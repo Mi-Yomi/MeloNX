@@ -22,7 +22,7 @@ struct JITPopover: View {
                 .font(.headline)
                 .foregroundColor(.primary)
             
-            Text("JIT (Just-In-Time) compilation allows MeloNX to run code at as fast as possible by translating it dynamically. This is necessary for running this emulator.")
+            Text("JIT (Just-In-Time) compilation allows MeloNX to run code at as fast as possible by translating and executing it dynamically. This is necessary for running this emulator.")
                 .font(.footnote)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)

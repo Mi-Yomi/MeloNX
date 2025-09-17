@@ -1009,14 +1009,6 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             var dsc = program.GetNewDescriptorSetCollection(setIndex, out var isNew).Get(cbs);
-
-            if (!program.HasMinimalLayout)
-            {
-                if (isNew)
-                {
-                    Initialize(cbs, setIndex, dsc);
-                }
-            }
             
             var dummyImageInfo = new DescriptorImageInfo
             {

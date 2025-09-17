@@ -45,3 +45,39 @@ struct AppCodableStorage<Value: Codable & Equatable>: DynamicProperty {
         )
     }
 }
+
+@propertyWrapper
+struct ArrayStorage<T: Codable> {
+    private let key: String
+    private let defaultValue: [T]
+    private let userDefaults: UserDefaults
+
+    init(wrappedValue: [T], _ key: String, userDefaults: UserDefaults = .standard) {
+        self.key = key
+        self.defaultValue = wrappedValue
+        self.userDefaults = userDefaults
+    }
+
+    var wrappedValue: [T] {
+        get {
+            guard let data = userDefaults.data(forKey: key) else {
+                return defaultValue
+            }
+            do {
+                return try JSONDecoder().decode([T].self, from: data)
+            } catch {
+                print("Failed to decode [\(T.self)] from UserDefaults: \(error)")
+                return defaultValue
+            }
+        }
+        set {
+            do {
+                let data = try JSONEncoder().encode(newValue)
+                userDefaults.set(data, forKey: key)
+            } catch {
+                print("Failed to encode [\(T.self)] to UserDefaults: \(error)")
+            }
+        }
+    }
+}
+

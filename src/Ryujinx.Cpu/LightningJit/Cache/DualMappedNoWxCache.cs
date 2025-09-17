@@ -205,31 +205,56 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
         public unsafe IntPtr Map(IntPtr framePointer, ReadOnlySpan<byte> code, ulong guestAddress, ulong guestSize)
         {
-            if (TryGetThreadLocalFunction(guestAddress, out IntPtr funcPtr))
+            try
             {
-                return funcPtr;
-            }
-
-            lock (_lock)
-            {
-                if (!HasInAnyPendingMap(guestAddress) && !_translator.Functions.ContainsKey(guestAddress))
+                if (TryGetThreadLocalFunction(guestAddress, out IntPtr funcPtr))
                 {
+                    return funcPtr;
+                }
+
+                lock (_lock)
+                {
+                    if (!HasInAnyPendingMap(guestAddress) && !_translator.Functions.ContainsKey(guestAddress))
+                    {
+                        int combinedOffset = AllocateInSharedCache(code.Length);
+                        var (cacheIndex, funcOffset) = SplitCacheOffset(combinedOffset);
+
+                        MemoryCache cache = _sharedCaches[cacheIndex];
+                        funcPtr = cache.Pointer + funcOffset;
+                        code.CopyTo(new Span<byte>((void*)funcPtr, code.Length));
+                        funcPtr = cache.RxPointer + funcOffset;
+
+                        TranslatedFunction function = new(funcPtr, guestSize);
+
+                        GetPendingMapForCache(cacheIndex).Add(funcOffset, code.Length, guestAddress, function);
+                    }
+
+                    ClearThreadLocalCache(framePointer);
+
+                    return AddThreadLocalFunction(code, guestAddress);
+                }
+            }
+            catch
+            {
+                lock (_lock)
+                {
+                    var funcPtr = IntPtr.Zero;
                     int combinedOffset = AllocateInSharedCache(code.Length);
                     var (cacheIndex, funcOffset) = SplitCacheOffset(combinedOffset);
-                    
+
                     MemoryCache cache = _sharedCaches[cacheIndex];
                     funcPtr = cache.Pointer + funcOffset;
                     code.CopyTo(new Span<byte>((void*)funcPtr, code.Length));
                     funcPtr = cache.RxPointer + funcOffset;
 
                     TranslatedFunction function = new(funcPtr, guestSize);
-                    
+
                     GetPendingMapForCache(cacheIndex).Add(funcOffset, code.Length, guestAddress, function);
+
+                    ClearThreadLocalCache(framePointer);
+
+                    return AddThreadLocalFunction(code, guestAddress);
                 }
-
-                ClearThreadLocalCache(framePointer);
-
-                return AddThreadLocalFunction(code, guestAddress);
             }
         }
 

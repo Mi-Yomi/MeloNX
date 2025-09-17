@@ -39,28 +39,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 using ConfigGamepadInputId = Ryujinx.Common.Configuration.Hid.Controller.GamepadInputId;
 using ConfigStickInputId = Ryujinx.Common.Configuration.Hid.Controller.StickInputId;
 using Key = Ryujinx.Common.Configuration.Hid.Key;
 using System.Linq;
-using Ryujinx.HLE.FileSystem;
-using Ryujinx.HLE.HOS.Services.Account.Acc;
-using Ryujinx.HLE.HOS;
-using Ryujinx.Input.HLE;
-using Ryujinx.HLE;
-using System;
-using System.Runtime.InteropServices;
-using Ryujinx.Common.Configuration;
-using LibHac.Tools.FsSystem;
-using Ryujinx.Graphics.GAL.Multithreading;
-using Ryujinx.Audio.Backends.Dummy;
 using Ryujinx.HLE.HOS.SystemState;
-using Ryujinx.UI.Common.Configuration;
-using Ryujinx.Common.Logging;
-using Ryujinx.Audio.Integration;
-using Ryujinx.Audio.Backends.SDL2;
-using System.IO;
 using LibHac.Common.Keys;
 using LibHac.Common;
 using LibHac.Ns;
@@ -73,29 +58,15 @@ using Path = System.IO.Path;
 using LibHac;
 using Ryujinx.Common.Configuration.Multiplayer;
 using Ryujinx.HLE.Loaders.Npdm;
-using Ryujinx.Common.Utilities;
 using System.Globalization;
-using Ryujinx.UI.Common.Configuration.System;
-using Ryujinx.Common.Logging.Targets;
-using System.Collections.Generic;
-using LibHac.Bcat;
-using Ryujinx.UI.App.Common;
 using System.Text;
 using Ryujinx.HLE.UI;
 using ARMeilleure.Translation;
 using LibHac.Ncm;
-using LibHac.Tools.FsSystem.NcaUtils;
 using Microsoft.Win32.SafeHandles;
-using Ryujinx.Common.Logging;
-using Ryujinx.HLE.FileSystem;
-using Ryujinx.HLE.HOS.SystemState;
-using Ryujinx.Input.HLE;
-using Silk.NET.Vulkan;
-using System;
-using System.IO;
 using System.Text.RegularExpressions;
-using System.Runtime.InteropServices;
 using SDL2;
+using Ryujinx.Common.Collections;
 
 namespace Ryujinx.Headless.SDL2
 {
@@ -120,6 +91,13 @@ namespace Ryujinx.Headless.SDL2
 
         private static readonly InputConfigJsonSerializerContext _serializerContext = new(JsonHelper.GetDefaultSerializerOptions());
         private static readonly TitleUpdateMetadataJsonSerializerContext _titleSerializerContext = new(JsonHelper.GetDefaultSerializerOptions());
+
+                
+        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void TriggerCallbackWithData(string cIdentifier, IntPtr data,  UIntPtr dataLength);
+
+        [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
+        public static extern void TriggerCallback(string cIdentifier);
 
         [UnmanagedCallersOnly(EntryPoint = "main_ryujinx_sdl")]
         public static unsafe int MainExternal(int argCount, IntPtr* pArgs)
@@ -158,6 +136,99 @@ namespace Ryujinx.Headless.SDL2
         {
             return nativeMetalLayer;
         }
+
+
+        [UnmanagedCallersOnly(EntryPoint = "create_account")]
+        public static void CreateAccount(IntPtr namePtr, IntPtr imagePtr, int imageLength)
+        {
+            string name = Marshal.PtrToStringAnsi(namePtr);
+
+            byte[] image = null;
+            if (imagePtr != IntPtr.Zero && imageLength > 0)
+            {
+                image = new byte[imageLength];
+                Marshal.Copy(imagePtr, image, 0, imageLength);
+            }
+
+            _accountManager.AddUser(name, image);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "delete_account")]
+        public static void DeleteAccount(IntPtr userId)
+        {
+            string name = Marshal.PtrToStringAnsi(userId);
+
+            HLE.HOS.Services.Account.Acc.UserId userIdObj = new HLE.HOS.Services.Account.Acc.UserId(name);
+            _accountManager.DeleteUser(userIdObj);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "open_user")]
+        public static void OpenUser(IntPtr userId)
+        {
+            string name = Marshal.PtrToStringAnsi(userId);
+
+            HLE.HOS.Services.Account.Acc.UserId userIdObj = new HLE.HOS.Services.Account.Acc.UserId(name);
+            _accountManager.OpenUser(userIdObj);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "close_user")]
+        public static void CloseUser(IntPtr userId)
+        {
+            string name = Marshal.PtrToStringAnsi(userId);
+
+            HLE.HOS.Services.Account.Acc.UserId userIdObj = new HLE.HOS.Services.Account.Acc.UserId(name);
+            _accountManager.OpenUser(userIdObj);
+        }
+
+
+        [UnmanagedCallersOnly(EntryPoint = "get_avatars")]
+        public static unsafe AvatarArray GetAvatars()
+        {
+            var avatars = AvatarLoader.LoadAvatars(_contentManager, _virtualFileSystem);
+            int count = avatars.Count;
+
+            AvatarInfo* avatarInfos = (AvatarInfo*)Marshal.AllocHGlobal(sizeof(AvatarInfo) * count);
+
+            int index = 0;
+            foreach (var kvp in avatars)
+            {
+                string fileName = kvp.Key;
+                byte[] imageData = kvp.Value;
+
+                byte* imagePtr = (byte*)Marshal.AllocHGlobal(imageData.Length);
+                Marshal.Copy(imageData, 0, (IntPtr)imagePtr, imageData.Length);
+
+                byte[] utf8FileName = Encoding.UTF8.GetBytes(fileName);
+                sbyte* fileNamePtr = (sbyte*)Marshal.AllocHGlobal(utf8FileName.Length + 1);
+                for (int i = 0; i < utf8FileName.Length; i++)
+                {
+                    fileNamePtr[i] = (sbyte)utf8FileName[i];
+                }
+                fileNamePtr[utf8FileName.Length] = 0; 
+
+                avatarInfos[index] = new AvatarInfo
+                {
+                    ImageData = imagePtr,
+                    ImageSize = imageData.Length,
+                    FileName = fileNamePtr
+                };
+
+                index++;
+            }
+
+            return new AvatarArray
+            {
+                Count = count,
+                Avatars = avatarInfos
+            };
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "refresh_account_manager")]
+        public static void RefreshAccountManager()
+        {
+            _accountManager.Refresh();
+        }
+        
 
         [UnmanagedCallersOnly(EntryPoint = "get_dlc_nca_list")]
         public static unsafe DlcNcaList GetDlcNcaList(IntPtr titleIdPtr, IntPtr pathPtr) 
@@ -265,13 +336,13 @@ namespace Ryujinx.Headless.SDL2
         }
 
         [UnmanagedCallersOnly(EntryPoint = "initialize")]
-        public static unsafe void Initialize() 
+        public static unsafe void Initialize()
         {
             AppDataManager.Initialize(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
 
             if (_virtualFileSystem == null)
             {
-               _virtualFileSystem = VirtualFileSystem.CreateInstance();
+                _virtualFileSystem = VirtualFileSystem.CreateInstance();
             }
 
             if (_libHacHorizonManager == null)
@@ -286,6 +357,11 @@ namespace Ryujinx.Headless.SDL2
             if (_contentManager == null)
             {
                 _contentManager = new ContentManager(_virtualFileSystem);
+            }
+            
+            if (_accountManager == null)
+            {
+                _accountManager = new AccountManager(_libHacHorizonManager.RyujinxClient);
             }
         }
 
@@ -932,6 +1008,22 @@ namespace Ryujinx.Headless.SDL2
 
             InputConfig config;
 
+            Common.Configuration.Hid.ControllerType GetControllerTypeByIndex(Options optionsInstance, int index)
+            {
+                if (index < 0 || index > 7)
+                    throw new ArgumentOutOfRangeException(nameof(index), "Index must be between 0 and 7.");
+
+                string propertyName = $"controllerType{index + 1}";
+                var property = typeof(Options).GetProperty(propertyName);
+
+                if (property == null)
+                    throw new InvalidOperationException($"Property '{propertyName}' not found in Options.");
+
+                return (Common.Configuration.Hid.ControllerType)property.GetValue(optionsInstance);
+            }
+
+
+
             if (inputProfileName == null || inputProfileName.Equals("default"))
             {
                 if (isKeyboard)
@@ -988,23 +1080,21 @@ namespace Ryujinx.Headless.SDL2
                     };
                 }
                 else
-                {   
+                {
                     bool isNintendoStyle = true; // gamepadName.Contains("Nintendo") || gamepadName.Contains("Joycons");
 
-                    ControllerType currentController; 
-                    
+                    ControllerType currentController;
+
                     if (index == PlayerIndex.Handheld)
                     {
                         currentController = ControllerType.Handheld;
                     }
-                    else if (gamepadName.Contains("Joycons") || gamepadName.Contains("Backbone"))
-                    {
-                        currentController = ControllerType.JoyconPair;
-                    }
                     else
                     {
-                        currentController = ControllerType.ProController;
+                        currentController = GetControllerTypeByIndex(option, (int)index);
                     }
+
+                    Console.WriteLine($"Configuring {index} as {currentController}");
 
                     config = new StandardControllerInputConfig
                     {
@@ -1171,12 +1261,6 @@ namespace Ryujinx.Headless.SDL2
 
             _inputManager = new InputManager(new SDL2KeyboardDriver(), new SDL2GamepadDriver());
 
-            if (OperatingSystem.IsIOS()) 
-            {
-                Logger.Info?.Print(LogClass.Application, $"Current Device: {option.DisplayName} ({option.DeviceModel}) {Environment.OSVersion.Version}");
-                Logger.Info?.Print(LogClass.Application, $"Increased Memory Limit: {option.MemoryEnt}");
-            }
-
             GraphicsConfig.EnableShaderCache = true;
 
             if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
@@ -1300,6 +1384,12 @@ namespace Ryujinx.Headless.SDL2
                 }
             }
 
+            if (OperatingSystem.IsIOS()) 
+            {
+                Logger.Info?.Print(LogClass.Application, $"Current Device: {option.DisplayName} ({option.DeviceModel}) {Environment.OSVersion.Version}");
+                Logger.Info?.Print(LogClass.Application, $"Increased Memory Limit: {option.MemoryEnt}");
+            }
+
             // Setup graphics configuration
             GraphicsConfig.EnableShaderCache = !option.DisableShaderCache;
             GraphicsConfig.EnableTextureRecompression = option.EnableTextureRecompression;
@@ -1339,14 +1429,41 @@ namespace Ryujinx.Headless.SDL2
 
         private static void ProgressHandler<T>(T state, int current, int total) where T : Enum
         {
-            string label = state switch
+            // string label = state switch
+            // {
+            //    LoadState => $"PTC : {current}/{total}",
+            //    ShaderCacheState => $"Shaders : {current}/{total}",
+            //    _ => throw new ArgumentException($"Unknown Progress Handler type {typeof(T)}"),
+            // };
+
+            string jsonData = state switch
             {
-                LoadState => $"PTC : {current}/{total}",
-                ShaderCacheState => $"Shaders : {current}/{total}",
+                LoadState => $"[\"PTC\",{current},{total}]",
+                ShaderCacheState => $"[\"Shaders\",{current},{total}]",
                 _ => throw new ArgumentException($"Unknown Progress Handler type {typeof(T)}"),
             };
 
-            Logger.Info?.Print(LogClass.Application, label);
+            // Convert to UTF-8 bytes
+            byte[] jsonBytes = Encoding.UTF8.GetBytes(jsonData);
+
+            // Allocate unmanaged memory and send
+            IntPtr unmanagedPointer = Marshal.AllocHGlobal(jsonBytes.Length);
+            try
+            {
+                Marshal.Copy(jsonBytes, 0, unmanagedPointer, jsonBytes.Length);
+
+                TriggerCallbackWithData(
+                    "ProgressWithPTCorShaderCache",
+                    unmanagedPointer,
+                    (UIntPtr)jsonBytes.Length
+                );
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(unmanagedPointer);
+            }
+
+            // Logger.Info?.Print(LogClass.Application, label);
         }
 
         private static WindowBase CreateWindow(Options options)
@@ -1451,7 +1568,7 @@ namespace Ryujinx.Headless.SDL2
                 options.AudioVolume,
                 AppleHV,
                 options.MultiplayerLanInterfaceId,
-                Common.Configuration.Multiplayer.MultiplayerMode.LdnMitm);
+                options.ldnMitm ? MultiplayerMode.LdnMitm : MultiplayerMode.Disabled);
 
             return new Switch(configuration);
         }
@@ -1644,6 +1761,21 @@ namespace Ryujinx.Headless.SDL2
             return new FileStream(safeHandle, FileAccess.ReadWrite);
         }
 
+        [StructLayout(LayoutKind.Sequential)]
+        public unsafe struct AvatarInfo
+        {
+            public byte* ImageData;    
+            public int ImageSize;     
+            public sbyte* FileName;  
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public unsafe struct AvatarArray
+        {
+            public int Count;          
+            public AvatarInfo* Avatars; 
+        }
+
         public class GameInfo
         {
             public double FileSize;
@@ -1705,7 +1837,6 @@ namespace Ryujinx.Headless.SDL2
                 }
             }
 
-            // Free allocated memory for ImageData
             public void Dispose()
             {
                 if (ImageData != null)
@@ -1758,24 +1889,11 @@ namespace Ryujinx.Headless.SDL2
 
         private static void ApplyDynamicSettings(Options options)
         {
-            Graphics.Gpu.GraphicsConfig.ResScale = options.ResScale;
-            Graphics.Gpu.GraphicsConfig.MaxAnisotropy = options.MaxAnisotropy;
-            Graphics.Gpu.GraphicsConfig.EnableShaderCache = !options.DisableShaderCache;
-            Graphics.Gpu.GraphicsConfig.EnableTextureRecompression = options.EnableTextureRecompression;
-            Graphics.Gpu.GraphicsConfig.EnableMacroHLE = !options.DisableMacroHLE;
-
-            if (_window != null)
-            {
-                _window.IsFullscreen = options.IsFullscreen;
-                _window.DisplayId = options.DisplayId;
-                _window.IsExclusiveFullscreen = options.IsExclusiveFullscreen;
-                _window.ExclusiveFullscreenWidth = options.ExclusiveFullscreenWidth;
-                _window.ExclusiveFullscreenHeight = options.ExclusiveFullscreenHeight;
-                _window.AntiAliasing = options.AntiAliasing;
-                _window.ScalingFilter = options.ScalingFilter;
-                _window.ScalingFilterLevel = options.ScalingFilterLevel;
-                _window._aspectRatio = options.AspectRatio;
-            }
+            GraphicsConfig.ResScale = options.ResScale;
+            GraphicsConfig.MaxAnisotropy = options.MaxAnisotropy;
+            GraphicsConfig.EnableShaderCache = !options.DisableShaderCache;
+            GraphicsConfig.EnableTextureRecompression = options.EnableTextureRecompression;
+            GraphicsConfig.EnableMacroHLE = !options.DisableMacroHLE;
 
             if (_emulationContext != null)
             {
@@ -1794,65 +1912,6 @@ namespace Ryujinx.Headless.SDL2
                 _emulationContext.Configuration.MemoryManagerMode = options.MemoryManagerMode;
                 _emulationContext.Configuration.MultiplayerLanInterfaceId = options.MultiplayerLanInterfaceId;
             }
-
-            Logger.SetEnable(LogLevel.Debug, options.LoggingEnableDebug);
-            Logger.SetEnable(LogLevel.Stub, !options.LoggingDisableStub);
-            Logger.SetEnable(LogLevel.Info, !options.LoggingDisableInfo);
-            Logger.SetEnable(LogLevel.Warning, !options.LoggingDisableWarning);
-            Logger.SetEnable(LogLevel.Error, options.LoggingEnableError);
-            Logger.SetEnable(LogLevel.Trace, options.LoggingEnableTrace);
-            Logger.SetEnable(LogLevel.Guest, !options.LoggingDisableGuest);
-            Logger.SetEnable(LogLevel.AccessLog, options.LoggingEnableFsAccessLog);
-        }
-        
-
-        // Old :3
-        private static void ReplaceEmulationContextConfiguration(Switch emu, Options options)
-        {
-            var oldConfig = emu.Configuration;
-
-            var newConfig = new HLEConfiguration(
-                _virtualFileSystem,
-                _libHacHorizonManager,
-                _contentManager,
-                _accountManager,
-                _userChannelPersistence,
-                oldConfig.GpuRenderer,
-                oldConfig.AudioDeviceDriver,
-                oldConfig.MemoryConfiguration,
-                oldConfig.HostUIHandler,
-                options.SystemLanguage,
-                options.SystemRegion,
-                !options.DisableVSync,
-                !options.DisableDockedMode,
-                !options.DisablePTC,
-                options.EnableInternetAccess,
-                !options.DisableFsIntegrityChecks ? IntegrityCheckLevel.ErrorOnInvalid : IntegrityCheckLevel.None,
-                options.FsGlobalAccessLogMode,
-                options.SystemTimeOffset,
-                options.SystemTimeZone,
-                options.MemoryManagerMode,
-                options.IgnoreMissingServices,
-                options.AspectRatio,
-                options.AudioVolume,
-                options.UseHypervisor,
-                options.MultiplayerLanInterfaceId,
-                Ryujinx.Common.Configuration.Multiplayer.MultiplayerMode.LdnMitm
-            );
-
-            var configField = typeof(Switch).GetField("<Configuration>k__BackingField", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-            if (configField != null)
-            {
-                configField.SetValue(emu, newConfig);
-            }
-
-            emu.System.State.SetLanguage(newConfig.SystemLanguage);
-            emu.System.State.SetRegion(newConfig.Region);
-            emu.EnableDeviceVsync = newConfig.EnableVsync;
-            emu.System.State.DockedMode = newConfig.EnableDockedMode;
-            emu.System.EnablePtc = newConfig.EnablePtc;
-            emu.System.FsIntegrityCheckLevel = newConfig.FsIntegrityCheckLevel;
-            emu.System.GlobalAccessLogMode = newConfig.FsGlobalAccessLogMode;
         }
     }
 }

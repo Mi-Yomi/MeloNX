@@ -31,7 +31,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        public bool TryGetCachedDescriptorSets(CommandBufferScoped cbs, ShaderCollection program, int setIndex, out DescriptorSet[] sets)
+        public bool TryGetCachedDescriptorSets(CommandBufferScoped cbs, ShaderCollection program, int setIndex, out DescriptorSet[] sets, out DescriptorSetCollection dsc)
         {
             if (_cachedDescriptorSets != null)
             {
@@ -39,10 +39,12 @@ namespace Ryujinx.Graphics.Vulkan
 
                 sets = _cachedDescriptorSets;
 
+                dsc = program.GetNewDescriptorSetCollection(setIndex, out var isNew).Get(cbs);
+
                 return true;
             }
 
-            var dsc = program.GetNewManualDescriptorSetCollection(cbs, setIndex, out _cachedDscIndex).Get(cbs);
+            dsc = program.GetNewManualDescriptorSetCollection(cbs, setIndex, out _cachedDscIndex).Get(cbs);
 
             sets = dsc.GetSets();
 

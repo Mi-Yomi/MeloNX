@@ -30,8 +30,11 @@
 	<array>
 		<string>melonx</string>
 	</array>
-	<key>MeloID</key>
-	<string>83f67a0a96bd8628a150d7853e360db5bae64e7769524fae399c4b8e7e6aff17</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>NSUserActivityTypes</key>
 	<array>
 		<string>LaunchGameIntent</string>

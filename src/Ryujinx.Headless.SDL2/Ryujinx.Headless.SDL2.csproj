@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -17,6 +17,10 @@
     <OptimizationPreference>Speed</OptimizationPreference>
   </PropertyGroup>
 
+<PropertyGroup>
+  <StripSymbols>false</StripSymbols>
+  <IlcGenerateDebugInfo>true</IlcGenerateDebugInfo>
+</PropertyGroup>
   <!-- iOS linking stuff from godot -->
 
   <PropertyGroup>

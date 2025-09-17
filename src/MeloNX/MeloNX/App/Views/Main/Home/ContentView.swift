@@ -11,6 +11,7 @@ import Darwin
 import UIKit
 import MetalKit
 import CoreLocation
+import Metal
 
 struct MoltenVKSettings: Codable, Hashable {
     let string: String
@@ -54,7 +55,10 @@ struct ContentView: View {
     @AppStorage("ignoreJIT") var ignoreJIT: Bool = false
     @AppStorage("DUAL_MAPPED_JIT") var dualMapped: Bool = false
     @AppStorage("DUAL_MAPPED_JIT_edit") var dualMappededit: Bool = false
-
+    @AppStorage("showProfileonGame") var showProfileonGame: Bool = false
+    @AppStorage("LDN_MITM") var ldn = printAllIPv4Addresses().first ?? "Unknown"
+    @State var choosedProfile = false
+    @State var showSheet = false
     
     // Loading Animation
     @AppStorage("showlogsloading") var showlogsloading: Bool = true
@@ -77,7 +81,7 @@ struct ContentView: View {
             MoltenVKSettings(string: "MVK_USE_METAL_PRIVATE_API", value: "1"),
             MoltenVKSettings(string: "MVK_CONFIG_USE_METAL_PRIVATE_API", value: "1"),
             MoltenVKSettings(string: "MVK_DEBUG", value: "0"),
-            MoltenVKSettings(string: "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", value: "0"),
+            // MoltenVKSettings(string: "MVK_CONFIG_LOG_LEVEL", value: "3"),
             MoltenVKSettings(string: "MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS", value: "0"),
             MoltenVKSettings(string: "MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE", value: "512"),
         ]
@@ -95,12 +99,26 @@ struct ContentView: View {
     
     // MARK: - Body
     var body: some View {
-        if game != nil && (ryujinx.jitenabled || ignoreJIT) {
+        if game != nil && (ryujinx.jitenabled || ignoreJIT) && (showProfileonGame ? choosedProfile : true) {
             gameView
         } else if game != nil && !ryujinx.jitenabled {
             jitErrorView
         } else {
             mainMenuView
+                .halfScreenSheet(isPresented: $showSheet) {
+                    AccountSelector() { cool in
+                        choosedProfile = cool
+                        showSheet = false
+                    }
+                }
+                .onChange(of: game) { _ in
+                    showSheet = game != nil && showProfileonGame && !choosedProfile
+                }
+                .onChange(of: showSheet) { _ in
+                    if !showSheet {
+                        game = nil
+                    }
+                }
         }
     }
     
@@ -198,6 +216,11 @@ struct ContentView: View {
         }
     }
     
+    @State private var isShaderOrPTC: Bool = false
+    @State private var loadingType: String = ""
+    @State private var currentProgress: Int = 0
+    @State private var totalProgress: Int = 1
+    
     // MARK: - Helper Methods
     
     private func gameLoadingContent(screenGeometry: GeometryProxy) -> some View {
@@ -219,6 +242,10 @@ struct ContentView: View {
                     .foregroundColor(.white)
                 
                 loadingProgressBar(screenGeometry: screenGeometry)
+                
+                if isShaderOrPTC {
+                    Text("\(loadingType): \(currentProgress)/\(totalProgress)")
+                }
             }
         }
         .padding(.horizontal, screenGeometry.size.width * 0.06)
@@ -232,38 +259,74 @@ struct ContentView: View {
     private func loadingProgressBar(screenGeometry: GeometryProxy) -> some View {
         GeometryReader { geometry in
             let containerWidth = min(screenGeometry.size.width * 0.35, 350)
-            
+
             ZStack(alignment: .leading) {
                 Rectangle()
                     .cornerRadius(10)
                     .frame(width: containerWidth, height: min(screenGeometry.size.height * 0.015, 12))
                     .foregroundColor(.gray.opacity(0.3))
-                    .shadow(color: .black.opacity(0.2), radius: 4, x: 0, y: 2)
+                
+                if isShaderOrPTC {
+                    Rectangle()
+                        .cornerRadius(10)
+                        .frame(width: containerWidth * CGFloat(currentProgress) / CGFloat(totalProgress), height: min(screenGeometry.size.height * 0.015, 12))
+                        .foregroundColor(.blue)
+                }
                 
                 Rectangle()
                     .cornerRadius(10)
                     .frame(width: clumpWidth, height: min(screenGeometry.size.height * 0.015, 12))
-                    .foregroundColor(.blue)
-                    .shadow(color: .blue.opacity(0.5), radius: 4, x: 0, y: 2)
+                    .foregroundColor(isShaderOrPTC ? .clear : .blue)
                     .offset(x: isAnimating ? containerWidth : -clumpWidth)
-                    .animation(
-                        Animation.linear(duration: 1.0)
-                            .repeatForever(autoreverses: false),
-                        value: isAnimating
-                    )
+                    .onAppear {
+                        withAnimation(Animation.linear(duration: 1.0).repeatForever(autoreverses: false)) {
+                            isAnimating = false
+                            
+                            isAnimating = true
+                        }
+                    }
             }
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .onAppear {
-                isAnimating = true
+                Ryujinx.shared.showLoading = true
+                
+                RegisterCallbackWithData("ProgressWithPTCorShaderCache") { data in
+                    guard let rawData = data else { return }
+
+                    if let jsonArray = try? JSONSerialization.jsonObject(with: rawData, options: []) as? [Any],
+                       jsonArray.count == 3,
+                       let type = jsonArray[0] as? String,
+                       let current = jsonArray[1] as? Int,
+                       let total = jsonArray[2] as? Int {
+
+                        DispatchQueue.main.async {
+                            if current < total - 1 {
+                                self.isShaderOrPTC = true
+                                self.loadingType = type
+                                self.currentProgress = current
+                                self.totalProgress = total
+                            } else {
+                                self.isShaderOrPTC = false
+                                
+                            }
+                        }
+                    } else {
+                        DispatchQueue.main.async {
+                            self.isShaderOrPTC = false
+                        }
+                    }
+                }
+
+                
                 setupEmulation()
                 
-                Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { timer in
-                    if get_current_fps() != 0 {
+                RegisterCallback("ran-first-frame") { _ in
+                    DispatchQueue.main.async {
                         withAnimation {
                             isLoading = false
                             isAnimating = false
+                            Ryujinx.shared.showLoading = false
                         }
-                        timer.invalidate()
                     }
                 }
             }
@@ -279,36 +342,135 @@ struct ContentView: View {
         SDL_Init(sdlInitFlags)
         initialize()
     }
-    
+
+    @State var waitingForController: [GCController] = []
+
     private func initControllerObservers() {
         NotificationCenter.default.addObserver(
             forName: .GCControllerDidConnect,
             object: nil,
             queue: .main
         ) { notification in
-            if let controller = notification.object as? GCController {
+            guard let controller = notification.object as? GCController else {
+                return
+            }
+
+            let waitingControllersWithSameName = waitingForController.filter { $0.vendorName == controller.vendorName }
+            
+            if waitingControllersWithSameName.count > 1 && ryujinx.isRunning {
+                showControllerSelectionAlert(newController: controller, waitingControllers: waitingControllersWithSameName)
+                return
+            }
+
+            if let index = waitingForController.firstIndex(where: { $0.vendorName == controller.vendorName }), ryujinx.isRunning {
+                waitingForController.remove(at: index)
+                
+                reconnectController(newController: controller, oldController: waitingControllersWithSameName.first)
+            } else if nativeControllers[controller] == nil {
                 nativeControllers[controller] = .init(controller)
                 refreshControllersList()
             }
         }
-        
+
         NotificationCenter.default.addObserver(
             forName: .GCControllerDidDisconnect,
             object: nil,
             queue: .main
-        ) { notification in
-            if let controller = notification.object as? GCController {
-                currentControllers = []
-                controllersList = []
-                nativeControllers[controller]?.cleanup()
-                nativeControllers[controller] = nil
-                refreshControllersList()
+        ) { [self] notification in
+            guard let controller = notification.object as? GCController else {
+                return
+            }
+            
+            if !ryujinx.isRunning {
+                self.currentControllers = []
+                self.controllersList = []
+                self.nativeControllers[controller]?.cleanup()
+                self.nativeControllers[controller] = nil
+                self.refreshControllersList()
+                return
+            }
+
+            if !self.waitingForController.contains(where: { $0 === controller }) {
+                self.waitingForController.append(controller)
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                if let index = waitingForController.firstIndex(where: { $0.vendorName == controller.vendorName }) {
+                } else {
+                    self.waitingForController.removeAll(where: { $0.vendorName == controller.vendorName })
+                    self.currentControllers = []
+                    self.controllersList = []
+                    self.nativeControllers[controller]?.cleanup()
+                    self.nativeControllers[controller] = nil
+                    self.refreshControllersList()
+                }
             }
         }
     }
+
+    private func showControllerSelectionAlert(newController: GCController, waitingControllers: [GCController]) {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            print("[Alert] Unable to get main window")
+            return
+        }
+        
+        let alert = UIAlertController(
+            title: "Multiple Controllers Detected",
+            message: "Multiple controllers with the name '\(newController.vendorName ?? "Unknown")' are waiting to reconnect. Which one would you like to reconnect?",
+            preferredStyle: .alert
+        )
+        
+
+        for (index, waitingController) in waitingControllers.enumerated() {
+            let title = "Controller \(index + 1)"
+            let action = UIAlertAction(title: title, style: .default) { [self] _ in
+                self.handleControllerSelection(newController: newController, selectedOldController: waitingController)
+            }
+            alert.addAction(action)
+        }
+        
+        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel) { [self] _ in
+            self.nativeControllers[newController] = .init(newController)
+            self.refreshControllersList()
+        }
+        alert.addAction(cancelAction)
+        
+        if let presentedViewController = window.rootViewController?.presentedViewController {
+            presentedViewController.present(alert, animated: true)
+        } else {
+            window.rootViewController?.present(alert, animated: true)
+        }
+    }
+
+    private func handleControllerSelection(newController: GCController, selectedOldController: GCController) {
+        if let index = waitingForController.firstIndex(where: { $0 === selectedOldController }) {
+            waitingForController.remove(at: index)
+        }
+        
+        reconnectController(newController: newController, oldController: selectedOldController)
+    }
+
+    private func reconnectController(newController: GCController, oldController: GCController?) {
+        if let oldEntry = nativeControllers.first(where: { $0.value.uniqueID == oldController?.vendorName }) {
+            print("[GCControllerDidConnect] Updating native controller with new gamepad")
+            let nativeController = oldEntry.value
+            nativeControllers.removeValue(forKey: oldEntry.key)
+
+            nativeController.changeGamepad(newController)
+
+            nativeControllers[newController] = nativeController
+        } else {
+            print("[GCControllerDidConnect] Initializing new native controller")
+            nativeControllers[newController] = .init(newController)
+        }
+        
+        self.refreshControllersList()
+    }
     
+
     private func setupEmulation() {
-        isVCA = (currentControllers.first(where: { $0 == onscreencontroller }) != nil)
+        isVCA = (currentControllers.first(where: { $0.isVirtualController }) != nil)
         
         DispatchQueue.main.async {
             start(displayid: 1)
@@ -321,7 +483,7 @@ struct ContentView: View {
         
         controllersList = ryujinx.getConnectedControllers()
         
-        if let onscreen = controllersList.first(where: { $0.name == ryujinx.virtualController.controllername }) {
+        if let onscreen = controllersList.first(where: { $0.isVirtualController }) {
             self.onscreencontroller = onscreen
         }
         
@@ -353,7 +515,7 @@ struct ContentView: View {
             }
             
             // Check virtual controller if active
-            if Ryujinx.shared.virtualController.controllername == controller.name && Ryujinx.shared.virtualController.tryGetMotionProvider() == nil {
+            if controller.isVirtualController && Ryujinx.shared.virtualController.tryGetMotionProvider() == nil {
                 Ryujinx.shared.virtualController.tryRegisterMotion(slot: slot)
                 continue
             }
@@ -369,6 +531,10 @@ struct ContentView: View {
         
         if let customgame = persettings.config[game.titleId] {
             config = customgame
+        }
+        
+        for controller in currentControllers {
+            ryujinx.controllerType[controller.id] = controller.controllerType
         }
         
         config.gamepath = game.fileURL.path
@@ -591,3 +757,61 @@ struct ControllerListView: View {
         }
     }
 }
+
+
+func printAllIPv4Addresses() -> [String] {
+    var ifaddr: UnsafeMutablePointer<ifaddrs>?
+    
+    var cool: [String] = []
+
+    guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else {
+        print("Failed to get network interfaces")
+        return []
+    }
+
+    var ptr: UnsafeMutablePointer<ifaddrs>? = firstAddr
+    while ptr != nil {
+        let interface = ptr!.pointee
+        let name = String(cString: interface.ifa_name)
+
+        if let addr = interface.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) {
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let addrLen = socklen_t(addr.pointee.sa_len)
+
+            let result = getnameinfo(
+                addr,
+                addrLen,
+                &hostname,
+                socklen_t(hostname.count),
+                nil,
+                0,
+                NI_NUMERICHOST
+            )
+
+            if result == 0 {
+                let address = String(cString: hostname)
+                print("\(name): \(address)")
+                if !cool.contains(where: { $0.contains(address) }), address != "127.0.0.1" {
+                    cool.append("\(name): \(address)")
+                }
+            } else {
+                print("\(name): Address lookup failed (\(result))")
+            }
+        }
+
+        ptr = interface.ifa_next
+    }
+
+    freeifaddrs(ifaddr)
+    
+    if cool.contains(where: { $0.contains("en0") }) {
+        let indexToMove = cool.firstIndex(where: { $0.contains("en0") }) ?? 0
+        if indexToMove < cool.count && indexToMove != 0 {
+            let element = cool.remove(at: indexToMove)
+            cool.insert(element, at: 0)
+        }
+    }
+    
+    return cool
+}
+

@@ -36,6 +36,8 @@ class MTLHud: ObservableObject {
     
     func openMetalDylib() -> Bool {
         let path = "/usr/lib/libMTLHud.dylib"
+        
+
 
         if dlopen(path, RTLD_NOW) != nil {
             return true

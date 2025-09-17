@@ -50,7 +50,7 @@ namespace Ryujinx.HLE.HOS.Services.Ssl.SslService
         {
             StartSslOperation();
 
-            if (!_isBlockingSocket)
+            if (!_isBlockingSocket && _stream.CanTimeout)
             {
                 _previousReadTimeout = _stream.ReadTimeout;
 
@@ -60,7 +60,7 @@ namespace Ryujinx.HLE.HOS.Services.Ssl.SslService
 
         private void EndSslReadOperation()
         {
-            if (!_isBlockingSocket)
+            if (!_isBlockingSocket && _stream.CanTimeout)
             {
                 _stream.ReadTimeout = _previousReadTimeout;
             }

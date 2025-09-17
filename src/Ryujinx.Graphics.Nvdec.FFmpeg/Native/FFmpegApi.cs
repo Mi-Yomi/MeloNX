@@ -33,7 +33,6 @@ namespace Ryujinx.Graphics.Nvdec.FFmpeg.Native
             else if (OperatingSystem.IsIOS()) 
             {
                 string libName = $"lib{libraryName}.{version}.dylib";
-                Console.WriteLine($"[iOS] Required firmware library: {libName}");
                 return libName;
             }
             else

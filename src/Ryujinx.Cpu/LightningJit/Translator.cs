@@ -117,15 +117,22 @@ namespace Ryujinx.Cpu.LightningJit
 
         internal IntPtr GetOrTranslatePointer(IntPtr framePointer, ulong address, ExecutionMode mode)
         {
-            if (_noWxCache != null)
+            try
             {
-                CompiledFunction func = Compile(address, mode);
-                return _noWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+                if (_noWxCache != null)
+                {
+                    CompiledFunction func = Compile(address, mode);
+                    return _noWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+                }
+                else if (_dualMappedCache != null)
+                {
+                    CompiledFunction func = Compile(address, mode);
+                    return _dualMappedCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+                }
             }
-            else if (_dualMappedCache != null)
+            catch
             {
-                CompiledFunction func = Compile(address, mode);
-                return _dualMappedCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+                return IntPtr.Zero;
             }
 
             return GetOrTranslate(address, mode).FuncPointer;

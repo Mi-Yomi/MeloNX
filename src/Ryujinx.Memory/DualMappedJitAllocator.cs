@@ -6,15 +6,13 @@ using Ryujinx.Common.Logging;
 namespace Ryujinx.Memory
 {
     /// <summary>
-    /// Placeholder class for JIT memory allocation on iOS.
+    /// Class for JIT memory allocation on iOS.
     /// Intended to allocate memory with both r/x and r/w permissions,
     /// as a workaround for stricter W^X (Write XOR Execute) enforcement introduced in iOS 26.
     /// 
     /// Specifically targets iOS 26, where the traditional method of reprotecting
     /// memory from writable to executable (RX) no longer works for JIT code.
     /// 
-    /// The actual allocation logic will be implemented after the release of iOS 26
-    /// to reduce the risk of this workaround being patched.
     /// </summary>
     public class DualMappedJitAllocator : IDisposable
     {
@@ -23,12 +21,14 @@ namespace Ryujinx.Memory
         public IntPtr RxPtr { get; private set; }
         public ulong Size { get; private set; }
 
+        [DllImport("BreakpointJIT.framework/BreakpointJIT", EntryPoint = "BreakGetJITMapping")]
+        public static extern unsafe byte* BreakGetJITMappingPub(nuint bytes);
 
         private IntPtr _mmapPtr;
 
         public DualMappedJitAllocator(ulong size)
         {
-            var stackTrace = new StackTrace(1, false);
+            var stackTrace = new StackTrace(1, false); // Skip *this* frame
             var callingMethod = stackTrace.GetFrame(0)?.GetMethod();
 
             Logger.Info?.Print(LogClass.Cpu,
@@ -37,17 +37,110 @@ namespace Ryujinx.Memory
             AllocateDualMapping();
         }
 
+        IntPtr BreakGetJITMapping(nuint bytes)
+        {
+            unsafe
+            {
+                byte* ptr = BreakGetJITMappingPub(bytes);
+                Logger.Info?.Print(LogClass.Cpu, "testing for BreakGetJITMapping.");
+                if (ptr == null || ptr == (byte*)0 || ptr == (byte*)-1)
+                {
+                    Logger.Info?.Print(LogClass.Cpu, "Failed to get JIT mapping from BreakGetJITMapping.");
+                    return MAP_FAILED;
+                }
+
+                return (IntPtr)ptr;
+            }
+        }
 
         private void AllocateDualMapping()
         {
+            IntPtr _mmapPtr;
+            string hasTXM = Environment.GetEnvironmentVariable("HAS_TXM");
 
-            RwPtr = IntPtr.Zero;
-            RxPtr = IntPtr.Zero;
+            if (hasTXM.Contains("0"))
+            {
+                _mmapPtr = mmap(IntPtr.Zero, (UIntPtr)Size, PROT_READ | PROT_EXEC, MAP_ANON | MAP_PRIVATE, -1, 0);
+            }
+            else
+            {
+                _mmapPtr = BreakGetJITMapping((nuint)Size);
+            }
+
+            if (_mmapPtr == MAP_FAILED)
+                throw new Exception("Failed to mmap memory");
+
+            var bufRX = (ulong)_mmapPtr;
+            ulong bufRW = 0;
+            uint curProt = 0, maxProt = 0;
+
+            int remapResult = vm_remap(mach_task_self(), ref bufRW, Size, 0, VM_FLAGS_ANYWHERE,
+                                      mach_task_self(), bufRX, 0, ref curProt, ref maxProt, VM_INHERIT_NONE);
+            if (remapResult != KERN_SUCCESS)
+                throw new Exception($"Failed to remap RX region: {remapResult}");
+
+            int protectRWResult = vm_protect(mach_task_self(), bufRW, Size, 0, VM_PROT_READ | VM_PROT_WRITE);
+            if (protectRWResult != KERN_SUCCESS)
+                throw new Exception($"Failed to set RW protection: {protectRWResult}");
+
+            RwPtr = (IntPtr)bufRW;
+            RxPtr = (IntPtr)bufRX;
         }
 
         public void Dispose()
         {
-
+            if (_mmapPtr != IntPtr.Zero)
+            {
+                munmap(_mmapPtr, (UIntPtr)Size);
+                _mmapPtr = IntPtr.Zero;
+            }
         }
+
+        private const int PROT_READ = 1;
+        private const int PROT_WRITE = 2;
+        private const int PROT_EXEC = 4;
+        private const int MAP_ANON = 0x1000;
+        private const int MAP_PRIVATE = 0x2;
+        private static readonly IntPtr MAP_FAILED = new IntPtr(-1);
+
+        private const int VM_FLAGS_ANYWHERE = 1 << 0;
+        private const int VM_INHERIT_NONE = 2;
+        private const int KERN_SUCCESS = 0;
+        private const int VM_PROT_READ = 1;
+        private const int VM_PROT_WRITE = 2;
+        private const int VM_PROT_EXECUTE = 4;
+
+        [DllImport("libc", SetLastError = true)]
+        private static extern IntPtr mmap(IntPtr addr, UIntPtr len, int prot, int flags, int fd, long offset);
+
+        [DllImport("libc", SetLastError = true)]
+        private static extern int munmap(IntPtr addr, UIntPtr len);
+
+        [DllImport("libc")]
+        private static extern ulong mach_task_self();
+
+        [DllImport("libc")]
+        private static extern int vm_remap(
+            ulong target_task,
+            ref ulong target_address,
+            ulong size,
+            ulong mask,
+            int anywhere,
+            ulong src_task,
+            ulong src_address,
+            int copy,
+            ref uint cur_protection,
+            ref uint max_protection,
+            int inheritance
+        );
+
+        [DllImport("libc")]
+        private static extern int vm_protect(
+            ulong task,
+            ulong address,
+            ulong size,
+            int set_maximum,
+            int new_protection
+        );
     }
 }

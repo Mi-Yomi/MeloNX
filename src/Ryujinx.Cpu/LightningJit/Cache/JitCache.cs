@@ -101,17 +101,29 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
         public static void Unmap(IntPtr pointer)
         {
-            lock (_lock)
+            if (OperatingSystem.IsIOS())
             {
-                Debug.Assert(_initialized);
+                return;
+            }
 
-                int funcOffset = (int)(pointer.ToInt64() - _jitRegion.Pointer.ToInt64());
-
-                if (TryFind(funcOffset, out CacheEntry entry, out int entryIndex) && entry.Offset == funcOffset)
+            try
+            {
+                lock (_lock)
                 {
-                    _cacheAllocator.Free(funcOffset, AlignCodeSize(entry.Size));
-                    _cacheEntries.RemoveAt(entryIndex);
+                    Debug.Assert(_initialized);
+
+                    int funcOffset = (int)(pointer.ToInt64() - _jitRegion.Pointer.ToInt64());
+
+                    if (TryFind(funcOffset, out CacheEntry entry, out int entryIndex) && entry.Offset == funcOffset)
+                    {
+                        _cacheAllocator.Free(funcOffset, AlignCodeSize(entry.Size));
+                        _cacheEntries.RemoveAt(entryIndex);
+                    }
                 }
+            }
+            catch
+            {
+                // Ignore errors on unmap, as it is not critical.
             }
         }
 

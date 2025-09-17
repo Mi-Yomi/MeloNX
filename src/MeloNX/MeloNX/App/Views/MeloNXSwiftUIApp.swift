@@ -18,9 +18,10 @@ extension UIDocumentPickerViewController {
     }
 }
 
+
 @main
 struct MeloNXApp: App {
-    
+    @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @State var showed = false
     @Environment(\.scenePhase) var scenePhase
     @State var alert: UIAlertController? = nil
@@ -47,16 +48,19 @@ struct MeloNXApp: App {
     @AppStorage("DUAL_MAPPED_JIT") var dualMapped: Bool = false
     @AppStorage("DUAL_MAPPED_JIT_edit") var dualMappededit: Bool = false
     // String(format: "%.0f GB", Double(totalMemory) / 1_000_000_000)
+    
+
+
     var body: some Scene {
         WindowGroup {
             Group {
                 if finishedStorage {
                     ContentView()
-                        .withFileImporter()
                         .onAppear {
                             if checkForUpdate {
                                 checkLatestVersion()
                             }
+                            
                             
                             print(metalHudEnabler.canMetalHud)
                             
@@ -90,6 +94,7 @@ struct MeloNXApp: App {
                 }
             }
             .onAppear() {
+                UIDocumentPickerViewController.swizzleInitWithContentTypes()
                 if #available(iOS 19, *), ProcessInfo.processInfo.hasTXM, !ignores19 {
                     ios19 = true
                 }
@@ -119,7 +124,7 @@ struct MeloNXApp: App {
         #if DEBUG
         let urlString = "http://192.168.178.116:8000/api/latest_release"
         #else
-        let urlString = "https://melonx.net/api/latest_release"
+        let urlString = "https://melonx.org/api/latest_release"
         #endif
         
         guard let url = URL(string: urlString) else {

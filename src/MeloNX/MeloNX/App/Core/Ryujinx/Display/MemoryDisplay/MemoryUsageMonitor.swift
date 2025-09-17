@@ -24,22 +24,22 @@ class MemoryUsageMonitor: ObservableObject {
     
     private func updateMemoryUsage() {
         var taskInfo = task_vm_info_data_t()
-        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info>.size) / 4
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.stride) / 4
+
         let result: kern_return_t = withUnsafeMutablePointer(to: &taskInfo) {
-            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
-        
+
         if result == KERN_SUCCESS {
-            memoryUsage = 0
             memoryUsage = taskInfo.phys_footprint
-        }
-        else {
-            // print("Error with task_info(): " +
-                // (String(cString: mach_error_string(result), encoding: String.Encoding.ascii) ?? "unknown error"))
+        } else {
+            print("Failed to get memory usage: \(result)")
+            memoryUsage = 0
         }
     }
+
     
     func formatMemorySize(_ bytes: UInt64) -> String {
         let formatter = ByteCountFormatter()

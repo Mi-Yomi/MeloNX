@@ -290,6 +290,8 @@ namespace Ryujinx.Headless.SDL2
 
             _gpuDriverName = GetGpuDriverName();
 
+            bool firstFrame = true;
+
             Device.Gpu.Renderer.RunLoop(() =>
             {
                 Device.Gpu.SetGpuThread();
@@ -318,6 +320,12 @@ namespace Ryujinx.Headless.SDL2
                     while (Device.ConsumeFrameAvailable())
                     {
                         Device.PresentFrame(SwapBuffers);
+
+                        if (firstFrame)
+                        {
+                            firstFrame = false;
+                            Program.TriggerCallback("ran-first-frame");
+                        }
                     }
 
                     if (_ticks >= _ticksPerFrame)

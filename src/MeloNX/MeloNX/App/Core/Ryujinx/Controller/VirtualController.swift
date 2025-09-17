@@ -18,6 +18,8 @@ class VirtualController : BaseController {
     
     public let controllername = "MeloNX Touch Controller"
     
+    public static let controllername = "MeloNX Touch Controller"
+    
     init() {
         // Setup Haptics
         hapticEngine = try? CHHapticEngine()

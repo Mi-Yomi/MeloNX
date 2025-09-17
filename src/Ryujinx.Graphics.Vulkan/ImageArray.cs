@@ -170,10 +170,9 @@ namespace Ryujinx.Graphics.Vulkan
             int setIndex,
             TextureView dummyTexture)
         {
-            if (TryGetCachedDescriptorSets(cbs, program, setIndex, out DescriptorSet[] sets))
+            if (TryGetCachedDescriptorSets(cbs, program, setIndex, out DescriptorSet[] sets, out DescriptorSetCollection dsc))
             {
-                // We still need to ensure the current command buffer holds a reference to all used textures.
-
+                // Still ensure resources are referenced for this command buffer.
                 if (!_isBuffer)
                 {
                     GetImageInfos(_gd, cbs, dummyTexture);
@@ -186,20 +185,22 @@ namespace Ryujinx.Graphics.Vulkan
                 return sets;
             }
 
-            DescriptorSetTemplate template = program.Templates[setIndex];
-
-            DescriptorSetTemplateWriter tu = templateUpdater.Begin(template);
-
             if (!_isBuffer)
             {
-                tu.Push(GetImageInfos(_gd, cbs, dummyTexture));
+                var imageInfos = GetImageInfos(_gd, cbs, dummyTexture);
+                if (imageInfos != null && imageInfos.Length > 0)
+                {
+                    dsc.UpdateImages(0, 0, imageInfos, DescriptorType.CombinedImageSampler);
+                }
             }
             else
             {
-                tu.Push(GetBufferViews(cbs));
+                var bufferViews = GetBufferViews(cbs);
+                if (bufferViews != null && bufferViews.Length > 0)
+                {
+                    dsc.UpdateBufferImages(0, 0, bufferViews, DescriptorType.UniformTexelBuffer);
+                }
             }
-
-            templateUpdater.Commit(_gd, device, sets[0]);
 
             return sets;
         }

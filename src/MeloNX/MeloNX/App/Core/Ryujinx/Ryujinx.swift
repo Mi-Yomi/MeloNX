@@ -121,8 +121,13 @@ func threadEntry(_ arg: () -> Void) -> UnsafeMutableRawPointer? {
 }
 
 
+
+
 class Ryujinx : ObservableObject {
     @Published var isRunning = false
+    @Published var showLoading = true
+    @AppStorage("LDN_MITM") var ldn = printAllIPv4Addresses().first ?? "Unknown"
+    @Published var controllerType: [String: ControllerType] = [:]
     
     let virtualController = VirtualController()
     
@@ -193,6 +198,7 @@ class Ryujinx : ObservableObject {
         var tracelogs: Bool = false
         var nintendoinput: Bool = true
         var enableInternet: Bool = false
+        var ldn_mitm: Bool = false
         var listinputids: Bool = false
         var aspectRatio: AspectRatio = .fixed16x9
         var memoryManagerMode: String = "HostMappedUnsafe"
@@ -225,6 +231,7 @@ class Ryujinx : ObservableObject {
              disableDockedMode: Bool = false,
              nintendoinput: Bool = true,
              enableInternet: Bool = false,
+             ldn_mitm: Bool = false,
              enableTextureRecompression: Bool = true,
              additionalArgs: [String] = [],
              resscale: Float = 1.00,
@@ -255,6 +262,7 @@ class Ryujinx : ObservableObject {
             self.resscale = resscale
             self.nintendoinput = nintendoinput
             self.enableInternet = enableInternet
+            self.ldn_mitm = ldn_mitm
             self.maxAnisotropy = maxAnisotropy
             self.macroHLE = macroHLE
             self.expandRam = expandRam
@@ -514,48 +522,75 @@ class Ryujinx : ObservableObject {
     func loadGames() -> [Game] {
         let fileManager = FileManager.default
         guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
-        
-        let romsDirectory = documentsDirectory.appendingPathComponent("roms")
-        
-        if (!fileManager.fileExists(atPath: romsDirectory.path)) {
+
+        var romdirs: [URL] = [documentsDirectory.appendingPathComponent("roms")]
+        let romfoldermanager = ROMFolderManager.shared
+        romfoldermanager.loadBookmarks()
+
+        for bookmarkData in romfoldermanager.bookmarks.values {
+            var isStale = false
             do {
-                try fileManager.createDirectory(at: romsDirectory, withIntermediateDirectories: true, attributes: nil)
-            } catch {
-                // print("Failed to create roms directory: \(error)")
-            }
-        }
-        var games: [Game] = []
-        
-        do {
-            let files = try fileManager.contentsOfDirectory(at: romsDirectory, includingPropertiesForKeys: nil)
-            
-            for fileURLCandidate in files {
-                if fileURLCandidate.pathExtension == "zip" {
-                    continue
+                let url = try URL(resolvingBookmarkData: bookmarkData,
+                                  options: [withSecurityScope],
+                                  relativeTo: nil,
+                                  bookmarkDataIsStale: &isStale)
+
+                if isStale {
+                    if fileManager.fileExists(atPath: url.path) {
+                        _ = romfoldermanager.addFolder(url: url)
+                    }
                 }
                 
-                do {
-                    let handle = try FileHandle(forReadingFrom: fileURLCandidate)
-                    let fileExtension = (fileURLCandidate.pathExtension as NSString).utf8String
-                    let extensionPtr = UnsafeMutablePointer<CChar>(mutating: fileExtension)
-                    
-                    
-                    let gameInfo = get_game_info(handle.fileDescriptor, extensionPtr)
-                    
-                    let game = Game.convertGameInfoToGame(gameInfo: gameInfo, url: fileURLCandidate)
-                    
-                    games.append(game)
-                } catch {
-                    // print(error)
+                print(url.path)
+
+                if url.startAccessingSecurityScopedResource() {
+                    romdirs.append(url)
+                }
+            } catch {
+                print("Failed to resolve bookmark: \(error)")
+            }
+        }
+
+        let originalRom = documentsDirectory.appendingPathComponent("roms")
+        if !fileManager.fileExists(atPath: originalRom.path) {
+            do {
+                try fileManager.createDirectory(at: originalRom, withIntermediateDirectories: true)
+            } catch {
+                print("Failed to create roms directory: \(error)")
+            }
+        }
+
+        var games: [Game] = []
+
+        for romsDirectory in romdirs {
+            if let enumerator = fileManager.enumerator(at: romsDirectory, includingPropertiesForKeys: nil) {
+                for case let fileURL as URL in enumerator {
+                    if !GameFileType.isSupported(fileExtension: fileURL.pathExtension) {
+                        continue
+                    }
+
+                    do {
+                        let handle = try FileHandle(forReadingFrom: fileURL)
+                        let fileExtension = (fileURL.pathExtension as NSString).utf8String
+                        let extensionPtr = UnsafeMutablePointer<CChar>(mutating: fileExtension)
+
+                        let gameInfo = get_game_info(handle.fileDescriptor, extensionPtr)
+
+                        let game = Game.convertGameInfoToGame(gameInfo: gameInfo, url: fileURL)
+
+                        games.append(game)
+                    } catch {
+                        print("Failed to read file at \(fileURL): \(error)")
+                    }
                 }
             }
-
-            return games
-        } catch {
-            // print("Error loading games from roms folder: \(error)")
-            return games
+            
+            romsDirectory.stopAccessingSecurityScopedResource()
         }
+
+        return games
     }
+
 
     func buildCommandLineArgs(from config: Arguments) -> [String] {
         var args: [String] = []
@@ -629,6 +664,20 @@ class Ryujinx : ObservableObject {
             args.append("--disable-fs-integrity-checks")
         }
         
+        if config.enableInternet {
+            args.append("--enable-internet-connection")
+        }
+        if let index = ldn.firstIndex(of: ":") {
+            let result = String(ldn[..<index])
+            
+            args.append(contentsOf: ["--lan-interface-id", result])
+        }
+        
+        if config.ldn_mitm {
+            args.append("--enable-ldn-mitm")
+        }
+        
+        // ldn
         
         if config.resscale != 1.0 {
             args.append(contentsOf: ["--resolution-scale", String(config.resscale)])
@@ -677,10 +726,15 @@ class Ryujinx : ObservableObject {
         // Append the input ids (limit to 8 (used to be 4) just in case)
         if !config.inputids.isEmpty {
             config.inputids.prefix(8).enumerated().forEach { index, inputId in
-                if config.handHeldController {
+                // controllerType
+                if let controller = controllerType[inputId], controller == .handheld {
                     args.append(contentsOf: ["\(index == 0 ? "--input-id-handheld" : "--input-id-\(index + 1)")", inputId])
                 } else {
                     args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
+                }
+                
+                if let controller = controllerType[inputId], controller != .handheld {
+                    args.append(contentsOf: ["--controller-type-\(index + 1)", controller.rawValue])
                 }
             }
         }
@@ -700,6 +754,21 @@ class Ryujinx : ObservableObject {
         return args
     }
     
+    func getPhysicalDeviceUniqueID(from controller: GCController) -> String? {
+        let selector = NSSelectorFromString("physicalDeviceUniqueID")
+        
+        guard controller.responds(to: selector) else {
+            print("Selector physicalDeviceUniqueID not found on controller")
+            return nil
+        }
+
+        if let unmanagedResult = controller.perform(selector) {
+            return unmanagedResult.takeUnretainedValue() as? String
+        }
+
+        return nil
+    }
+    
     func checkIfKeysImported() -> Bool {
         let keysDirectory = URL.documentsDirectory.appendingPathComponent("system")
         let keysFile = keysDirectory.appendingPathComponent("prod.keys")
@@ -708,6 +777,10 @@ class Ryujinx : ObservableObject {
     }
     
     func fetchFirmwareVersion() -> String {
+        if isRunning {
+            return "1"
+        }
+        
         let firmwareVersionPointer = installed_firmware_version()
         if let pointer = firmwareVersionPointer {
             let firmwareVersion = String(cString: pointer)
@@ -756,6 +829,39 @@ class Ryujinx : ObservableObject {
                 }, titleId: item.TitleId, enabled: true)
         }
     }
+    
+    private func registerExceptionPort() {
+        var exceptionPort: mach_port_t = mach_port_t()
+        
+        // Allocate the exception port
+        let kr1 = mach_port_allocate(mach_task_self_, mach_port_right_t(MACH_PORT_RIGHT_RECEIVE), &exceptionPort)
+        guard kr1 == KERN_SUCCESS else {
+            print("mach_port_allocate failed: \(kr1)")
+            return
+        }
+        
+        // Insert a send right into the exception port
+        let kr2 = mach_port_insert_right(mach_task_self_, exceptionPort, exceptionPort, mach_msg_type_name_t(MACH_MSG_TYPE_MAKE_SEND))
+        guard kr2 == KERN_SUCCESS else {
+            print("mach_port_insert_right failed: \(kr2)")
+            return
+        }
+        
+        // Set the exception port for the task (future threads)
+        let kr3 = task_set_exception_ports(
+            mach_task_self_,
+            exception_mask_t(EXC_MASK_BAD_ACCESS),
+            exceptionPort,
+            exception_behavior_t(EXCEPTION_DEFAULT),
+            thread_state_flavor_t(THREAD_STATE_NONE)
+        )
+        guard kr3 == KERN_SUCCESS else {
+            print("task_set_exception_ports failed: \(kr3)")
+            return
+        }
+        
+        print("Exception port registered successfully.")
+    }
 
     private func generateGamepadId(joystickIndex: Int32) -> String? {
         let guid = SDL_JoystickGetDeviceGUID(joystickIndex)
@@ -802,7 +908,13 @@ class Ryujinx : ObservableObject {
                     return []
                 }
                 
-                controllers.append(Controller(id: guid, name: name))
+                
+                
+                if name == self.virtualController.controllername {
+                    controllers.append(Controller(id: guid, name: name, controllerType: .joyconPair))
+                } else {
+                    controllers.append(Controller(id: guid, name: name))
+                }
 
                 SDL_GameControllerClose(controller)
             }
@@ -877,4 +989,3 @@ public extension UIDevice {
     }()
 
 }
-

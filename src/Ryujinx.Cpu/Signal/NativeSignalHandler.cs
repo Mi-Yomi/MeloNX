@@ -123,12 +123,24 @@ namespace Ryujinx.Cpu.Signal
 
         private static IntPtr MapCode(ReadOnlySpan<byte> code)
         {
-            Debug.Assert(_codeBlock == null);
-
             ulong codeSizeAligned = BitUtils.AlignUp((ulong)code.Length, MemoryBlock.GetPageSize());
 
-            string dualMapped = Environment.GetEnvironmentVariable("DUAL_MAPPED_JIT");
-            _codeBlock = new MemoryBlock(codeSizeAligned, (dualMapped == "1") ? MemoryAllocationFlags.DualMapping : MemoryAllocationFlags.None);
+            if (_codeBlock == null)
+            {
+                string dualMapped = Environment.GetEnvironmentVariable("DUAL_MAPPED_JIT");
+                _codeBlock = new MemoryBlock(codeSizeAligned, (dualMapped == "1") ? MemoryAllocationFlags.DualMapping : MemoryAllocationFlags.None);
+            }
+            else
+            {
+                // If the region exists, just overwrite the code and reprotect.
+                // Optionally, check if the size matches and handle resizing if needed.
+                if (_codeBlock.Size != codeSizeAligned)
+                {
+                    string dualMapped = Environment.GetEnvironmentVariable("DUAL_MAPPED_JIT");
+                    _codeBlock = new MemoryBlock(codeSizeAligned, (dualMapped == "1") ? MemoryAllocationFlags.DualMapping : MemoryAllocationFlags.None);
+                }
+            }
+
             _codeBlock.Write(0, code);
             _codeBlock.Reprotect(0, codeSizeAligned, MemoryPermission.ReadAndExecute);
 
@@ -175,6 +187,19 @@ namespace Ryujinx.Cpu.Signal
             }
 
             return false;
+        }
+
+        public static void ClearAllTrackedRegions()
+        {
+            Span<SignalHandlerRange> ranges = GetConfigRef().Ranges;
+
+            for (int i = 0; i < NativeSignalHandlerGenerator.MaxTrackedRanges; i++)
+            {
+                ranges[i].IsActive = 0;
+                ranges[i].RangeAddress = 0;
+                ranges[i].RangeEndAddress = 0;
+                ranges[i].ActionPointer = IntPtr.Zero;
+            }
         }
 
         public static bool SupportsFaultAddressPatching()

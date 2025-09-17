@@ -50,6 +50,8 @@ namespace Ryujinx.Cpu.Jit.HostTracked
 
             _trackingEvent = VirtualMemoryEvent;
 
+            // NativeSignalHandler.ClearAllTrackedRegions();
+
             bool added = NativeSignalHandler.AddTrackedRegion((nuint)ptStart, (nuint)ptEnd, Marshal.GetFunctionPointerForDelegate(_trackingEvent));
 
             if (!added)

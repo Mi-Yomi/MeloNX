@@ -21,6 +21,8 @@ extern "C" {
 #endif
 
 
+
+
 struct GameInfo {
     long FileSize;
     char TitleName[512];
@@ -42,9 +44,24 @@ struct DlcNcaList {
     struct DlcNcaListItem* items;
 };
 
+struct AvatarInfo
+{
+    unsigned char* ImageData;
+    int ImageSize;
+    char* FileName;
+};
+
+struct AvatarArray
+{
+    int Count;
+    struct AvatarInfo* Avatars;
+};
+
 typedef void (^SwiftCallback)(NSString *result);
+typedef void (^SwiftCallback2)(NSData *result);
 
 void RegisterCallback(NSString *identifier, SwiftCallback callback);
+void RegisterCallbackWithData(NSString *identifier, SwiftCallback2 callback);
 
 extern struct GameInfo get_game_info(int, char*);
 
@@ -73,6 +90,16 @@ void touch_began(float x, float y, int index);
 void touch_moved(float x, float y, int index);
 
 void touch_ended(int index);
+
+void refresh_account_manager();
+
+void create_account(char* name, char* image, int imagelength);
+
+void open_user(char* userid);
+
+void close_user(char* userid);
+
+extern struct AvatarArray get_avatars();
 
 #ifdef __cplusplus
 }

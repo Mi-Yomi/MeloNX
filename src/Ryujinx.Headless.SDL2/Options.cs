@@ -71,6 +71,33 @@ namespace Ryujinx.Headless.SDL2
 
         [Option("input-profile-handheld", Required = false, HelpText = "Set the input profile in use for the Handheld Player.")]
         public string InputProfileHandheldName { get; set; }
+        
+
+        [Option("controller-type-1", Required = false, HelpText = "Set the controller type in use for Player 1.")]
+        public Common.Configuration.Hid.ControllerType controllerType1 { get; set; }
+
+        [Option("controller-type-2", Required = false, HelpText = "Set the controller type in use for Player 2.")]
+        public Common.Configuration.Hid.ControllerType controllerType2 { get; set; }
+
+        [Option("controller-type-3", Required = false, HelpText = "Set the controller type in use for Player 3.")]
+        public Common.Configuration.Hid.ControllerType controllerType3 { get; set; }
+
+        [Option("controller-type-4", Required = false, HelpText = "Set the controller type in use for Player 4.")]
+        public Common.Configuration.Hid.ControllerType controllerType4 { get; set; }
+
+        [Option("controller-type-5", Required = false, HelpText = "Set the controller type in use for Player 5.")]
+        public Common.Configuration.Hid.ControllerType controllerType5 { get; set; }
+
+        [Option("controller-type-6", Required = false, HelpText = "Set the controller type in use for Player 6.")]
+        public Common.Configuration.Hid.ControllerType controllerType6 { get; set; }
+
+        [Option("controller-type-7", Required = false, HelpText = "Set the controller type in use for Player 7.")]
+        public Common.Configuration.Hid.ControllerType controllerType7 { get; set; }
+
+        [Option("controller-type-8", Required = false, HelpText = "Set the controller type in use for Player 8.")]
+        public Common.Configuration.Hid.ControllerType controllerType8 { get; set; }
+
+        // ControllerType
 
         [Option("input-id-1", Required = false, HelpText = "Set the input id in use for Player 1.")]
         public string InputId1 { get; set; }
@@ -98,6 +125,7 @@ namespace Ryujinx.Headless.SDL2
 
         [Option("input-id-handheld", Required = false, HelpText = "Set the input id in use for the Handheld Player.")]
         public string InputIdHandheld { get; set; }
+
 
         [Option("input-dsu-server-1", Required = false, HelpText = "Set the input DSU server:port in use for Player 1.")]
         public string InputDSUServer1 { get; set; }
@@ -187,6 +215,9 @@ namespace Ryujinx.Headless.SDL2
 
 		[Option("use-hypervisor", Required = false, Default = false, HelpText = "Uses Hypervisor over JIT if available.")]
         public bool UseHypervisor { get; set; }
+
+        [Option("enable-ldn-mitm", Required = false, Default = false, HelpText = "Enables the ldn mitm mode, allowing for local wireless play.")]
+        public bool ldnMitm { get; set; }
 
         [Option("lan-interface-id", Required = false, Default = "0", HelpText = "GUID for the network interface used by LAN.")]
         public string MultiplayerLanInterfaceId { get; set; }

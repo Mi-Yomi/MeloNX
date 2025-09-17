@@ -98,15 +98,19 @@ struct PerGameSettingsView: View {
         self.titleId = titleId 
     }
     
-    
-    private var config: Binding<Ryujinx.Arguments> {
-        return Binding<Ryujinx.Arguments> {
-            return settingsManager.config[titleId] ?? Ryujinx.Arguments()
-        } set: { newValue in
-            settingsManager.config[titleId] = newValue
-            settingsManager.debouncedSave()
-        }
+    private func configBinding<T>(_ keyPath: WritableKeyPath<Ryujinx.Arguments, T>) -> Binding<T> {
+        Binding(
+            get: {
+                (settingsManager.config[titleId] ?? Ryujinx.Arguments())[keyPath: keyPath]
+            },
+            set: { newValue in
+                var config = settingsManager.config[titleId] ?? Ryujinx.Arguments()
+                config[keyPath: keyPath] = newValue
+                settingsManager.config[titleId] = config
+            }
+        )
     }
+    
     
     var memoryManagerModes = [
         ("HostMapped", "Host (fast)"),
@@ -123,7 +127,7 @@ struct PerGameSettingsView: View {
     @State private var showAppIconSwitcher = false
     @State private var searchText = ""
     @StateObject var ryujinx = Ryujinx.shared
-    @Environment(\.dismiss) var dismiss
+    @Environment(\.dismissPopover) var dismiss
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.verticalSizeClass) var verticalSizeClass: UserInterfaceSizeClass?
     @Environment(\.horizontalSizeClass) var horizontalSizeClass: UserInterfaceSizeClass?
@@ -279,7 +283,7 @@ struct PerGameSettingsView: View {
                     }
                     
                     VStack(spacing: 8) {
-                        Slider(value: config.resscale, in: 0.1...3.0, step: 0.05)
+                        Slider(value: configBinding(\.resscale), in: 0.1...3.0, step: 0.05)
                         
                         HStack {
                             Text("0.1x")
@@ -288,7 +292,7 @@ struct PerGameSettingsView: View {
                             
                             Spacer()
                             
-                            Text("\(config.resscale.wrappedValue, specifier: "%.2f")x")
+                            Text("\(configBinding(\.resscale).wrappedValue, specifier: "%.2f")x")
                                 .font(.headline)
                                 .foregroundColor(.blue)
                             
@@ -326,7 +330,7 @@ struct PerGameSettingsView: View {
                     }
                     
                     VStack(spacing: 8) {
-                        Slider(value: config.maxAnisotropy, in: 0...16.0, step: 0.1)
+                        Slider(value: configBinding(\.maxAnisotropy), in: 0...16.0, step: 0.1)
                         
                         HStack {
                             Text("Off")
@@ -335,7 +339,7 @@ struct PerGameSettingsView: View {
                             
                             Spacer()
                             
-                            Text("\(config.maxAnisotropy.wrappedValue, specifier: "%.1f")x")
+                            Text("\(configBinding(\.maxAnisotropy).wrappedValue, specifier: "%.1f")x")
                                 .font(.headline)
                                 .foregroundColor(.blue)
                             
@@ -352,23 +356,23 @@ struct PerGameSettingsView: View {
             // Toggle options card
             SettingsCard {
                 VStack(spacing: 4) {
-                    PerSettingsToggle(isOn: config.disableShaderCache, icon: "memorychip", label: "Shader Cache")
+                    PerSettingsToggle(isOn: configBinding(\.disableShaderCache), icon: "memorychip", label: "Shader Cache")
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: config.disablevsync, icon: "arrow.triangle.2.circlepath", label: "Disable VSync")
+                    PerSettingsToggle(isOn: configBinding(\.disablevsync).reversed, icon: "arrow.triangle.2.circlepath", label: "VSync")
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: config.enableTextureRecompression, icon: "rectangle.compress.vertical", label: "Texture Recompression")
+                    PerSettingsToggle(isOn: configBinding(\.enableTextureRecompression), icon: "rectangle.compress.vertical", label: "Texture Recompression")
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: config.disableDockedMode, icon: "dock.rectangle", label: "Docked Mode")
+                    PerSettingsToggle(isOn: configBinding(\.disableDockedMode), icon: "dock.rectangle", label: "Docked Mode")
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: config.macroHLE, icon: "gearshape", label: "Macro HLE")
+                    PerSettingsToggle(isOn: configBinding(\.macroHLE), icon: "gearshape", label: "Macro HLE")
                 }
             }
             
@@ -379,7 +383,7 @@ struct PerGameSettingsView: View {
                         .font(.headline)
                     
                     if (horizontalSizeClass == .regular && verticalSizeClass == .regular) || (horizontalSizeClass == .regular && verticalSizeClass == .compact) {
-                        Picker(selection: config.aspectRatio) {
+                        Picker(selection: configBinding(\.aspectRatio)) {
                             ForEach(AspectRatio.allCases, id: \.self) { ratio in
                                 Text(ratio.displayName).tag(ratio)
                             }
@@ -388,7 +392,7 @@ struct PerGameSettingsView: View {
                         }
                         .pickerStyle(.segmented)
                     } else {
-                        Picker(selection: config.aspectRatio) {
+                        Picker(selection: configBinding(\.aspectRatio)) {
                             ForEach(AspectRatio.allCases, id: \.self) { ratio in
                                 Text(ratio.displayName).tag(ratio)
                             }
@@ -416,7 +420,7 @@ struct PerGameSettingsView: View {
                         labelWithIcon("System Language", iconName: "character.bubble")
                             .font(.headline)
                         
-                        Picker(selection: config.language) {
+                        Picker(selection: configBinding(\.language)) {
                             ForEach(SystemLanguage.allCases, id: \.self) { language in
                                 Text(language.displayName).tag(language)
                             }
@@ -434,7 +438,7 @@ struct PerGameSettingsView: View {
                         labelWithIcon("Region", iconName: "globe")
                             .font(.headline)
                         
-                        Picker(selection: config.regioncode) {
+                        Picker(selection: configBinding(\.regioncode)) {
                             ForEach(SystemRegionCode.allCases, id: \.self) { region in
                                 Text(region.displayName).tag(region)
                             }
@@ -460,7 +464,7 @@ struct PerGameSettingsView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                         
-                        Picker(selection: config.memoryManagerMode) {
+                        Picker(selection: configBinding(\.memoryManagerMode)) {
                             ForEach(filteredMemoryModes, id: \.0) { key, displayName in
                                 Text(displayName).tag(key)
                             }
@@ -472,7 +476,7 @@ struct PerGameSettingsView: View {
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: config.disablePTC, icon: "cpu", label: "Disable PTC")
+                    PerSettingsToggle(isOn: configBinding(\.disablePTC).reversed, icon: "cpu", label: "PTC")
                     
                     if let gpuInfo = getGPUInfo(), gpuInfo.hasPrefix("Apple M") {
                         Divider()
@@ -481,21 +485,9 @@ struct PerGameSettingsView: View {
                             PerSettingsToggle(isOn: .constant(false), icon: "bolt", label: "Hypervisor")
                                 .disabled(true)
                         } else if checkAppEntitlement("com.apple.private.hypervisor") {
-                            PerSettingsToggle(isOn: config.hypervisor, icon: "bolt", label: "Hypervisor")
+                            PerSettingsToggle(isOn: configBinding(\.hypervisor), icon: "bolt", label: "Hypervisor")
                         }
                     }
-                }
-            }
-            
-            // Controller options card
-            SettingsCard {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Controller Configuration")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    PerSettingsToggle(isOn: config.handHeldController, icon: "formfitting.gamecontroller", label: "Player 1 to Handheld")
-    
                 }
             }
         }
@@ -508,11 +500,11 @@ struct PerGameSettingsView: View {
             // Debug options card
             SettingsCard {
                 VStack(spacing: 4) {
-                    PerSettingsToggle(isOn: config.debuglogs, icon: "exclamationmark.bubble", label: "Debug Logs")
+                    PerSettingsToggle(isOn: configBinding(\.debuglogs), icon: "exclamationmark.bubble", label: "Debug Logs")
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: config.tracelogs, icon: "waveform.path", label: "Trace Logs")
+                    PerSettingsToggle(isOn: configBinding(\.tracelogs), icon: "waveform.path", label: "Trace Logs")
                 }
             }
             
@@ -520,18 +512,18 @@ struct PerGameSettingsView: View {
             SettingsCard {
                 VStack(spacing: 4) {
                     
-                    PerSettingsToggle(isOn: config.dfsIntegrityChecks, icon: "checkmark.shield", label: "Disable FS Integrity Checks")
+                    PerSettingsToggle(isOn: configBinding(\.dfsIntegrityChecks), icon: "checkmark.shield", label: "Disable FS Integrity Checks")
                         .accentColor(.red)
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: config.expandRam, icon: "exclamationmark.bubble", label: "Expand Guest RAM")
+                    PerSettingsToggle(isOn: configBinding(\.expandRam), icon: "exclamationmark.bubble", label: "Expand Guest RAM")
                         .accentColor(.red)
                         .disabled(totalMemory < 5723)
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: config.ignoreMissingServices, icon: "waveform.path", label: "Ignore Missing Services")
+                    PerSettingsToggle(isOn: configBinding(\.ignoreMissingServices), icon: "waveform.path", label: "Ignore Missing Services")
                         .accentColor(.red)
                 }
             }
@@ -545,13 +537,13 @@ struct PerGameSettingsView: View {
                     
                     let binding = Binding(
                         get: {
-                            config.additionalArgs.wrappedValue.joined(separator: ", ")
+                            configBinding(\.additionalArgs).wrappedValue.joined(separator: ", ")
                         },
                         set: { newValue in
                             let args = newValue
                                 .split(separator: ",")
                                 .map { $0.trimmingCharacters(in: .whitespaces) }
-                            config.additionalArgs.wrappedValue = args
+                            configBinding(\.additionalArgs).wrappedValue = args
                         }
                     )
                     
@@ -599,8 +591,18 @@ struct PerGameSettingsView: View {
     private var miscSettings: some View {
         SettingsSection(title: "Miscellaneous Options") {
             SettingsCard {
-                VStack(spacing: 4) {
-                    PerSettingsToggle(isOn: config.handHeldController, icon: "formfitting.gamecontroller", label: "Player 1 to Handheld")
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Network Configuration")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    Divider()
+                    
+                    SettingsToggle(isOn: configBinding(\.enableInternet), icon: "wifi.router.fill", label: "Guest Internet Access / LAN Mode")
+                    
+                    Divider()
+                    
+                    SettingsToggle(isOn: configBinding(\.ldn_mitm), icon: "ipad.sizes", label: "ldn_mitm")
                 }
             }
         }

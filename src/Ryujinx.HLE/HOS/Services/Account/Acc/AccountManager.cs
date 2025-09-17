@@ -9,6 +9,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace Ryujinx.HLE.HOS.Services.Account.Acc
 {
@@ -16,14 +17,14 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc
     {
         public static readonly UserId DefaultUserId = new("00000000000000010000000000000000");
 
-        private readonly AccountSaveDataManager _accountSaveDataManager;
+        private AccountSaveDataManager _accountSaveDataManager;
 
         // Todo: The account service doesn't have the permissions to delete save data. Qlaunch takes care of deleting
         // save data, so we're currently passing a client with full permissions. Consider moving save data deletion
         // outside of the AccountManager.
         private readonly HorizonClient _horizonClient;
 
-        private readonly ConcurrentDictionary<string, UserProfile> _profiles;
+        private ConcurrentDictionary<string, UserProfile> _profiles;
         private UserProfile[] _storedOpenedUsers;
 
         public UserProfile LastOpenedUser { get; private set; }
@@ -37,7 +38,7 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc
 
             _accountSaveDataManager = new AccountSaveDataManager(_profiles);
 
-            if (!_profiles.TryGetValue(DefaultUserId.ToString(), out _))
+            if (!_profiles.TryGetValue(DefaultUserId.ToString(), out _) && _profiles.Count == 0)
             {
                 byte[] defaultUserImage = EmbeddedResources.Read("Ryujinx.HLE/HOS/Services/Account/Acc/DefaultUserImage.jpg");
 
@@ -59,7 +60,6 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc
                 OpenUser(commandLineUserProfileOverride.IsNull ? _accountSaveDataManager.LastOpened : commandLineUserProfileOverride);
             }
         }
-
         public void AddUser(string name, byte[] image, UserId userId = new UserId())
         {
             if (userId.IsNull)
@@ -72,6 +72,21 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc
             _profiles.AddOrUpdate(userId.ToString(), profile, (key, old) => profile);
 
             _accountSaveDataManager.Save(_profiles);
+        }
+
+        public void Refresh()
+        {
+            _profiles = new ConcurrentDictionary<string, UserProfile>();
+            _accountSaveDataManager = new AccountSaveDataManager(_profiles);
+
+            if (!_profiles.TryGetValue(DefaultUserId.ToString(), out _) && _profiles.Count == 0)
+            {
+                byte[] defaultUserImage = EmbeddedResources.Read("Ryujinx.HLE/HOS/Services/Account/Acc/DefaultUserImage.jpg");
+
+                AddUser("MeloNX", defaultUserImage, DefaultUserId);
+
+                OpenUser(DefaultUserId);
+            }
         }
 
         public void OpenUser(UserId userId)
@@ -249,6 +264,11 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc
         internal UserProfile GetFirst()
         {
             return _profiles.First().Value;
+        }
+
+        public void DeleteUser(object value)
+        {
+            throw new NotImplementedException();
         }
     }
 }

@@ -267,11 +267,15 @@ struct SettingsViewNew: View {
     
     @AppStorage("oldSettingsUI") var oldSettingsUI = false
     
+    @AppStorage("showBatteryPercentage") var showBatteryPercentage: Bool = false
+    
     let totalMemory = ProcessInfo.processInfo.physicalMemory
     
     @AppStorage("lockInApp") var restartApp = false
+    @AppStorage("showProfileonGame") var showProfileonGame: Bool = false
     
     @AppStorage("OldView") var oldView = true
+    @AppStorage("LDN_MITM") var ldn = printAllIPv4Addresses().first ?? "Unknown"
     
     @State private var showResolutionInfo = false
     @State private var showAnisotropicInfo = false
@@ -309,8 +313,8 @@ struct SettingsViewNew: View {
     enum SettingsCategory: String, CaseIterable, Identifiable {
         case graphics = "Graphics"
         case input = "Input"
-        case system = "System"
         case misc = "Misc"
+        case system = "System"
         case advanced = "Advanced"
         
         var id: String { self.rawValue }
@@ -440,14 +444,14 @@ struct SettingsViewNew: View {
                         switch selectedCategory {
                         case .graphics:
                             graphicsSettings
+                        case .misc:
+                            miscSettings
                         case .input:
                             inputSettings
                         case .system:
                             systemSettings
                         case .advanced:
                             advancedSettings
-                        case .misc:
-                            miscSettings
                         }
                     }
                 },
@@ -755,7 +759,7 @@ struct SettingsViewNew: View {
                     
                     Divider()
                     
-                    SettingsToggle(isOn: config.disablevsync, icon: "arrow.triangle.2.circlepath", label: "Disable VSync")
+                    SettingsToggle(isOn: config.disablevsync.reversed, icon: "arrow.triangle.2.circlepath", label: "VSync")
                     
                     Divider()
                     
@@ -839,10 +843,6 @@ struct SettingsViewNew: View {
             // On-screen controls card
             SettingsCard {
                 VStack(spacing: 4) {
-                    SettingsToggle(isOn: config.handHeldController, icon: "formfitting.gamecontroller", label: "Player 1 to Handheld")
-                    
-                    Divider()
-                    
                     SettingsToggle(isOn: $stickButton, icon: "l.joystick.press.down", label: "Show Stick Buttons")
                     
                     Divider()
@@ -931,7 +931,7 @@ struct SettingsViewNew: View {
                         }
                         
                         VStack(spacing: 8) {
-                            Slider(value: $controllerOpacity, in: 0.1...1.0, step: 0.05)
+                            Slider(value: $controllerOpacity, in: 0.01...1.0, step: 0.05)
                             
                             HStack {
                                 Text("More Transparent")
@@ -960,7 +960,7 @@ struct SettingsViewNew: View {
     // MARK: - Controller Selection Components
 
     private var hasAvailableControllers: Bool {
-        !controllersList.filter { !currentControllers.contains($0) }.isEmpty
+        !controllersList.filter { !contains(currentControllers, value: $0) }.isEmpty
     }
 
     private var emptyControllersView: some View {
@@ -978,7 +978,7 @@ struct SettingsViewNew: View {
             Divider()
             
             ForEach(currentControllers.indices, id: \.self) { index in
-                let controller = currentControllers[index]
+                var controller = currentControllers[index]
                 
                 VStack(spacing: 0) {
                     HStack {
@@ -991,7 +991,7 @@ struct SettingsViewNew: View {
                         Spacer()
                         
                         Button {
-                            toggleController(controller)
+                            toggleController(currentControllers[index])
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.secondary)
@@ -1004,17 +1004,44 @@ struct SettingsViewNew: View {
                         Divider()
                     }
                 }
+                .contextMenu {
+                    ForEach(ControllerType.allCases) { type in
+                        if currentControllers[index].controllerType == type {
+                            Button {
+                                currentControllers[index].controllerType = type
+                                ControllerTypeManager.shared.controllerTypeForId[index] = controller.controllerType
+                            } label: {
+                                Label(type.rawValue, systemImage: "checkmark")
+                            }
+                        } else {
+                            Button(type.rawValue) {
+                                currentControllers[index].controllerType = type
+                                ControllerTypeManager.shared.controllerTypeForId[index] = controller.controllerType
+                            }
+                            .tag(type)
+                        }
+                    }
+                }
             }
-            .onMove { from, to in
-                currentControllers.move(fromOffsets: from, toOffset: to)
+            .onAppear {
+                let manager = ControllerTypeManager.shared
+                    
+                
+                for (index, controller) in currentControllers.enumerated() {
+                    if controller.isVirtualController {
+                        currentControllers[index].controllerType = manager.controllerTypeForId[index] ?? .joyconPair
+                    } else {
+                         currentControllers[index].controllerType = manager.controllerTypeForId[index] ?? .proController
+                    }
+                }
+
             }
-            .environment(\.editMode, .constant(.active))
         }
     }
 
     private var addControllerButton: some View {
         Menu {
-            ForEach(controllersList.filter { !currentControllers.contains($0) }) { controller in
+            ForEach(controllersList.filter { !contains(currentControllers, value: $0) }) { controller in
                 Button {
                     currentControllers.append(controller)
                 } label: {
@@ -1027,6 +1054,15 @@ struct SettingsViewNew: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 6)
         }
+    }
+    
+    func contains(_ cool: [Controller], value: Controller) -> Bool {
+        for item in cool {
+            if item.name == value.name && item.id == value.id {
+                return true
+            }
+        }
+        return false
     }
     
     // MARK: - System Settings
@@ -1096,7 +1132,7 @@ struct SettingsViewNew: View {
                     
                     Divider()
                     
-                    SettingsToggle(isOn: config.disablePTC, icon: "cpu", label: "Disable PTC")
+                    SettingsToggle(isOn: config.disablePTC.reversed, icon: "cpu", label: "PTC")
                     
                     if let gpuInfo = getGPUInfo(), gpuInfo.hasPrefix("Apple M") {
                         Divider()
@@ -1241,6 +1277,15 @@ struct SettingsViewNew: View {
                         .font(.system(.body, design: .monospaced))
                         .foregroundColor(.secondary)
                 }
+                
+                HStack {
+                    let res = (UIApplication.shared.connectedScenes.first! as! UIWindowScene).windows.first!.bounds.size
+                    labelWithIcon("App Resolution", iconName: "display")
+                    Spacer()
+                    Text("\(Int(res.width))x\(Int(res.height))")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
             }
             
             if gamepo {
@@ -1259,20 +1304,71 @@ struct SettingsViewNew: View {
     private var miscSettings: some View {
         SettingsSection(title: "Miscellaneous Options") {
             SettingsCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Custom ROM folders")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    FolderListView()
+                }
+            }
+            
+            SettingsCard {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Network Configuration")
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    
+                    VStack(alignment: .leading, spacing: 8) {
+                        labelWithIcon("Network Interface", iconName: "wifi")
+                            .font(.headline)
+                        
+                        Picker(selection: $ldn) {
+                            ForEach(printAllIPv4Addresses(), id: \.self) { option in
+                                Text(option)
+                            }
+                        } label: {
+                            EmptyView()
+                        }
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                    }
+                    
+                    Divider()
+                    
+                    SettingsToggle(isOn: config.enableInternet, icon: "wifi.router.fill", label: "Guest Internet Access / LAN Mode")
+                    
+                    Divider()
+                    
+                    SettingsToggle(isOn: config.ldn_mitm, icon: "ipad.sizes", label: "ldn_mitm")
+                    
+                    // enable-ldn-mitm
+                }
+            }
+            
+            
+            SettingsCard {
                 VStack(spacing: 4) {
-
                     if UIDevice.current.userInterfaceIdiom == .pad {
                         SettingsToggle(isOn: $toggleGreen, icon: "arrow.clockwise", label: "Toggle Color Green when \"ON\"")
                         
                         Divider()
                     }
+            
+                    SettingsToggle(isOn: $showBatteryPercentage, icon: "battery.100percent.bolt", label: "Show Battery Percentage (in-game)")
                     
-                    
+                    Divider()
+                
                     // Disable Touch card
                     SettingsToggle(isOn: $disableTouch, icon: "rectangle.and.hand.point.up.left.filled", label: "Disable Touch")
                     
                     Divider()
                     
+                    // Select User on Launch card
+                    SettingsToggle(isOn: $showProfileonGame, icon: "person.3", label: "Select Profile on Game Launch")
+                    
+                    Divider()
                     
                     Button {
                         showAppIconSwitcher = true
@@ -1368,7 +1464,12 @@ struct SettingsViewNew: View {
                     
                     Divider()
                     
-                    SettingsToggle(isOn: $dualMapped, icon: "light.strip.2", label: "Dual Mapped JIT")
+                    if #available(iOS 19, *), !ProcessInfo.processInfo.isiOSAppOnMac {
+                        SettingsToggle(isOn: $dualMapped, icon: "light.strip.2", label: "Dual Mapped JIT")
+                            .disabled(true)
+                    } else {
+                        SettingsToggle(isOn: $dualMapped, icon: "light.strip.2", label: "Dual Mapped JIT")
+                    }
                     
                     Divider()
                     
@@ -1686,3 +1787,64 @@ extension View {
     }
 }
 
+// seperate view for testing™
+struct FolderListView: View {
+    @StateObject private var folderManager = ROMFolderManager.shared
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+            
+            ForEach(Array(folderManager.bookmarks.keys).sorted(), id: \.self) { path in
+                VStack(spacing: 0) {
+                    HStack {
+                        Image(systemName: "folder.fill")
+                            .foregroundColor(.blue)
+                        
+                        Text(path)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        
+                        Spacer()
+                        
+                        Button {
+                            folderManager.bookmarks.removeValue(forKey: path)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.vertical, 8)
+                    
+                    if path != folderManager.bookmarks.keys.sorted().last {
+                        Divider()
+                    }
+                }
+            }
+            
+            Button(action: {
+                FileImporterManager.shared.importFiles(types: [.folder]) { result in
+                    switch result {
+                    case .success(let paths):
+                        for url in paths {
+                            let wow = folderManager.addFolder(url: url)
+                            print(wow)
+                            Ryujinx.shared.games = Ryujinx.shared.loadGames()
+                        }
+                    case .failure:
+                        break
+                    }
+                }
+            }) {
+                HStack {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Add Folder")
+                }
+                .padding(.vertical, 10)
+            }
+        }
+        .padding(.horizontal)
+    }
+    
+}

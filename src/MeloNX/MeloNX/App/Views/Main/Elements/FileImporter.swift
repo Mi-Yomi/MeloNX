@@ -5,121 +5,128 @@
 //  Created by Stossy11 on 17/04/2025.
 //
 
-
-import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
-class FileImporterManager: ObservableObject {
+class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate {
     static let shared = FileImporterManager()
     
-    private init() {}
+    private var currentCompletion: ((Result<[URL], Error>) -> Void)?
+    private var currentDocumentPicker: UIDocumentPickerViewController?
+    private var securityScopedURLs: [URL] = []
     
-    func importFiles(types: [UTType], allowMultiple: Bool = false, completion: @escaping (Result<[URL], Error>) -> Void) {
-        let id = "\(Unmanaged.passUnretained(completion as AnyObject).toOpaque())"
+    private override init() {
+        super.init()
+    }
+    
+    func importFiles(
+        types: [UTType],
+        allowMultiple: Bool = false,
+        completion: @escaping (Result<[URL], Error>) -> Void
+    ) {
+        self.currentCompletion = { result in
+            DispatchQueue.main.async {
+                completion(result)
+            }
+        }
         
-        DispatchQueue.main.async {
-            NotificationCenter.default.post(
-                name: .importFiles,
-                object: nil,
-                userInfo: [
-                    "id": id,
-                    "types": types,
-                    "allowMultiple": allowMultiple,
-                    "completion": completion
-                ]
+        let documentPicker = UIDocumentPickerViewController(forOpeningContentTypes: types)
+        documentPicker.delegate = self
+        documentPicker.allowsMultipleSelection = allowMultiple
+        documentPicker.modalPresentationStyle = .formSheet
+        
+        self.currentDocumentPicker = documentPicker
+        
+        guard let topViewController = getTopViewController() else {
+            let error = NSError(
+                domain: "FileImporterManager",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to find presenting view controller."]
             )
+            currentCompletion?(.failure(error))
+            return
+        }
+        
+        topViewController.present(documentPicker, animated: true)
+    }
+    
+    private func getTopViewController() -> UIViewController? {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else { return nil }
+        
+        var topController = window.rootViewController
+        while let presentedController = topController?.presentedViewController {
+            topController = presentedController
+        }
+        return topController
+    }
+    
+    private func stopAccessingSecurityScopedResources() {
+        for url in securityScopedURLs {
+            url.stopAccessingSecurityScopedResource()
+        }
+        securityScopedURLs.removeAll()
+    }
+    
+    private func cleanup() {
+        currentCompletion = nil
+        currentDocumentPicker = nil
+    }
+    
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+        var accessibleURLs: [URL] = []
+        
+        for url in urls {
+            if url.startAccessingSecurityScopedResource() {
+                securityScopedURLs.append(url)
+                accessibleURLs.append(url)
+            } else {
+                accessibleURLs.append(url)
+            }
+        }
+        
+        currentCompletion?(.success(accessibleURLs))
+        cleanup()
+    }
+    
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        let error = NSError(
+            domain: "FileImporterManager",
+            code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "User cancelled the document picker."]
+        )
+        currentCompletion?(.failure(error))
+        cleanup()
+    }
+}
+
+extension FileImporterManager {
+    
+    func importSingleFile(completion: @escaping (Result<URL, Error>) -> Void) {
+        importFiles(types: [.item], allowMultiple: false) { result in
+            switch result {
+            case .success(let urls):
+                if let firstURL = urls.first {
+                    completion(.success(firstURL))
+                } else {
+                    completion(.failure(NSError(domain: "FileImporterManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "No file selected."])))
+                }
+            case .failure(let error):
+                completion(.failure(error))
+            }
         }
     }
-}
-
-extension Notification.Name {
-    static let importFiles = Notification.Name("importFiles")
-}
-
-struct FileImporterView: ViewModifier {
-    @State private var isImporterPresented: [String: Bool] = [:]
-    @State private var activeImporters: [String: ImporterConfig] = [:]
     
-    struct ImporterConfig {
-        let types: [UTType]
-        let allowMultiple: Bool
-        let completion: (Result<[URL], Error>) -> Void
+    func importMultipleFiles(completion: @escaping (Result<[URL], Error>) -> Void) {
+        importFiles(types: [.item], allowMultiple: true, completion: completion)
     }
     
-    func body(content: Content) -> some View {
-        content
-            .background(
-                ForEach(Array(activeImporters.keys), id: \.self) { id in
-                    if let config = activeImporters[id] {
-                        FileImporterWrapper(
-                            isPresented: Binding(
-                                get: { isImporterPresented[id] ?? false },
-                                set: { isImporterPresented[id] = $0 }
-                            ),
-                            id: id,
-                            config: config,
-                            onCompletion: { success in
-                                if success {
-                                    DispatchQueue.main.async {
-                                        activeImporters.removeValue(forKey: id)
-                                    }
-                                }
-                            }
-                        )
-                    }
-                }
-            )
-            .onReceive(NotificationCenter.default.publisher(for: .importFiles)) { notification in
-                guard let userInfo = notification.userInfo,
-                      let id = userInfo["id"] as? String,
-                      let types = userInfo["types"] as? [UTType],
-                      let allowMultiple = userInfo["allowMultiple"] as? Bool,
-                      let completion = userInfo["completion"] as? ((Result<[URL], Error>) -> Void) else {
-                    return
-                }
-                
-                let config = ImporterConfig(
-                    types: types,
-                    allowMultiple: allowMultiple,
-                    completion: completion
-                )
-                
-                activeImporters[id] = config
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isImporterPresented[id] = true
-                }
-            }
+    func importImages(allowMultiple: Bool = false, completion: @escaping (Result<[URL], Error>) -> Void) {
+        importFiles(types: [.image], allowMultiple: allowMultiple, completion: completion)
     }
-}
-
-struct FileImporterWrapper: View {
-    @Binding var isPresented: Bool
-    let id: String
-    let config: FileImporterView.ImporterConfig
-    let onCompletion: (Bool) -> Void
     
-    var body: some View {
-        Text("wow")
-            .hidden()
-            .fileImporter(
-                isPresented: $isPresented,
-                allowedContentTypes: config.types,
-                allowsMultipleSelection: config.allowMultiple
-            ) { result in
-                switch result {
-                case .success(let urls):
-                    config.completion(.success(urls))
-                case .failure(let error):
-                    config.completion(.failure(error))
-                }
-                onCompletion(true)
-            }
-    }
-}
-
-extension View {
-    func withFileImporter() -> some View {
-        self.modifier(FileImporterView())
+    func importDocuments(allowMultiple: Bool = false, completion: @escaping (Result<[URL], Error>) -> Void) {
+        let documentTypes: [UTType] = [.pdf, .plainText, .rtf, .html, .xml, .json]
+        importFiles(types: documentTypes, allowMultiple: allowMultiple, completion: completion)
     }
 }

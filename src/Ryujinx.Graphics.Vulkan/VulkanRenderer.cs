@@ -405,7 +405,7 @@ namespace Ryujinx.Graphics.Vulkan
             bool isDynamicStateSupported = OperatingSystem.IsIOSVersionAtLeast(17) && _physicalDevice.IsDeviceExtensionPresent(ExtExtendedDynamicState.ExtensionName);
 
             Capabilities = new HardwareCapabilities(
-                _physicalDevice.IsDeviceExtensionPresent("VK_EXT_index_type_uint8"),
+                _physicalDevice.IsDeviceExtensionPresent("VK_EXT_index_type_uint8") && !IsMoltenVk,
                 supportsCustomBorderColor,
                 supportsBlendOperationAdvanced,
                 propertiesBlendOperationAdvanced.AdvancedBlendCorrelatedOverlap,
@@ -422,8 +422,8 @@ namespace Ryujinx.Graphics.Vulkan
                 isDynamicStateSupported,
                 features2.Features.MultiViewport, // && !IsMoltenVk, // Workaround for AMD on MoltenVK issue
                 featuresRobustness2.NullDescriptor && !IsMoltenVk,
-                supportsPushDescriptors && !IsMoltenVk,
-                propertiesPushDescriptor.MaxPushDescriptors,
+                supportsPushDescriptors,
+                IsMoltenVk ? 16 : propertiesPushDescriptor.MaxPushDescriptors, 
                 featuresPrimitiveTopologyListRestart.PrimitiveTopologyListRestart,
                 featuresPrimitiveTopologyListRestart.PrimitiveTopologyPatchListRestart,
                 supportsTransformFeedback,
@@ -720,7 +720,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             SystemMemoryType memoryType;
 
-            if (IsSharedMemory)
+            if (IsSharedMemory && !IsMoltenVk)
             {
                 memoryType = SystemMemoryType.UnifiedMemory;
             }

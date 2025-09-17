@@ -7,10 +7,29 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import Combine
 
 extension UTType {
     static let nsp = UTType(exportedAs: "com.nintendo.switch-package")
     static let xci = UTType(exportedAs: "com.nintendo.switch-cartridge")
+}
+
+class PerGameSettingsViewHandler: ObservableObject {
+    private init() {}
+    static var shared = PerGameSettingsViewHandler()
+    
+    @Published var gamePerGameSettings: Game?
+    
+    var isShowingPerGameSettings: Bool {
+        get {
+            return self.gamePerGameSettings != nil
+        }
+        set {
+            if !newValue {
+                self.gamePerGameSettings = nil
+            }
+        }
+    }
 }
 
 struct GameLibraryView: View {
@@ -26,15 +45,7 @@ struct GameLibraryView: View {
     @State var startgame = false
     @State var isSelectingGameFile = false
     @State var isViewingGameInfo: Bool = false
-    @State var gamePerGameSettings: Game?
     @State var gameController: Game?
-    var isShowingPerGameSettings: Binding<Bool> {
-        Binding<Bool> {
-            gamePerGameSettings != nil
-        } set: { value in
-            !value ? gamePerGameSettings = nil : ()
-        }
-    }
     
     var isShowingGameController: Binding<Bool> {
         Binding<Bool> {
@@ -49,6 +60,8 @@ struct GameLibraryView: View {
     @State var gameInfo: Game?
     @State var gameRequirements: [GameRequirements] = []
     @State private var showingOptions = false
+    @State private var showingAccounts = false
+    @StateObject private var perGameSettingsHandler = PerGameSettingsViewHandler.shared
     
     var games: Binding<[Game]> {
         Binding(
@@ -157,6 +170,17 @@ struct GameLibraryView: View {
                         } label: {
                             Label("Show MeloNX Folder", systemImage: "folder")
                         }
+                        
+                        Divider()
+                        
+                        Button {
+                            showingAccounts = true
+                            
+                    
+                        } label: {
+                            Label("Profile Manager", systemImage: "person.2")
+                        }
+                        
                     } label: {
                         Label("Options", systemImage: "ellipsis.circle")
                             .labelStyle(.iconOnly)
@@ -218,11 +242,16 @@ struct GameLibraryView: View {
             .sheet(isPresented: $isSelectingGameDLC) {
                 DLCManagerSheet(game: $gameInfo)
             }
-            .sheet(isPresented: isShowingPerGameSettings) {
-                PerGameSettingsView(titleId: gamePerGameSettings!.titleId)
+            .popoverUIKit(isPresented: $perGameSettingsHandler.isShowingPerGameSettings) {
+                if let gamePerGameSettings = perGameSettingsHandler.gamePerGameSettings {
+                    PerGameSettingsView(titleId: gamePerGameSettings.titleId)
+                }
             }
             .fullScreenCover(isPresented: isShowingGameController) {
                 ControllerView(isEditing: isShowingGameController, gameId: gameController?.titleId)
+            }
+            .sheet(isPresented: $showingAccounts) {
+                AccountManagerView()
             }
             .sheet(isPresented: Binding(
                 get: { isViewingGameInfo && gameInfo != nil },
@@ -295,8 +324,7 @@ struct GameLibraryView: View {
                                     isSelectingGameDLC: $isSelectingGameDLC,
                                     gameRequirements: $gameRequirements,
                                     gameInfo: $gameInfo,
-                                    isShowingGameController: $gameController,
-                                    perGameSettings: $gamePerGameSettings
+                                    isShowingGameController: $gameController
                                 )
                                 .padding(.horizontal)
                                 .padding(.vertical, 8)
@@ -314,8 +342,7 @@ struct GameLibraryView: View {
                             isSelectingGameDLC: $isSelectingGameDLC,
                             gameRequirements: $gameRequirements,
                             gameInfo: $gameInfo,
-                            isShowingGameController: $gameController,
-                            perGameSettings: $gamePerGameSettings
+                            isShowingGameController: $gameController
                         )
                         .padding(.horizontal)
                         .padding(.vertical, 8)
@@ -511,7 +538,7 @@ struct GameLibraryView: View {
                 }
                 
                 Button {
-                    gamePerGameSettings = game
+                    perGameSettingsHandler.gamePerGameSettings = game
                 } label: {
                     Label("\(game.titleName) Settings", systemImage: "gear")
                 }
@@ -824,7 +851,7 @@ struct GameListRow: View {
     @Binding var gameInfo: Game?
     @Binding var isShowingGameController: Game?
     @StateObject private var settingsManager = PerGameSettingsManager.shared
-    @Binding var perGameSettings: Game?
+    @StateObject private var perGamesSettingsHandler = PerGameSettingsViewHandler.shared
     @State var gametoDelete: Game?
     @State var showGameDeleteConfirmation: Bool = false
     @Environment(\.colorScheme) var colorScheme
@@ -961,7 +988,7 @@ struct GameListRow: View {
                     }
                     
                     Button {
-                        perGameSettings = game
+                        perGamesSettingsHandler.gamePerGameSettings = game
                     } label: {
                         Label("\(game.titleName) Settings", systemImage: "gear")
                     }
@@ -1260,7 +1287,7 @@ func pullGameCompatibility(completion: @escaping (Result<[GameRequirements], Err
         return
     }
 
-    guard let url = URL(string: "https://melonx.net/api/game_entries") else {
+    guard let url = URL(string: "https://melonx.org/api/game_entries") else {
         completion(.failure(NSError(domain: "Invalid URL", code: 0, userInfo: nil)))
         return
     }

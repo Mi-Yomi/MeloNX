@@ -13,6 +13,7 @@ struct EmulationView: View {
     @AppStorage("isVirtualController") var isVCA: Bool = true
     @AppStorage("showScreenShotButton") var ssb: Bool = false
     @AppStorage("showlogsgame") var showlogsgame: Bool = false
+    @AppStorage("showBatteryPercentage") var showBatteryPercentage: Bool = false
     
     @AppStorage("On-ScreenControllerOpacity") var controllerOpacity: Double = 1.0
     
@@ -28,6 +29,8 @@ struct EmulationView: View {
     @AppStorage("location-enabled") var locationenabled: Bool = false
     @FocusState private var isFocused: Bool
     @ObservedObject var ryujijnx = Ryujinx.shared
+    @State var rotationlock = false
+    @State private var batteryLevel: Int = Int(UIDevice.current.batteryLevel * 100)
     
     var body: some View {
         ZStack {
@@ -53,6 +56,7 @@ struct EmulationView: View {
             
             if isVCA {
                 ControllerView(isEditing: .constant(false), gameId: startgame?.titleId) // Virtual Controller
+                    .contentShape(Rectangle())
                     .opacity(controllerOpacity)
                     .allowsHitTesting(true)
             }
@@ -92,6 +96,26 @@ struct EmulationView: View {
                                 }
                             }
                             
+                            //  OrientationManager.lockOrientation(.landscape, rotateTo: .landscapeRight)
+                            
+                            if UIDevice.current.userInterfaceIdiom == .phone {
+                                Button {
+                                    // UIDevice.current.orientation
+                                    rotationlock.toggle()
+                                    if rotationlock {
+                                        OrientationManager.lockCurrentOrientation(UIDevice.current.orientation)
+                                    } else {
+                                        OrientationManager.lockOrientation(.all, rotateTo: UIDevice.current.orientation)
+                                    }
+                                } label: {
+                                    Label {
+                                        Text("Rotation Lock")
+                                    } icon: {
+                                        Image(systemName: rotationlock ? "lock" : "lock.open")
+                                    }
+                                }
+                            }
+                            
                             Button(role: .destructive) {
                                 startgame = nil
                                 stop_emulation()
@@ -114,6 +138,16 @@ struct EmulationView: View {
                     
                     Spacer()
                     
+                    if showBatteryPercentage {
+                        Image(systemName: "battery.0percent")
+                            .resizable()
+                            .frame(maxWidth: 70, maxHeight: 35)
+                            .overlay {
+                                Text("\(batteryLevel)%")
+                                    .font(.caption2)
+                            }
+                            .opacity(controllerOpacity)
+                    }
                     
                     if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
                         PerformanceOverlayView()
@@ -126,7 +160,7 @@ struct EmulationView: View {
                 Spacer()
             }
             
-            if showlogsgame, get_current_fps() != 0 {
+            if showlogsgame, !Ryujinx.shared.showLoading {
                 VStack {
                     LogFileView(isfps: false)
                     
@@ -147,6 +181,17 @@ struct EmulationView: View {
                 }
             }
             
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            batteryLevel = Int(UIDevice.current.batteryLevel * 100)
+            
+            NotificationCenter.default.addObserver(
+                forName: UIDevice.batteryLevelDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                batteryLevel = Int(UIDevice.current.batteryLevel * 100)
+            }
+            
             RegisterCallback("exit-emulation") { cool in
                 DispatchQueue.main.async {
                     print(cool)
@@ -156,6 +201,7 @@ struct EmulationView: View {
                 }
             }
         }
+        .statusBar(hidden: true)
         .onKeyPress()
         .focused($isFocused)
         .onChange(of: scenePhase) { newPhase in

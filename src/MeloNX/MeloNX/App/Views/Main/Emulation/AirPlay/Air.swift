@@ -89,6 +89,15 @@ public class Air {
             }
             self.airWindow?.rootViewController = viewController
             self.airWindow?.windowScene = airWindowScene
+            
+            if let hostingController = viewController as? UIHostingController<AnyView> {
+                let traitCollection = UITraitCollection(traitsFrom: [
+                    UITraitCollection(userInterfaceIdiom: .pad),
+                    airWindowScene.traitCollection
+                ])
+                viewController.setOverrideTraitCollection(traitCollection, forChild: viewController)
+            }
+            
             self.airWindow?.isHidden = false
             // print("AirKit - Add Screen - Done")
             completion(true)
@@ -109,10 +118,15 @@ public class Air {
             }
         }
         guard let windowScene: UIWindowScene = matchingWindowScene else {
-            DispatchQueue.main.async {
-                self.findWindowScene(for: screen, shouldRecurse: false) { windowScene in
-                    completion(windowScene)
+            // Only recurse once to avoid infinite loops
+            if shouldRecurse {
+                DispatchQueue.main.async {
+                    self.findWindowScene(for: screen, shouldRecurse: false) { windowScene in
+                        completion(windowScene)
+                    }
                 }
+            } else {
+                completion(nil)
             }
             return
         }
