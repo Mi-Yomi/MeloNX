@@ -131,7 +131,7 @@ namespace Ryujinx.Cpu.LightningJit
         {
             if (!_disposed)
             {
-                if (_noWxCache == null || _dualMappedCache == null)
+                if (_noWxCache == null && _dualMappedCache == null)
                 {
                     if (_dispatchStub.IsValueCreated)
                     {

@@ -31,16 +31,9 @@ namespace Ryujinx.Graphics.Vulkan
             _gd = gd;
             _device = device;
 
-            // Calculate total number of individual descriptors
-            int totalDescriptors = 0;
-            for (int seg = 0; seg < segments.Length; seg++)
-            {
-                totalDescriptors += segments[seg].Count;
-            }
+            // Create a template from the set usages. Assumes the descriptor set is updated in segment order then binding order.
 
-            
-            DescriptorUpdateTemplateEntry* entries = stackalloc DescriptorUpdateTemplateEntry[totalDescriptors];
-            int entryIndex = 0;
+            DescriptorUpdateTemplateEntry* entries = stackalloc DescriptorUpdateTemplateEntry[segments.Length];
             nuint structureOffset = 0;
 
             for (int seg = 0; seg < segments.Length; seg++)
@@ -49,36 +42,45 @@ namespace Ryujinx.Graphics.Vulkan
 
                 int binding = segment.Binding;
                 int count = segment.Count;
-                DescriptorType descriptorType = segment.Type.Convert();
 
-                // Create separate entries for each descriptor in this segment
-                for (int i = 0; i < count; i++)
+                if (IsBufferType(segment.Type))
                 {
-                    nuint stride;
-                    if (IsBufferType(segment.Type))
+                    entries[seg] = new DescriptorUpdateTemplateEntry()
                     {
-                        stride = (nuint)Unsafe.SizeOf<DescriptorBufferInfo>();
-                    }
-                    else if (IsBufferTextureType(segment.Type))
-                    {
-                        stride = (nuint)Unsafe.SizeOf<BufferView>();
-                    }
-                    else
-                    {
-                        stride = (nuint)Unsafe.SizeOf<DescriptorImageInfo>();
-                    }
-
-                    entries[entryIndex] = new DescriptorUpdateTemplateEntry()
-                    {
-                        DescriptorType = descriptorType,
-                        DstBinding = (uint)(binding + i),
-                        DescriptorCount = 1, // Always 1 descriptor per entry
+                        DescriptorType = segment.Type.Convert(),
+                        DstBinding = (uint)binding,
+                        DescriptorCount = (uint)count,
                         Offset = structureOffset,
-                        Stride = stride
+                        Stride = (nuint)Unsafe.SizeOf<DescriptorBufferInfo>()
                     };
 
-                    structureOffset += stride;
-                    entryIndex++;
+                    structureOffset += (nuint)(Unsafe.SizeOf<DescriptorBufferInfo>() * count);
+                }
+                else if (IsBufferTextureType(segment.Type))
+                {
+                    entries[seg] = new DescriptorUpdateTemplateEntry()
+                    {
+                        DescriptorType = segment.Type.Convert(),
+                        DstBinding = (uint)binding,
+                        DescriptorCount = (uint)count,
+                        Offset = structureOffset,
+                        Stride = (nuint)Unsafe.SizeOf<BufferView>()
+                    };
+
+                    structureOffset += (nuint)(Unsafe.SizeOf<BufferView>() * count);
+                }
+                else
+                {
+                    entries[seg] = new DescriptorUpdateTemplateEntry()
+                    {
+                        DescriptorType = segment.Type.Convert(),
+                        DstBinding = (uint)binding,
+                        DescriptorCount = (uint)count,
+                        Offset = structureOffset,
+                        Stride = (nuint)Unsafe.SizeOf<DescriptorImageInfo>()
+                    };
+
+                    structureOffset += (nuint)(Unsafe.SizeOf<DescriptorImageInfo>() * count);
                 }
             }
 
@@ -87,7 +89,7 @@ namespace Ryujinx.Graphics.Vulkan
             var info = new DescriptorUpdateTemplateCreateInfo()
             {
                 SType = StructureType.DescriptorUpdateTemplateCreateInfo,
-                DescriptorUpdateEntryCount = (uint)totalDescriptors,
+                DescriptorUpdateEntryCount = (uint)segments.Length,
                 PDescriptorUpdateEntries = entries,
 
                 TemplateType = DescriptorUpdateTemplateType.DescriptorSet,
@@ -122,6 +124,23 @@ namespace Ryujinx.Graphics.Vulkan
             int entry = 0;
             nuint structureOffset = 0;
 
+            void AddBinding(int binding, int count)
+            {
+                entries[entry++] = new DescriptorUpdateTemplateEntry()
+                {
+                    DescriptorType = DescriptorType.UniformBuffer,
+                    DstBinding = (uint)binding,
+                    DescriptorCount = (uint)count,
+                    Offset = structureOffset,
+                    Stride = (nuint)Unsafe.SizeOf<DescriptorBufferInfo>()
+                };
+
+                structureOffset += (nuint)(Unsafe.SizeOf<DescriptorBufferInfo>() * count);
+            }
+
+            int startBinding = 0;
+            int bindingCount = 0;
+
             foreach (ResourceDescriptor descriptor in descriptors.Descriptors)
             {
                 for (int i = 0; i < descriptor.Count; i++)
@@ -130,19 +149,26 @@ namespace Ryujinx.Graphics.Vulkan
 
                     if ((updateMask & (1L << binding)) != 0)
                     {
-                        entries[entry] = new DescriptorUpdateTemplateEntry()
+                        if (bindingCount > 0 && (RenderdocPushCountBug || startBinding + bindingCount != binding))
                         {
-                            DescriptorType = DescriptorType.UniformBuffer,
-                            DstBinding = (uint)binding,
-                            DescriptorCount = 1, // Always 1 descriptor per entry
-                            Offset = structureOffset,
-                            Stride = (nuint)Unsafe.SizeOf<DescriptorBufferInfo>()
-                        };
+                            AddBinding(startBinding, bindingCount);
 
-                        structureOffset += (nuint)Unsafe.SizeOf<DescriptorBufferInfo>();
-                        entry++;
+                            bindingCount = 0;
+                        }
+
+                        if (bindingCount == 0)
+                        {
+                            startBinding = binding;
+                        }
+
+                        bindingCount++;
                     }
                 }
+            }
+
+            if (bindingCount > 0)
+            {
+                AddBinding(startBinding, bindingCount);
             }
 
             Size = (int)structureOffset;

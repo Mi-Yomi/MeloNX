@@ -59,6 +59,7 @@ namespace Ryujinx.Common.Configuration.Hid
             {
                 InputBackendType.WindowKeyboard => JsonSerializer.Deserialize(ref reader, _serializerContext.StandardKeyboardInputConfig),
                 InputBackendType.GamepadSDL2 => JsonSerializer.Deserialize(ref reader, _serializerContext.StandardControllerInputConfig),
+                InputBackendType.GamepadiOS => JsonSerializer.Deserialize(ref reader, _serializerContext.StandardControllerInputConfig),
                 _ => throw new InvalidOperationException($"Unknown backend type {backendType}"),
             };
         }
@@ -71,6 +72,9 @@ namespace Ryujinx.Common.Configuration.Hid
                     JsonSerializer.Serialize(writer, value as StandardKeyboardInputConfig, _serializerContext.StandardKeyboardInputConfig);
                     break;
                 case InputBackendType.GamepadSDL2:
+                    JsonSerializer.Serialize(writer, value as StandardControllerInputConfig, _serializerContext.StandardControllerInputConfig);
+                    break;
+                case InputBackendType.GamepadiOS:
                     JsonSerializer.Serialize(writer, value as StandardControllerInputConfig, _serializerContext.StandardControllerInputConfig);
                     break;
                 default:

@@ -157,6 +157,7 @@ struct PerGameSettingsView: View {
     enum PerSettingsCategory: String, CaseIterable, Identifiable {
         case graphics = "Graphics"
         case system = "System"
+        case network = "Network"
         case advanced = "Advanced"
         
         var id: String { self.rawValue }
@@ -165,6 +166,7 @@ struct PerGameSettingsView: View {
             switch self {
             case .graphics: return "paintbrush.fill"
             case .system: return "gearshape.fill"
+            case .network: return "network"
             case .advanced: return "terminal.fill"
             }
         }
@@ -204,6 +206,9 @@ struct PerGameSettingsView: View {
                                     .padding(.top)
                             case .system:
                                 systemSettings
+                                    .padding(.top)
+                            case .network:
+                                miscSettings
                                     .padding(.top)
                             case .advanced:
                                 advancedSettings
@@ -589,15 +594,9 @@ struct PerGameSettingsView: View {
     // MARK: - Miscellaneous Settings
     
     private var miscSettings: some View {
-        SettingsSection(title: "Miscellaneous Options") {
+        SettingsSection(title: "Network Options") {
             SettingsCard {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Network Configuration")
-                        .font(.headline)
-                        .foregroundColor(.primary)
-                    
-                    Divider()
-                    
                     SettingsToggle(isOn: configBinding(\.enableInternet), icon: "wifi.router.fill", label: "Guest Internet Access / LAN Mode")
                     
                     Divider()

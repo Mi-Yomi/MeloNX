@@ -11,7 +11,7 @@ namespace Ryujinx.Graphics.Vulkan
     {
         public static unsafe DisposableRenderPass ToRenderPass(this ProgramPipelineState state, VulkanRenderer gd, Device device)
         {
-            int MaxAttachments = Constants.MaxRenderTargets + 1;
+            const int MaxAttachments = Constants.MaxRenderTargets + 1;
 
             AttachmentDescription[] attachmentDescs = null;
 
@@ -185,8 +185,8 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (gd.Capabilities.SupportsMultiView)
             {
-                pipeline.ScissorsCount = (uint)Constants.MaxViewports;
-                pipeline.ViewportsCount = (uint)Constants.MaxViewports;
+                pipeline.ScissorsCount = Constants.MaxViewports;
+                pipeline.ViewportsCount = Constants.MaxViewports;
             }
             else
             {

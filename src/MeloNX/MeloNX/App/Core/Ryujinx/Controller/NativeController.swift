@@ -18,6 +18,8 @@ class NativeController: Hashable, BaseController {
     private var controllerHaptics: CHHapticEngine?
     private var rumbleController: RumbleController?
     
+    private var cachedJoystick: OpaquePointer?
+    
     var uniqueID: String? { nativeController.vendorName }
 
     public var controllername: String { "GC - \(nativeController.vendorName ?? "Unknown")" }
@@ -208,39 +210,48 @@ class NativeController: Hashable, BaseController {
 
     func setupButtonChangeListener(_ button: GCControllerButtonInput, for key: VirtualControllerButton) {
         button.valueChangedHandler = { [unowned self] _, _, pressed in
-            setButtonState(pressed ? 1 : 0, for: key)
+            DispatchQueue.global(qos: .userInteractive).async { [unowned self] in
+                setButtonState(pressed ? 1 : 0, for: key)
+            }
         }
     }
 
     func setupStickChangeListener(_ button: GCControllerDirectionPad, for key: ThumbstickType) {
         button.valueChangedHandler = { [unowned self] _, xValue, yValue in
-            let scaledX = Sint16(xValue * 32767.0)
-            let scaledY = -Sint16(yValue * 32767.0)
-
-            switch key {
-            case .left:
-                updateAxisValue(value: scaledX, forAxis: SDL_GameControllerAxis(SDL_CONTROLLER_AXIS_LEFTX.rawValue))
-                updateAxisValue(value: scaledY, forAxis: SDL_GameControllerAxis(SDL_CONTROLLER_AXIS_LEFTY.rawValue))
-            case .right:
-                updateAxisValue(value: scaledX, forAxis: SDL_GameControllerAxis(SDL_CONTROLLER_AXIS_RIGHTX.rawValue))
-                updateAxisValue(value: scaledY, forAxis: SDL_GameControllerAxis(SDL_CONTROLLER_AXIS_RIGHTY.rawValue))
+            DispatchQueue.global(qos: .userInteractive).async { [unowned self] in
+                let scaledX = Sint16(xValue * 32767.0)
+                let scaledY = -Sint16(yValue * 32767.0)
+                
+                switch key {
+                case .left:
+                    updateAxisValue(value: scaledX, forAxis: SDL_GameControllerAxis(SDL_CONTROLLER_AXIS_LEFTX.rawValue))
+                    updateAxisValue(value: scaledY, forAxis: SDL_GameControllerAxis(SDL_CONTROLLER_AXIS_LEFTY.rawValue))
+                case .right:
+                    updateAxisValue(value: scaledX, forAxis: SDL_GameControllerAxis(SDL_CONTROLLER_AXIS_RIGHTX.rawValue))
+                    updateAxisValue(value: scaledY, forAxis: SDL_GameControllerAxis(SDL_CONTROLLER_AXIS_RIGHTY.rawValue))
+                }
             }
         }
     }
 
     func setupTriggerChangeListener(_ button: GCControllerButtonInput, for key: ThumbstickType) {
         button.valueChangedHandler = { [unowned self] _, value, pressed in
-//            // print("Value: \(value), Is pressed: \(pressed)")
-            let axis: SDL_GameControllerAxis = (key == .left) ? SDL_CONTROLLER_AXIS_TRIGGERLEFT : SDL_CONTROLLER_AXIS_TRIGGERRIGHT
-            let scaledValue = Sint16(value * 32767.0)
-            updateAxisValue(value: scaledValue, forAxis: axis)
+            DispatchQueue.global(qos: .userInteractive).async { [unowned self] in
+                //            // print("Value: \(value), Is pressed: \(pressed)")
+                let axis: SDL_GameControllerAxis = (key == .left) ? SDL_CONTROLLER_AXIS_TRIGGERLEFT : SDL_CONTROLLER_AXIS_TRIGGERRIGHT
+                let scaledValue = Sint16(value * 32767.0)
+                updateAxisValue(value: scaledValue, forAxis: axis)
+            }
         }
     }
 
     func updateAxisValue(value: Sint16, forAxis axis: SDL_GameControllerAxis) {
         guard controller != nil else { return }
-        let joystick = SDL_JoystickFromInstanceID(instanceID)
-        SDL_JoystickSetVirtualAxis(joystick, axis.rawValue, value)
+        
+        if cachedJoystick == nil {
+            cachedJoystick = SDL_JoystickFromInstanceID(instanceID)
+        }
+        SDL_JoystickSetVirtualAxis(cachedJoystick, axis.rawValue, value)
     }
 
     func thumbstickMoved(_ stick: ThumbstickType, x: Double, y: Double) {
@@ -266,8 +277,10 @@ class NativeController: Hashable, BaseController {
             let value: Int = (state == 1) ? 32767 : 0
             updateAxisValue(value: Sint16(value), forAxis: axis)
         } else {
-            let joystick = SDL_JoystickFromInstanceID(instanceID)
-            SDL_JoystickSetVirtualButton(joystick, Int32(button.rawValue), state)
+            if cachedJoystick == nil {
+                cachedJoystick = SDL_JoystickFromInstanceID(instanceID)
+            }
+            SDL_JoystickSetVirtualButton(cachedJoystick, Int32(button.rawValue), state)
         }
     }
 

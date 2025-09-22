@@ -1390,6 +1390,13 @@ namespace Ryujinx.Headless.SDL2
                 Logger.Info?.Print(LogClass.Application, $"Increased Memory Limit: {option.MemoryEnt}");
             }
 
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+            {
+                var ex = e.ExceptionObject as Exception;
+                Logger.Info?.Print(LogClass.Application, "Unhandled exception: " + ex?.ToString());
+            };
+
+
             // Setup graphics configuration
             GraphicsConfig.EnableShaderCache = !option.DisableShaderCache;
             GraphicsConfig.EnableTextureRecompression = option.EnableTextureRecompression;

@@ -94,14 +94,12 @@ namespace Ryujinx.Graphics.Vulkan
         /// <inheritdoc/>
         public void SetData(MemoryOwner<byte> data, int layer, int level)
         {
-            data.Dispose();
             throw new NotSupportedException();
         }
 
         /// <inheritdoc/>
         public void SetData(MemoryOwner<byte> data, int layer, int level, Rectangle<int> region)
         {
-            data.Dispose();
             throw new NotSupportedException();
         }
 

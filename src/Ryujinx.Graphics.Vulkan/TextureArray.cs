@@ -159,8 +159,8 @@ namespace Ryujinx.Graphics.Vulkan
                 }
 
                 texture.ImageLayout = ImageLayout.General;
-                texture.ImageView = refs.View?.Get(cbs).Value ?? dummyTexture.GetImageView().Get(cbs).Value;
-                texture.Sampler = refs.Sampler?.Get(cbs).Value ?? dummySampler.GetSampler().Get(cbs).Value;
+                texture.ImageView = refs.View?.Get(cbs).Value ?? default;
+                texture.Sampler = refs.Sampler?.Get(cbs).Value ?? default;
 
                 if (texture.ImageView.Handle == 0)
                 {
@@ -197,9 +197,10 @@ namespace Ryujinx.Graphics.Vulkan
             TextureView dummyTexture,
             SamplerHolder dummySampler)
         {
-            if (TryGetCachedDescriptorSets(cbs, program, setIndex, out DescriptorSet[] sets, out DescriptorSetCollection dsc))
+            if (TryGetCachedDescriptorSets(cbs, program, setIndex, out DescriptorSet[] sets))
             {
-                // Still ensure resources are referenced for this command buffer.
+                // We still need to ensure the current command buffer holds a reference to all used textures.
+
                 if (!_isBuffer)
                 {
                     GetImageInfos(_gd, cbs, dummyTexture, dummySampler);
@@ -212,25 +213,22 @@ namespace Ryujinx.Graphics.Vulkan
                 return sets;
             }
 
+            DescriptorSetTemplate template = program.Templates[setIndex];
+
+            DescriptorSetTemplateWriter tu = templateUpdater.Begin(template);
+
             if (!_isBuffer)
             {
-                var imageInfos = GetImageInfos(_gd, cbs, dummyTexture, dummySampler);
-                if (imageInfos != null && imageInfos.Length > 0)
-                {
-                    dsc.UpdateImages(0, 0, imageInfos, DescriptorType.CombinedImageSampler);
-                }
+                tu.Push(GetImageInfos(_gd, cbs, dummyTexture, dummySampler));
             }
             else
             {
-                var bufferViews = GetBufferViews(cbs);
-                if (bufferViews != null && bufferViews.Length > 0)
-                {
-                    dsc.UpdateBufferImages(0, 0, bufferViews, DescriptorType.UniformTexelBuffer);
-                }
+                tu.Push(GetBufferViews(cbs));
             }
+
+            templateUpdater.Commit(_gd, device, sets[0]);
 
             return sets;
         }
     }
-
 }

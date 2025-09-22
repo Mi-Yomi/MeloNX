@@ -728,7 +728,8 @@ class Ryujinx : ObservableObject {
             config.inputids.prefix(8).enumerated().forEach { index, inputId in
                 // controllerType
                 if let controller = controllerType[inputId], controller == .handheld {
-                    args.append(contentsOf: ["\(index == 0 ? "--input-id-handheld" : "--input-id-\(index + 1)")", inputId])
+                    args.append(contentsOf: ["--input-id-handheld", inputId])
+                    // args.append(contentsOf: ["\(index == 0 ? "--input-id-handheld" : "--input-id-\(index + 1)")", inputId])
                 } else {
                     args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
                 }

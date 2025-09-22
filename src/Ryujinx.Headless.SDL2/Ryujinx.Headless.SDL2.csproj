@@ -18,8 +18,8 @@
   </PropertyGroup>
 
 <PropertyGroup>
-  <StripSymbols>false</StripSymbols>
-  <IlcGenerateDebugInfo>true</IlcGenerateDebugInfo>
+  <!-- <StripSymbols>false</StripSymbols>  -->
+  <!-- <IlcGenerateDebugInfo>true</IlcGenerateDebugInfo> -->
 </PropertyGroup>
   <!-- iOS linking stuff from godot -->
 

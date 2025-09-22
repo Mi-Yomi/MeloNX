@@ -3,10 +3,10 @@ using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Shader;
 using Silk.NET.Vulkan;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Buffer = Silk.NET.Vulkan.Buffer;
 using CompareOp = Ryujinx.Graphics.GAL.CompareOp;
 using Format = Ryujinx.Graphics.GAL.Format;
 using SamplerCreateInfo = Ryujinx.Graphics.GAL.SamplerCreateInfo;
@@ -141,11 +141,11 @@ namespace Ryujinx.Graphics.Vulkan
             _bufferTextureRefs = new TextureBuffer[Constants.MaxTextureBindings * 2];
             _bufferImageRefs = new TextureBuffer[Constants.MaxImageBindings * 2];
 
-            _textureArrayRefs = [];
-            _imageArrayRefs = [];
+            _textureArrayRefs = Array.Empty<ArrayRef<TextureArray>>();
+            _imageArrayRefs = Array.Empty<ArrayRef<ImageArray>>();
 
-            _textureArrayExtraRefs = [];
-            _imageArrayExtraRefs = [];
+            _textureArrayExtraRefs = Array.Empty<ArrayRef<TextureArray>>();
+            _imageArrayExtraRefs = Array.Empty<ArrayRef<ImageArray>>();
 
             _uniformBuffers = new DescriptorBufferInfo[Constants.MaxUniformBufferBindings];
             _storageBuffers = new DescriptorBufferInfo[Constants.MaxStorageBufferBindings];
@@ -156,7 +156,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             _uniformSetPd = new int[Constants.MaxUniformBufferBindings];
 
-            DescriptorImageInfo initialImageInfo = new()
+            var initialImageInfo = new DescriptorImageInfo
             {
                 ImageLayout = ImageLayout.General,
             };
@@ -217,7 +217,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (isMainPipeline)
             {
-                FeedbackLoopHazards = [];
+                FeedbackLoopHazards = new();
             }
         }
 
@@ -235,7 +235,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             // Check stage bindings
 
-            _uniformMirrored.Union(_uniformSet).SignalSet((binding, count) =>
+            _uniformMirrored.Union(_uniformSet).SignalSet((int binding, int count) =>
             {
                 for (int i = 0; i < count; i++)
                 {
@@ -257,7 +257,7 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             });
 
-            _storageMirrored.Union(_storageSet).SignalSet((binding, count) =>
+            _storageMirrored.Union(_storageSet).SignalSet((int binding, int count) =>
             {
                 for (int i = 0; i < count; i++)
                 {
@@ -301,13 +301,13 @@ namespace Ryujinx.Graphics.Vulkan
                     {
                         for (int i = 0; i < segment.Count; i++)
                         {
-                            ref TextureRef texture = ref _textureRefs[segment.Binding + i];
+                            ref var texture = ref _textureRefs[segment.Binding + i];
                             texture.View?.PrepareForUsage(cbs, texture.Stage.ConvertToPipelineStageFlags(), FeedbackLoopHazards);
                         }
                     }
                     else
                     {
-                        ref ArrayRef<TextureArray> arrayRef = ref _textureArrayRefs[segment.Binding];
+                        ref var arrayRef = ref _textureArrayRefs[segment.Binding];
                         PipelineStageFlags stageFlags = arrayRef.Stage.ConvertToPipelineStageFlags();
                         arrayRef.Array?.QueueWriteToReadBarriers(cbs, stageFlags);
                     }
@@ -322,13 +322,13 @@ namespace Ryujinx.Graphics.Vulkan
                     {
                         for (int i = 0; i < segment.Count; i++)
                         {
-                            ref ImageRef image = ref _imageRefs[segment.Binding + i];
+                            ref var image = ref _imageRefs[segment.Binding + i];
                             image.View?.PrepareForUsage(cbs, image.Stage.ConvertToPipelineStageFlags(), FeedbackLoopHazards);
                         }
                     }
                     else
                     {
-                        ref ArrayRef<ImageArray> arrayRef = ref _imageArrayRefs[segment.Binding];
+                        ref var arrayRef = ref _imageArrayRefs[segment.Binding];
                         PipelineStageFlags stageFlags = arrayRef.Stage.ConvertToPipelineStageFlags();
                         arrayRef.Array?.QueueWriteToReadBarriers(cbs, stageFlags);
                     }
@@ -337,7 +337,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             for (int setIndex = PipelineBase.DescriptorSetLayouts; setIndex < _program.BindingSegments.Length; setIndex++)
             {
-                ResourceBindingSegment[] bindingSegments = _program.BindingSegments[setIndex];
+                var bindingSegments = _program.BindingSegments[setIndex];
 
                 if (bindingSegments.Length == 0)
                 {
@@ -348,18 +348,18 @@ namespace Ryujinx.Graphics.Vulkan
 
                 if (segment.IsArray)
                 {
-                    if (segment.Type is ResourceType.Texture or
-                        ResourceType.Sampler or
-                        ResourceType.TextureAndSampler or
-                        ResourceType.BufferTexture)
+                    if (segment.Type == ResourceType.Texture ||
+                        segment.Type == ResourceType.Sampler ||
+                        segment.Type == ResourceType.TextureAndSampler ||
+                        segment.Type == ResourceType.BufferTexture)
                     {
-                        ref ArrayRef<TextureArray> arrayRef = ref _textureArrayExtraRefs[setIndex - PipelineBase.DescriptorSetLayouts];
+                        ref var arrayRef = ref _textureArrayExtraRefs[setIndex - PipelineBase.DescriptorSetLayouts];
                         PipelineStageFlags stageFlags = arrayRef.Stage.ConvertToPipelineStageFlags();
                         arrayRef.Array?.QueueWriteToReadBarriers(cbs, stageFlags);
                     }
-                    else if (segment.Type is ResourceType.Image or ResourceType.BufferImage)
+                    else if (segment.Type == ResourceType.Image || segment.Type == ResourceType.BufferImage)
                     {
-                        ref ArrayRef<ImageArray> arrayRef = ref _imageArrayExtraRefs[setIndex - PipelineBase.DescriptorSetLayouts];
+                        ref var arrayRef = ref _imageArrayExtraRefs[setIndex - PipelineBase.DescriptorSetLayouts];
                         PipelineStageFlags stageFlags = arrayRef.Stage.ConvertToPipelineStageFlags();
                         arrayRef.Array?.QueueWriteToReadBarriers(cbs, stageFlags);
                     }
@@ -424,8 +424,8 @@ namespace Ryujinx.Graphics.Vulkan
         {
             for (int i = 0; i < buffers.Length; i++)
             {
-                BufferAssignment assignment = buffers[i];
-                BufferRange buffer = assignment.Range;
+                var assignment = buffers[i];
+                var buffer = assignment.Range;
                 int index = assignment.Binding;
 
                 Auto<DisposableBuffer> vkBuffer = buffer.Handle == BufferHandle.Null
@@ -440,7 +440,7 @@ namespace Ryujinx.Graphics.Vulkan
                     Range = (ulong)buffer.Size,
                 };
 
-                BufferRef newRef = new(vkBuffer, ref buffer);
+                var newRef = new BufferRef(vkBuffer, ref buffer);
 
                 ref DescriptorBufferInfo currentInfo = ref _storageBuffers[index];
 
@@ -460,7 +460,7 @@ namespace Ryujinx.Graphics.Vulkan
         {
             for (int i = 0; i < buffers.Length; i++)
             {
-                Auto<DisposableBuffer> vkBuffer = buffers[i];
+                var vkBuffer = buffers[i];
                 int index = first + i;
 
                 ref BufferRef currentBufferRef = ref _storageBufferRefs[index];
@@ -633,8 +633,8 @@ namespace Ryujinx.Graphics.Vulkan
         {
             for (int i = 0; i < buffers.Length; i++)
             {
-                BufferAssignment assignment = buffers[i];
-                BufferRange buffer = assignment.Range;
+                var assignment = buffers[i];
+                var buffer = assignment.Range;
                 int index = assignment.Binding;
 
                 Auto<DisposableBuffer> vkBuffer = buffer.Handle == BufferHandle.Null
@@ -678,10 +678,8 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
-            ShaderCollection program = _program;
+            var program = _program;
 
-
-            // UpdateAndBindTexturesWithoutTemplate jas been renamed to UpdateAndBind and supports more then just textures.
             if (_dirty.HasFlag(DirtyFlags.Uniform))
             {
                 if (program.UsePushDescriptors)
@@ -690,14 +688,12 @@ namespace Ryujinx.Graphics.Vulkan
                 }
                 else
                 {
-                    try {
+                    try
+                    {
                         UpdateAndBind(cbs, program, PipelineBase.UniformSetIndex, pbp);
                     }
-                    catch (Exception e)
+                    catch
                     {
-                        // If binding fails, we can try to bind the uniform buffers without using the template.
-                        // This is a workaround for some games that use invalid bindings.
-
                         UpdateAndBind(cbs, PipelineBase.UniformSetIndex, pbp);
                     }
                 }
@@ -705,40 +701,34 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (_dirty.HasFlag(DirtyFlags.Storage))
             {
-                try {
+                try
+                {
                     UpdateAndBind(cbs, program, PipelineBase.StorageSetIndex, pbp);
                 }
-                catch (Exception e)
+                catch
                 {
-                    // If binding fails, we can try to bind the storage buffers without using the template.
-                    // This is a workaround for some games that use invalid bindings.
-
-                    UpdateAndBind(cbs, PipelineBase.StorageSetIndex, pbp);
+                    UpdateAndBind(cbs, PipelineBase.TextureSetIndex, pbp);
                 }
             }
 
             if (_dirty.HasFlag(DirtyFlags.Texture))
-            {
-                if (program.UpdateTexturesWithoutTemplate)
                 {
-                    UpdateAndBind(cbs, PipelineBase.TextureSetIndex, pbp);
-                }
-                else
-                {
-                    try
+                    if (program.UpdateTexturesWithoutTemplate)
                     {
-
-                        UpdateAndBind(cbs, program, PipelineBase.TextureSetIndex, pbp);
+                        UpdateAndBindTexturesWithoutTemplate(cbs, program, pbp);
                     }
-                    catch (Exception e)
+                    else
                     {
-                        // If binding fails, we can try to bind the textures without using the template.
-                        // This is a workaround for some games that use invalid bindings.
-
-                        UpdateAndBind(cbs, PipelineBase.TextureSetIndex, pbp);
+                        try
+                        {
+                            UpdateAndBind(cbs, program, PipelineBase.TextureSetIndex, pbp);
+                        }
+                        catch
+                        {
+                            UpdateAndBind(cbs, PipelineBase.TextureSetIndex, pbp);
+                        }
                     }
                 }
-            }
 
             if (_dirty.HasFlag(DirtyFlags.Image))
             {
@@ -746,11 +736,8 @@ namespace Ryujinx.Graphics.Vulkan
                 {
                     UpdateAndBind(cbs, program, PipelineBase.ImageSetIndex, pbp);
                 }
-                catch (Exception e)
+                catch
                 {
-                    // If binding fails, we can try to bind the images without using the template.
-                    // This is a workaround for some games that use invalid bindings.
-
                     UpdateAndBind(cbs, PipelineBase.ImageSetIndex, pbp);
                 }
             }
@@ -759,8 +746,7 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 // Program is using extra sets, we need to bind those too.
 
-                // Ignore Extra Sets for now.
-                // BindExtraSets(cbs, program, pbp);
+                BindExtraSets(cbs, program, pbp);
             }
 
             _dirty = DirtyFlags.None;
@@ -802,14 +788,14 @@ namespace Ryujinx.Graphics.Vulkan
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateAndBind(CommandBufferScoped cbs, ShaderCollection program, int setIndex, PipelineBindPoint pbp)
         {
-            ResourceBindingSegment[] bindingSegments = program.BindingSegments[setIndex];
+            var bindingSegments = program.BindingSegments[setIndex];
 
             if (bindingSegments.Length == 0)
             {
                 return;
             }
 
-            Auto<DisposableBuffer> dummyBuffer = _dummyBuffer?.GetBuffer();
+            var dummyBuffer = _dummyBuffer?.GetBuffer();
 
             if (_updateDescriptorCacheCbIndex)
             {
@@ -817,7 +803,7 @@ namespace Ryujinx.Graphics.Vulkan
                 program.UpdateDescriptorCacheCommandBufferIndex(cbs.CommandBufferIndex);
             }
 
-            DescriptorSetCollection dsc = program.GetNewDescriptorSetCollection(setIndex, out bool isNew).Get(cbs);
+            var dsc = program.GetNewDescriptorSetCollection(setIndex, out var isNew).Get(cbs);
 
             if (!program.HasMinimalLayout)
             {
@@ -826,13 +812,6 @@ namespace Ryujinx.Graphics.Vulkan
                     Initialize(cbs, setIndex, dsc);
                 }
             }
-
-            var dummyImageInfo = new DescriptorImageInfo
-            {
-                ImageView = _dummyTexture.GetImageView().Get(cbs).Value,
-                Sampler = _dummySampler.GetSampler().Get(cbs).Value,
-                ImageLayout = ImageLayout.General
-            };
 
             DescriptorSetTemplate template = program.Templates[setIndex];
 
@@ -873,7 +852,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                         if (_storageSet.Set(index))
                         {
-                            ref DescriptorBufferInfo info = ref _storageBuffers[index];
+                            ref var info = ref _storageBuffers[index];
 
                             bool mirrored = UpdateBuffer(cbs,
                                 ref info,
@@ -899,20 +878,20 @@ namespace Ryujinx.Graphics.Vulkan
 
                             for (int i = 0; i < count; i++)
                             {
-                                ref DescriptorImageInfo texture = ref textures[i];
-                                ref TextureRef refs = ref _textureRefs[binding + i];
+                                ref var texture = ref textures[i];
+                                ref var refs = ref _textureRefs[binding + i];
 
                                 texture.ImageView = refs.ImageView?.Get(cbs).Value ?? default;
                                 texture.Sampler = refs.Sampler?.Get(cbs).Value ?? default;
 
                                 if (texture.ImageView.Handle == 0)
                                 {
-                                    texture.ImageView = dummyImageInfo.ImageView;
+                                    texture.ImageView = _dummyTexture.GetImageView().Get(cbs).Value;
                                 }
 
                                 if (texture.Sampler.Handle == 0)
                                 {
-                                    texture.Sampler = dummyImageInfo.Sampler;
+                                    texture.Sampler = _dummySampler.GetSampler().Get(cbs).Value;
                                 }
                             }
 
@@ -952,7 +931,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                             for (int i = 0; i < count; i++)
                             {
-                                images[i].ImageView = _imageRefs[binding + i].ImageView?.Get(cbs).Value ?? dummyImageInfo.ImageView;
+                                images[i].ImageView = _imageRefs[binding + i].ImageView?.Get(cbs).Value ?? _dummyTexture.GetImageView().Get(cbs).Value;
                             }
 
                             tu.Push<DescriptorImageInfo>(images[..count]);
@@ -983,11 +962,92 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             }
 
-            DescriptorSet[] sets = dsc.GetSets();
+            var sets = dsc.GetSets();
             _templateUpdater.Commit(_gd, _device, sets[0]);
 
             _gd.Api.CmdBindDescriptorSets(cbs.CommandBuffer, pbp, _program.PipelineLayout, (uint)setIndex, 1, sets, 0, ReadOnlySpan<uint>.Empty);
         }
+
+        private void UpdateAndBindTexturesWithoutTemplate(CommandBufferScoped cbs, ShaderCollection program, PipelineBindPoint pbp)
+        {
+            int setIndex = PipelineBase.TextureSetIndex;
+            var bindingSegments = program.BindingSegments[setIndex];
+
+            if (bindingSegments.Length == 0)
+            {
+                return;
+            }
+
+            if (_updateDescriptorCacheCbIndex)
+            {
+                _updateDescriptorCacheCbIndex = false;
+                program.UpdateDescriptorCacheCommandBufferIndex(cbs.CommandBufferIndex);
+            }
+
+            var dsc = program.GetNewDescriptorSetCollection(setIndex, out _).Get(cbs);
+
+            foreach (ResourceBindingSegment segment in bindingSegments)
+            {
+                int binding = segment.Binding;
+                int count = segment.Count;
+
+                if (!segment.IsArray)
+                {
+                    if (segment.Type != ResourceType.BufferTexture)
+                    {
+                        Span<DescriptorImageInfo> textures = _textures;
+
+                        for (int i = 0; i < count; i++)
+                        {
+                            ref var texture = ref textures[i];
+                            ref var refs = ref _textureRefs[binding + i];
+
+                            texture.ImageView = refs.ImageView?.Get(cbs).Value ?? _dummyTexture.GetImageView().Get(cbs).Value;
+                            texture.Sampler = refs.Sampler?.Get(cbs).Value ?? _dummySampler.GetSampler().Get(cbs).Value;
+
+                            if (texture.ImageView.Handle == 0)
+                            {
+                                texture.ImageView = _dummyTexture.GetImageView().Get(cbs).Value;
+                            }
+
+                            if (texture.Sampler.Handle == 0)
+                            {
+                                texture.Sampler = _dummySampler.GetSampler().Get(cbs).Value;
+                            }
+                        }
+
+                        dsc.UpdateImages(0, binding, textures[..count], DescriptorType.CombinedImageSampler);
+                    }
+                    else
+                    {
+                        Span<BufferView> bufferTextures = _bufferTextures;
+
+                        for (int i = 0; i < count; i++)
+                        {
+                            bufferTextures[i] = _bufferTextureRefs[binding + i]?.GetBufferView(cbs, false) ?? default;
+                        }
+
+                        dsc.UpdateBufferImages(0, binding, bufferTextures[..count], DescriptorType.UniformTexelBuffer);
+                    }
+                }
+                else
+                {
+                    if (segment.Type != ResourceType.BufferTexture)
+                    {
+                        dsc.UpdateImages(0, binding, _textureArrayRefs[binding].Array.GetImageInfos(_gd, cbs, _dummyTexture, _dummySampler), DescriptorType.CombinedImageSampler);
+                    }
+                    else
+                    {
+                        dsc.UpdateBufferImages(0, binding, _textureArrayRefs[binding].Array.GetBufferViews(cbs), DescriptorType.UniformTexelBuffer);
+                    }
+                }
+            }
+
+            var sets = dsc.GetSets();
+
+            _gd.Api.CmdBindDescriptorSets(cbs.CommandBuffer, pbp, _program.PipelineLayout, (uint)setIndex, 1, sets, 0, ReadOnlySpan<uint>.Empty);
+        }
+
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void UpdateAndBind(CommandBufferScoped cbs, int setIndex, PipelineBindPoint pbp)
@@ -1178,8 +1238,8 @@ namespace Ryujinx.Graphics.Vulkan
         private void UpdateAndBindUniformBufferPd(CommandBufferScoped cbs)
         {
             int sequence = _pdSequence;
-            ResourceBindingSegment[] bindingSegments = _program.BindingSegments[PipelineBase.UniformSetIndex];
-            Auto<DisposableBuffer> dummyBuffer = _dummyBuffer?.GetBuffer();
+            var bindingSegments = _program.BindingSegments[PipelineBase.UniformSetIndex];
+            var dummyBuffer = _dummyBuffer?.GetBuffer();
 
             long updatedBindings = 0;
             DescriptorSetTemplateWriter writer = _templateUpdater.Begin(32 * Unsafe.SizeOf<DescriptorBufferInfo>());
@@ -1226,12 +1286,12 @@ namespace Ryujinx.Graphics.Vulkan
         private void Initialize(CommandBufferScoped cbs, int setIndex, DescriptorSetCollection dsc)
         {
             // We don't support clearing texture descriptors currently.
-            if (setIndex is not PipelineBase.UniformSetIndex and not PipelineBase.StorageSetIndex)
+            if (setIndex != PipelineBase.UniformSetIndex && setIndex != PipelineBase.StorageSetIndex)
             {
                 return;
             }
 
-            Buffer dummyBuffer = _dummyBuffer?.GetBuffer().Get(cbs).Value ?? default;
+            var dummyBuffer = _dummyBuffer?.GetBuffer().Get(cbs).Value ?? default;
 
             foreach (ResourceBindingSegment segment in _program.ClearSegments[setIndex])
             {
@@ -1243,7 +1303,7 @@ namespace Ryujinx.Graphics.Vulkan
         {
             for (int setIndex = PipelineBase.DescriptorSetLayouts; setIndex < program.BindingSegments.Length; setIndex++)
             {
-                ResourceBindingSegment[] bindingSegments = program.BindingSegments[setIndex];
+                var bindingSegments = program.BindingSegments[setIndex];
 
                 if (bindingSegments.Length == 0)
                 {
@@ -1256,10 +1316,10 @@ namespace Ryujinx.Graphics.Vulkan
                 {
                     DescriptorSet[] sets = null;
 
-                    if (segment.Type is ResourceType.Texture or
-                        ResourceType.Sampler or
-                        ResourceType.TextureAndSampler or
-                        ResourceType.BufferTexture)
+                    if (segment.Type == ResourceType.Texture ||
+                        segment.Type == ResourceType.Sampler ||
+                        segment.Type == ResourceType.TextureAndSampler ||
+                        segment.Type == ResourceType.BufferTexture)
                     {
                         sets = _textureArrayExtraRefs[setIndex - PipelineBase.DescriptorSetLayouts].Array.GetDescriptorSets(
                             _device,
@@ -1270,7 +1330,7 @@ namespace Ryujinx.Graphics.Vulkan
                             _dummyTexture,
                             _dummySampler);
                     }
-                    else if (segment.Type is ResourceType.Image or ResourceType.BufferImage)
+                    else if (segment.Type == ResourceType.Image || segment.Type == ResourceType.BufferImage)
                     {
                         sets = _imageArrayExtraRefs[setIndex - PipelineBase.DescriptorSetLayouts].Array.GetDescriptorSets(
                             _device,

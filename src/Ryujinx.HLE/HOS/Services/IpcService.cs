@@ -128,12 +128,13 @@ namespace Ryujinx.HLE.HOS.Services
                 }
                 else
                 {
-                    string serviceName;
+                    string dbgMessage = $"{service.GetType().FullName}: {commandId}";
 
+                    string serviceName = (service is not DummyService dummyService) ? service.GetType().FullName : dummyService.ServiceName;
 
-                    serviceName = (service is not DummyService dummyService) ? service.GetType().FullName : dummyService.ServiceName;
+                    var service2 = new ServiceNotImplementedException(service, context, dbgMessage);
 
-                    Logger.Warning?.Print(LogClass.KernelIpc, $"Missing service {serviceName}: {commandId} ignored");
+                    Logger.Warning?.Print(LogClass.KernelIpc, $"Missing service {serviceName}: {commandId} ignored, service call details: {Environment.NewLine}{service2.Message}");
                 }
 
                 if (_isDomain)
@@ -156,8 +157,11 @@ namespace Ryujinx.HLE.HOS.Services
             else
             {
                 string dbgMessage = $"{service.GetType().FullName}: {commandId}";
+                var service2 = new ServiceNotImplementedException(service, context, dbgMessage);
 
-                throw new ServiceNotImplementedException(service, context, dbgMessage);
+                Logger.Warning?.Print(LogClass.KernelIpc, $"Missing service {dbgMessage} ignored, service call details: {Environment.NewLine}{service2.Message}");
+
+                throw service2;
             }
         }
 
