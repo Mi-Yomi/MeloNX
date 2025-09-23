@@ -12,94 +12,6 @@ import MetalKit
 import Metal
 import Darwin
 
-class LogCapture {
-    static let shared = LogCapture()
-
-    private var stdoutPipe: Pipe?
-    private var stderrPipe: Pipe?
-    private let originalStdout: Int32
-    private let originalStderr: Int32
-
-    var capturedLogs: [String] = [] {
-        didSet {
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .newLogCaptured, object: nil)
-            }
-        }
-    }
-
-    private init() {
-        originalStdout = dup(STDOUT_FILENO)
-        originalStderr = dup(STDERR_FILENO)
-        startCapturing()
-    }
-
-    func startCapturing() {
-        stdoutPipe = Pipe()
-        stderrPipe = Pipe()
-
-        redirectOutput(to: stdoutPipe!, fileDescriptor: STDOUT_FILENO)
-        redirectOutput(to: stderrPipe!, fileDescriptor: STDERR_FILENO)
-
-        setupReadabilityHandler(for: stdoutPipe!, isStdout: true)
-        setupReadabilityHandler(for: stderrPipe!, isStdout: false)
-    }
-
-    func stopCapturing() {
-        dup2(originalStdout, STDOUT_FILENO)
-        dup2(originalStderr, STDERR_FILENO)
-
-        stdoutPipe?.fileHandleForReading.readabilityHandler = nil
-        stderrPipe?.fileHandleForReading.readabilityHandler = nil
-    }
-
-    private func redirectOutput(to pipe: Pipe, fileDescriptor: Int32) {
-        dup2(pipe.fileHandleForWriting.fileDescriptor, fileDescriptor)
-    }
-
-    private func setupReadabilityHandler(for pipe: Pipe, isStdout: Bool) {
-        pipe.fileHandleForReading.readabilityHandler = { [weak self] fileHandle in
-            let data = fileHandle.availableData
-            let originalFD = isStdout ? self?.originalStdout : self?.originalStderr
-            write(originalFD ?? STDOUT_FILENO, (data as NSData).bytes, data.count)
-
-            if let logString = String(data: data, encoding: .utf8),
-               let cleanedLog = self?.cleanLog(logString), !cleanedLog.isEmpty {
-                self?.capturedLogs.append(cleanedLog)
-            }
-        }
-    }
-
-    private func cleanLog(_ raw: String) -> String? {
-        let lines = raw.split(separator: "\n")
-        let filteredLines = lines.filter { line in
-            !line.contains("SwiftUI") &&
-            !line.contains("ForEach") &&
-            !line.contains("VStack") &&
-            !line.contains("Invalid frame dimension (negative or non-finite).")
-        }
-
-        let cleaned = filteredLines.map { line -> String in
-            if let tabRange = line.range(of: "\t") {
-                return line[tabRange.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            return line.trimmingCharacters(in: .whitespacesAndNewlines)
-        }.joined(separator: "\n")
-
-        return cleaned.isEmpty ? nil : cleaned.replacingOccurrences(of: "\n\n", with: "\n")
-    }
-
-    deinit {
-        stopCapturing()
-    }
-}
-
-
-extension Notification.Name {
-    static let newLogCaptured = Notification.Name("newLogCaptured")
-}
-
-
 
 struct iOSNav<Content: View>: View {
     @ViewBuilder var content: () -> Content
@@ -124,31 +36,34 @@ func threadEntry(_ arg: () -> Void) -> UnsafeMutableRawPointer? {
 
 
 class Ryujinx : ObservableObject {
+    // Models
     @Published var isRunning = false
     @Published var showLoading = true
-    @AppStorage("LDN_MITM") var ldn = printAllIPv4Addresses().first ?? "Unknown"
-    @Published var controllerType: [String: ControllerType] = [:]
-    
-    let virtualController = VirtualController()
-    
-    @Published var controllerMap: [Controller] = []
-    @Published var metalLayer: CAMetalLayer? = nil
+    @Published var jitenabled = false
     @Published var isPortrait = false
+    
+    // LDN and Firmware
+    @AppStorage("LDN_MITM") var ldn = printAllIPv4Addresses().first ?? "Unknown"
     @Published var firmwareversion = "0"
+    
+    // UI
+    @Published var metalLayer: CAMetalLayer? = nil
     @Published var emulationUIView: MeloMTKView? = nil
+    @Published var defMLContentSize: CGFloat?
+    var shouldMetal: Bool {
+        metalLayer == nil
+    }
+    
+    // Ryujinx Models
     @Published var config: Ryujinx.Arguments? = nil
     @Published var games: [Game] = []
     @Published var aspectRatio: AspectRatio = .fixed16x9
     
-    @Published var defMLContentSize: CGFloat?
+    // Classes
+    let controllerManager = ControllerManager.shared
     
+    // Ryujinx Thread
     var thread: pthread_t? = nil
-    
-    @Published var jitenabled = false
-    
-    var shouldMetal: Bool {
-        metalLayer == nil
-    }
     
     static let shared = Ryujinx()
 
@@ -727,14 +642,14 @@ class Ryujinx : ObservableObject {
         if !config.inputids.isEmpty {
             config.inputids.prefix(8).enumerated().forEach { index, inputId in
                 // controllerType
-                if let controller = controllerType[inputId], controller == .handheld {
+                if let controller = controllerManager.controllerTypes[index], controller == .handheld {
                     args.append(contentsOf: ["--input-id-handheld", inputId])
                     // args.append(contentsOf: ["\(index == 0 ? "--input-id-handheld" : "--input-id-\(index + 1)")", inputId])
                 } else {
                     args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
                 }
                 
-                if let controller = controllerType[inputId], controller != .handheld {
+                if let controller = controllerManager.controllerTypes[index] {
                     args.append(contentsOf: ["--controller-type-\(index + 1)", controller.rawValue])
                 }
             }
@@ -753,21 +668,6 @@ class Ryujinx : ObservableObject {
         args.append(contentsOf: config.additionalArgs)
 
         return args
-    }
-    
-    func getPhysicalDeviceUniqueID(from controller: GCController) -> String? {
-        let selector = NSSelectorFromString("physicalDeviceUniqueID")
-        
-        guard controller.responds(to: selector) else {
-            print("Selector physicalDeviceUniqueID not found on controller")
-            return nil
-        }
-
-        if let unmanagedResult = controller.perform(selector) {
-            return unmanagedResult.takeUnretainedValue() as? String
-        }
-
-        return nil
     }
     
     func checkIfKeysImported() -> Bool {
@@ -829,99 +729,6 @@ class Ryujinx : ObservableObject {
                     }
                 }, titleId: item.TitleId, enabled: true)
         }
-    }
-    
-    private func registerExceptionPort() {
-        var exceptionPort: mach_port_t = mach_port_t()
-        
-        // Allocate the exception port
-        let kr1 = mach_port_allocate(mach_task_self_, mach_port_right_t(MACH_PORT_RIGHT_RECEIVE), &exceptionPort)
-        guard kr1 == KERN_SUCCESS else {
-            print("mach_port_allocate failed: \(kr1)")
-            return
-        }
-        
-        // Insert a send right into the exception port
-        let kr2 = mach_port_insert_right(mach_task_self_, exceptionPort, exceptionPort, mach_msg_type_name_t(MACH_MSG_TYPE_MAKE_SEND))
-        guard kr2 == KERN_SUCCESS else {
-            print("mach_port_insert_right failed: \(kr2)")
-            return
-        }
-        
-        // Set the exception port for the task (future threads)
-        let kr3 = task_set_exception_ports(
-            mach_task_self_,
-            exception_mask_t(EXC_MASK_BAD_ACCESS),
-            exceptionPort,
-            exception_behavior_t(EXCEPTION_DEFAULT),
-            thread_state_flavor_t(THREAD_STATE_NONE)
-        )
-        guard kr3 == KERN_SUCCESS else {
-            print("task_set_exception_ports failed: \(kr3)")
-            return
-        }
-        
-        print("Exception port registered successfully.")
-    }
-
-    private func generateGamepadId(joystickIndex: Int32) -> String? {
-        let guid = SDL_JoystickGetDeviceGUID(joystickIndex)
-
-        if guid.data.0 == 0 && guid.data.1 == 0 && guid.data.2 == 0 && guid.data.3 == 0 {
-            return nil
-        }
-
-        let reorderedGUID: [UInt8] = [
-            guid.data.3, guid.data.2, guid.data.1, guid.data.0,
-            guid.data.5, guid.data.4,
-            guid.data.7, guid.data.6,
-            guid.data.8, guid.data.9,
-            guid.data.10, guid.data.11, guid.data.12, guid.data.13, guid.data.14, guid.data.15
-        ]
-
-        let guidString = reorderedGUID.map { String(format: "%02X", $0) }.joined().lowercased()
-
-        func substring(_ str: String, _ start: Int, _ end: Int) -> String {
-            let startIdx = str.index(str.startIndex, offsetBy: start)
-            let endIdx = str.index(str.startIndex, offsetBy: end)
-            return String(str[startIdx..<endIdx])
-        }
-
-        let formattedGUID = "\(substring(guidString, 0, 8))-\(substring(guidString, 8, 12))-\(substring(guidString, 12, 16))-\(substring(guidString, 16, 20))-\(substring(guidString, 20, 32))"
-
-        return "\(joystickIndex)-\(formattedGUID)"
-    }
-    
-    func getConnectedControllers() -> [Controller] {
-        var controllers: [Controller] = []
-
-        let numJoysticks = SDL_NumJoysticks()
-
-        for i in 0..<numJoysticks {
-            if let controller = SDL_GameControllerOpen(i) {
-                let guid = generateGamepadId(joystickIndex: i)
-                let name = String(cString: SDL_GameControllerName(controller))
-                
-                // print("Controller \(i): \(name), GUID: \(guid ?? "")")
-                
-                guard let guid else {
-                    SDL_GameControllerClose(controller)
-                    return []
-                }
-                
-                
-                
-                if name == self.virtualController.controllername {
-                    controllers.append(Controller(id: guid, name: name, controllerType: .joyconPair))
-                } else {
-                    controllers.append(Controller(id: guid, name: name))
-                }
-
-                SDL_GameControllerClose(controller)
-            }
-         }
-        
-        return controllers
     }
     
     func removeFirmware() {

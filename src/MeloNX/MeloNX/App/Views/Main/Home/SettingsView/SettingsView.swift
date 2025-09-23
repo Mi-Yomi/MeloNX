@@ -209,10 +209,8 @@ struct SettingsViewNew: View {
     
     @Binding var MoltenVKSettings: [MoltenVKSettings]
     
-    @Binding var controllersList: [Controller]
-    @Binding var currentControllers: [Controller]
+    @ObservedObject var controllerManager = ControllerManager.shared
     
-    @Binding var onscreencontroller: Controller
     @AppStorage("useTrollStore") var useTrollStore: Bool = false
     
     @AppStorage("jitStreamerEB") var jitStreamerEB: Bool = false
@@ -827,7 +825,7 @@ struct SettingsViewNew: View {
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    if currentControllers.isEmpty {
+                    if controllerManager.currentControllers.isEmpty {
                         emptyControllersView
                     } else {
                         controllerListView
@@ -960,7 +958,7 @@ struct SettingsViewNew: View {
     // MARK: - Controller Selection Components
 
     private var hasAvailableControllers: Bool {
-        !controllersList.filter { !contains(currentControllers, value: $0) }.isEmpty
+        !controllerManager.nativeControllers.map(\.ryujinxController).filter { !contains(controllerManager.currentControllers, value: $0) }.isEmpty
     }
 
     private var emptyControllersView: some View {
@@ -977,8 +975,8 @@ struct SettingsViewNew: View {
         VStack(spacing: 0) {
             Divider()
             
-            ForEach(currentControllers.indices, id: \.self) { index in
-                var controller = currentControllers[index]
+            ForEach(controllerManager.currentControllers.indices, id: \.self) { index in
+                let controller = controllerManager.currentControllers[index]
                 
                 VStack(spacing: 0) {
                     HStack {
@@ -991,7 +989,7 @@ struct SettingsViewNew: View {
                         Spacer()
                         
                         Button {
-                            toggleController(currentControllers[index])
+                            toggleController(controllerManager.currentControllers[index])
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.secondary)
@@ -999,24 +997,27 @@ struct SettingsViewNew: View {
                         .buttonStyle(.plain)
                     }
                     .padding(.vertical, 8)
+                    .onAppear() {
+                        print(controllerManager.currentControllers)
+                    }
                     
-                    if index < currentControllers.count - 1 {
+                    if index < controllerManager.currentControllers.count - 1 {
                         Divider()
                     }
                 }
                 .contextMenu {
                     ForEach(ControllerType.allCases) { type in
-                        if currentControllers[index].controllerType == type {
+                        if controllerManager.currentControllers[index].controllerType == type {
                             Button {
-                                currentControllers[index].controllerType = type
-                                ControllerTypeManager.shared.controllerTypeForId[index] = controller.controllerType
+                                controllerManager.currentControllers[index].controllerType = type
+                                controllerManager.controllerTypes[index] = controller.controllerType
                             } label: {
                                 Label(type.rawValue, systemImage: "checkmark")
                             }
                         } else {
                             Button(type.rawValue) {
-                                currentControllers[index].controllerType = type
-                                ControllerTypeManager.shared.controllerTypeForId[index] = controller.controllerType
+                                controllerManager.currentControllers[index].controllerType = type
+                                controllerManager.controllerTypes[index] = controller.controllerType
                             }
                             .tag(type)
                         }
@@ -1024,14 +1025,12 @@ struct SettingsViewNew: View {
                 }
             }
             .onAppear {
-                let manager = ControllerTypeManager.shared
-                    
                 
-                for (index, controller) in currentControllers.enumerated() {
+                for (index, controller) in controllerManager.currentControllers.enumerated() {
                     if controller.isVirtualController {
-                        currentControllers[index].controllerType = manager.controllerTypeForId[index] ?? .joyconPair
+                        controllerManager.currentControllers[index].controllerType = controllerManager.controllerTypes[index] ?? .joyconPair
                     } else {
-                         currentControllers[index].controllerType = manager.controllerTypeForId[index] ?? .proController
+                        controllerManager.currentControllers[index].controllerType = controllerManager.controllerTypes[index] ?? .proController
                     }
                 }
 
@@ -1041,9 +1040,9 @@ struct SettingsViewNew: View {
 
     private var addControllerButton: some View {
         Menu {
-            ForEach(controllersList.filter { !contains(currentControllers, value: $0) }) { controller in
+            ForEach(controllerManager.nativeControllers.map(\.ryujinxController).filter { !contains(controllerManager.currentControllers, value: $0) }) { controller in
                 Button {
-                    currentControllers.append(controller)
+                    controllerManager.currentControllers.append(controller)
                 } label: {
                     Text(controller.name)
                 }
@@ -1497,10 +1496,10 @@ struct SettingsViewNew: View {
     // MARK: - Helper Functions
     
     private func toggleController(_ controller: Controller) {
-        if currentControllers.contains(where: { $0.id == controller.id }) {
-            currentControllers.removeAll(where: { $0.id == controller.id })
+        if controllerManager.currentControllers.contains(where: { $0.id == controller.id }) {
+            controllerManager.currentControllers.removeAll(where: { $0.id == controller.id })
         } else {
-            currentControllers.append(controller)
+            controllerManager.currentControllers.append(controller)
         }
     }
     

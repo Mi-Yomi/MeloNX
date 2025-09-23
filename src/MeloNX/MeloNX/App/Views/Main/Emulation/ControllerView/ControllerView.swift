@@ -985,18 +985,20 @@ struct ButtonView: View {
     }
     
     private func handleButtonPress() {
-        guard !isPressed || istoggle else { return }
-
-        if istoggle {
-            toggleState.toggle()
-            isPressed = toggleState
-            let value = toggleState ? 1 : 0
-            Ryujinx.shared.virtualController.setButtonState(Uint8(value), for: button)
-            Haptics.shared.play(.soft)
-        } else {
-            isPressed = true
-            Ryujinx.shared.virtualController.setButtonState(1, for: button)
-            Haptics.shared.play(.soft)
+        DispatchQueue.global(qos: .userInteractive).async {
+            guard !isPressed || istoggle else { return }
+            
+            if istoggle {
+                toggleState.toggle()
+                isPressed = toggleState
+                let value = toggleState ? 1 : 0
+                ControllerManager.virtualController.setButtonState(Uint8(value), for: button)
+                Haptics.shared.play(.soft)
+            } else {
+                isPressed = true
+                ControllerManager.virtualController.setButtonState(1, for: button)
+                Haptics.shared.play(.soft)
+            }
         }
     }
     
@@ -1005,8 +1007,8 @@ struct ButtonView: View {
         guard isPressed else { return }
 
         isPressed = false
-        DispatchQueue.global(qos: .background).asyncAfter(deadline: .now() + 0.05) {
-            Ryujinx.shared.virtualController.setButtonState(0, for: button)
+        DispatchQueue.global(qos: .userInteractive).async {
+            ControllerManager.virtualController.setButtonState(0, for: button)
         }
     }
     

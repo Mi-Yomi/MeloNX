@@ -25,10 +25,7 @@ struct ContentView: View {
     @State private var game: Game?
     
     // Controllers
-    @State private var controllersList: [Controller] = []
-    @State private var currentControllers: [Controller] = []
-    @State var onscreencontroller: Controller = Controller(id: "", name: "")
-    @State var nativeControllers: [GCController: NativeController] = [:]
+    @StateObject var controllerManager = ControllerManager.shared
     @State private var isVirtualControllerActive: Bool = false
     @AppStorage("isVirtualController") var isVCA: Bool = true
     
@@ -164,26 +161,21 @@ struct ContentView: View {
         MainTabView(
             startemu: $game,
             MVKconfig: $settings,
-            controllersList: $controllersList,
-            currentControllers: $currentControllers,
-            onscreencontroller: $onscreencontroller
         )
         .onAppear {
             quits = false
             let _ = loadSettings()
             isLoading = true
             
-            refreshControllersList()
-            
             UserDefaults.standard.set(false, forKey: "lockInApp")
             
-            initControllerObservers()
+            self.controllerManager.initControllerObservers()
             
             Air.play(AnyView(
                 ControllerListView(game: $game)
             ))
             
-            refreshControllersList()
+            self.controllerManager.refreshControllersList()
             
             ryujinx.addGames()
             
@@ -343,184 +335,14 @@ struct ContentView: View {
         initialize()
     }
 
-    @State var waitingForController: [GCController] = []
-
-    private func initControllerObservers() {
-        NotificationCenter.default.addObserver(
-            forName: .GCControllerDidConnect,
-            object: nil,
-            queue: .main
-        ) { notification in
-            guard let controller = notification.object as? GCController else {
-                return
-            }
-
-            let waitingControllersWithSameName = waitingForController.filter { $0.vendorName == controller.vendorName }
-            
-            if waitingControllersWithSameName.count > 1 && ryujinx.isRunning {
-                showControllerSelectionAlert(newController: controller, waitingControllers: waitingControllersWithSameName)
-                return
-            }
-
-            if let index = waitingForController.firstIndex(where: { $0.vendorName == controller.vendorName }), ryujinx.isRunning {
-                waitingForController.remove(at: index)
-                
-                reconnectController(newController: controller, oldController: waitingControllersWithSameName.first)
-            } else if nativeControllers[controller] == nil {
-                nativeControllers[controller] = .init(controller)
-                refreshControllersList()
-            }
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: .GCControllerDidDisconnect,
-            object: nil,
-            queue: .main
-        ) { [self] notification in
-            guard let controller = notification.object as? GCController else {
-                return
-            }
-            
-            if !ryujinx.isRunning {
-                self.currentControllers = []
-                self.controllersList = []
-                self.nativeControllers[controller]?.cleanup()
-                self.nativeControllers[controller] = nil
-                self.refreshControllersList()
-                return
-            }
-
-            if !self.waitingForController.contains(where: { $0 === controller }) {
-                self.waitingForController.append(controller)
-            }
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
-                if let index = waitingForController.firstIndex(where: { $0.vendorName == controller.vendorName }) {
-                } else {
-                    self.waitingForController.removeAll(where: { $0.vendorName == controller.vendorName })
-                    self.currentControllers = []
-                    self.controllersList = []
-                    self.nativeControllers[controller]?.cleanup()
-                    self.nativeControllers[controller] = nil
-                    self.refreshControllersList()
-                }
-            }
-        }
-    }
-
-    private func showControllerSelectionAlert(newController: GCController, waitingControllers: [GCController]) {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first else {
-            print("[Alert] Unable to get main window")
-            return
-        }
-        
-        let alert = UIAlertController(
-            title: "Multiple Controllers Detected",
-            message: "Multiple controllers with the name '\(newController.vendorName ?? "Unknown")' are waiting to reconnect. Which one would you like to reconnect?",
-            preferredStyle: .alert
-        )
-        
-
-        for (index, waitingController) in waitingControllers.enumerated() {
-            let title = "Controller \(index + 1)"
-            let action = UIAlertAction(title: title, style: .default) { [self] _ in
-                self.handleControllerSelection(newController: newController, selectedOldController: waitingController)
-            }
-            alert.addAction(action)
-        }
-        
-        let cancelAction = UIAlertAction(title: "Cancel", style: .cancel) { [self] _ in
-            self.nativeControllers[newController] = .init(newController)
-            self.refreshControllersList()
-        }
-        alert.addAction(cancelAction)
-        
-        if let presentedViewController = window.rootViewController?.presentedViewController {
-            presentedViewController.present(alert, animated: true)
-        } else {
-            window.rootViewController?.present(alert, animated: true)
-        }
-    }
-
-    private func handleControllerSelection(newController: GCController, selectedOldController: GCController) {
-        if let index = waitingForController.firstIndex(where: { $0 === selectedOldController }) {
-            waitingForController.remove(at: index)
-        }
-        
-        reconnectController(newController: newController, oldController: selectedOldController)
-    }
-
-    private func reconnectController(newController: GCController, oldController: GCController?) {
-        if let oldEntry = nativeControllers.first(where: { $0.value.uniqueID == oldController?.vendorName }) {
-            print("[GCControllerDidConnect] Updating native controller with new gamepad")
-            let nativeController = oldEntry.value
-            nativeControllers.removeValue(forKey: oldEntry.key)
-
-            nativeController.changeGamepad(newController)
-
-            nativeControllers[newController] = nativeController
-        } else {
-            print("[GCControllerDidConnect] Initializing new native controller")
-            nativeControllers[newController] = .init(newController)
-        }
-        
-        self.refreshControllersList()
-    }
-    
-
     private func setupEmulation() {
-        isVCA = (currentControllers.first(where: { $0.isVirtualController }) != nil)
+        isVCA = (controllerManager.currentControllers.first(where: { $0.isVirtualController }) != nil)
         
         DispatchQueue.main.async {
             start(displayid: 1)
         }
     }
     
-    private func refreshControllersList() {
-        currentControllers = []
-        controllersList = []
-        
-        controllersList = ryujinx.getConnectedControllers()
-        
-        if let onscreen = controllersList.first(where: { $0.isVirtualController }) {
-            self.onscreencontroller = onscreen
-        }
-        
-        controllersList.removeAll(where: { $0.id == "0" || (!$0.name.starts(with: "GC - ") && $0 != onscreencontroller) })
-        controllersList.mutableForEach { $0.name = $0.name.replacingOccurrences(of: "GC - ", with: "") }
-        
-        if controllersList.count == 1 {
-            if !ProcessInfo.processInfo.isiOSAppOnMac {
-                currentControllers.append(controllersList[0])
-            }
-        } else if (controllersList.count - 1) >= 1 {
-            for controller in controllersList {
-                if controller.id != onscreencontroller.id && !currentControllers.contains(where: { $0.id == controller.id }) {
-                    currentControllers.append(controller)
-                }
-            }
-        }
-    }
-    
-    private func registerMotionForMatchingControllers() {
-        // Loop through currentControllers with index
-        for (index, controller) in currentControllers.enumerated() {
-            let slot = UInt8(index)
-            
-            // Check native controllers
-            for (_, nativeController) in nativeControllers where nativeController.controllername == String("GC - \(controller.name)") && nativeController.tryGetMotionProvider() == nil {
-                nativeController.tryRegisterMotion(slot: slot)
-                continue
-            }
-            
-            // Check virtual controller if active
-            if controller.isVirtualController && Ryujinx.shared.virtualController.tryGetMotionProvider() == nil {
-                Ryujinx.shared.virtualController.tryRegisterMotion(slot: slot)
-                continue
-            }
-        }
-    }
     
     @StateObject private var persettings = PerGameSettingsManager.shared
     private func start(displayid: UInt32) {
@@ -533,16 +355,19 @@ struct ContentView: View {
             config = customgame
         }
         
-        for controller in currentControllers {
-            ryujinx.controllerType[controller.id] = controller.controllerType
+        
+        for index in controllerManager.currentControllers.indices {
+            ControllerManager.shared.controllerTypes[index] = controllerManager.currentControllers[index].controllerType
         }
         
+        print("\(controllerManager.currentControllers), \(Array(Set(controllerManager.currentControllers.map(\.id))))")
+        
         config.gamepath = game.fileURL.path
-        config.inputids = Array(Set(currentControllers.map(\.id)))
+        config.inputids = Array(Set(controllerManager.currentControllers.map(\.id)))
         
         configureEnvironmentVariables()
         
-        registerMotionForMatchingControllers()
+        controllerManager.registerMotionForMatchingControllers()
         
         config.inputids.isEmpty ? config.inputids.append("0") : ()
         

@@ -11,6 +11,5 @@ struct Controller: Identifiable, Hashable {
     var id: String
     var name: String
     var controllerType: ControllerType = .proController
-    var gameController: GCController? = nil
-    var isVirtualController: Bool { name == VirtualController.controllername }
+    var isVirtualController: Bool = false
 }

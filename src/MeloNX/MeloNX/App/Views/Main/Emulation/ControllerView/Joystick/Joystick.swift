@@ -61,9 +61,9 @@ struct Joystick: View {
     
     func setPos() {
         if right {
-            Ryujinx.shared.virtualController.thumbstickMoved(.right, x: position.x, y: position.y)
+            ControllerManager.virtualController.thumbstickMoved(.right, x: position.x, y: position.y)
         } else {
-            Ryujinx.shared.virtualController.thumbstickMoved(.left, x: position.x, y: position.y)
+            ControllerManager.virtualController.thumbstickMoved(.left, x: position.x, y: position.y)
         }
     }
     

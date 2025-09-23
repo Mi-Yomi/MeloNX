@@ -7,8 +7,12 @@
 
 //──────────────────────────────────────────────────────────────────────── MARK:- Base Controller Protocol
 
+import GameController
+
 /// Base Controller with motion related functions
-protocol BaseController: AnyObject {
+protocol BaseController: AnyObject, Equatable {
+    var ryujinxController: Controller { get set }
     func tryRegisterMotion(slot: UInt8)
     func tryGetMotionProvider() -> DSUMotionProvider?
+    var nativeController: GCController { get set }
 }

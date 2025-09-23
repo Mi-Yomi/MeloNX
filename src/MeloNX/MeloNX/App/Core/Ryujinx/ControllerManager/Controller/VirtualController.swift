@@ -8,17 +8,22 @@
 import Foundation
 import CoreHaptics
 import UIKit
+import GameController
 
 class VirtualController : BaseController {
+    static func == (lhs: VirtualController, rhs: VirtualController) -> Bool {
+        lhs.controller == rhs.controller && lhs.instanceID == rhs.instanceID && lhs.hapticEngine == rhs.hapticEngine && lhs.ryujinxController == rhs.ryujinxController && lhs.controllername == rhs.controllername
+    }
+    
     private var instanceID: SDL_JoystickID = -1
     private var controller: OpaquePointer?
     private let hapticEngine: CHHapticEngine?
     private let rumbleController: RumbleController?
     private var deviceMotionProvider: DeviceMotionProvider?
+    var ryujinxController: Controller = Controller(id: "", name: "")
+    var nativeController: GCController = GCController()
     
     public let controllername = "MeloNX Touch Controller"
-    
-    public static let controllername = "MeloNX Touch Controller"
     
     init() {
         // Setup Haptics
@@ -113,6 +118,12 @@ class VirtualController : BaseController {
             // print("Failed to create virtual controller: \(String(cString: SDL_GetError()))")
             return
         }
+        
+        self.ryujinxController.name = self.controllername
+        self.ryujinxController.id = ControllerManager.generateGamepadId(from: controller!) ?? ""
+        self.ryujinxController.isVirtualController = true
+        
+        print(ryujinxController)
     }
     
     func updateAxisValue(value: Sint16, forAxis axis: SDL_GameControllerAxis) {

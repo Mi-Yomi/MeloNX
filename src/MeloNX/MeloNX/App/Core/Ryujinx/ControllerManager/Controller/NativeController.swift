@@ -11,12 +11,14 @@ import GameController
 class NativeController: Hashable, BaseController {
     private var instanceID: SDL_JoystickID = -1
     private var controller: OpaquePointer?
-    private var nativeController: GCController
+    var nativeController: GCController
     private var controllerMotionProvider: ControllerMotionProvider?
     private var deviceMotionProvider: DeviceMotionProvider?
     
     private var controllerHaptics: CHHapticEngine?
     private var rumbleController: RumbleController?
+    
+    var ryujinxController: Controller = Controller(id: "", name: "")
     
     private var cachedJoystick: OpaquePointer?
     
@@ -26,10 +28,10 @@ class NativeController: Hashable, BaseController {
 
     init(_ controller: GCController) {
         nativeController = controller
-        var ncontrollerHaptics = nativeController.haptics?.createEngine(withLocality: .all)
+        let ncontrollerHaptics = nativeController.haptics?.createEngine(withLocality: .all)
         
         let vendorName = nativeController.vendorName ?? "Unknown"
-        var usesdeviceHaptics = (vendorName.lowercased().contains("backbone") || vendorName.lowercased() == "Joy-Con (l/R)".lowercased())
+        let usesdeviceHaptics = (vendorName.lowercased().contains("backbone") || vendorName.lowercased() == "Joy-Con (l/R)".lowercased())
         controllerHaptics = usesdeviceHaptics ?  try? CHHapticEngine() : ncontrollerHaptics
         
         // Make sure the haptic engine exists before attempting to start it or initialize the controller.
@@ -54,7 +56,7 @@ class NativeController: Hashable, BaseController {
         // Setup Motion
         let dsuServer = DSUServer.shared
         let vendorName = nativeController.vendorName ?? "Unknown"
-        var usesdevicemotion = (vendorName.lowercased() == "Joy-Con (l/R)".lowercased() || vendorName.lowercased().hasSuffix("backbone") || vendorName.lowercased() == "backbone one")
+        let usesdevicemotion = (vendorName.lowercased() == "Joy-Con (l/R)".lowercased() || vendorName.lowercased().hasSuffix("backbone") || vendorName.lowercased() == "backbone one")
         
         usesdevicemotion ? (deviceMotionProvider = DeviceMotionProvider(slot: slot)) : (controllerMotionProvider = ControllerMotionProvider(controller: nativeController, slot: slot))
         
@@ -131,6 +133,9 @@ class NativeController: Hashable, BaseController {
         if controller == nil {
             return
         }
+        
+        self.ryujinxController.name = self.uniqueID ?? "Unknown"
+        self.ryujinxController.id = ControllerManager.generateGamepadId(from: controller!) ?? ""
         
         guard let gamepad = nativeController.extendedGamepad
         else { return }

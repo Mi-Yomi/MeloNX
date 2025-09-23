@@ -12,10 +12,6 @@ import UniformTypeIdentifiers
 struct MainTabView: View {
     @Binding var startemu: Game?
     @Binding var MVKconfig: [MoltenVKSettings]
-    @Binding var controllersList: [Controller]
-    @Binding var currentControllers: [Controller]
-    
-    @Binding var onscreencontroller: Controller
     
     var body: some View {
         TabView {
@@ -25,7 +21,7 @@ struct MainTabView: View {
                 }
             
             // SettingsView(config: $config, MoltenVKSettings: $MVKconfig, controllersList: $controllersList, currentControllers: $currentControllers, onscreencontroller: $onscreencontroller)
-            SettingsViewNew(MoltenVKSettings: $MVKconfig, controllersList: $controllersList, currentControllers: $currentControllers, onscreencontroller: $onscreencontroller)
+            SettingsViewNew(MoltenVKSettings: $MVKconfig)
                 .tabItem {
                     Label("Settings", systemImage: "gear")
                 }
