@@ -2,7 +2,7 @@ using Ryujinx.Audio.Common;
 using Ryujinx.Audio.Renderer.Common;
 using Ryujinx.Audio.Renderer.Server.Voice;
 using System;
-using static Ryujinx.Audio.Renderer.Parameter.VoiceInParameter;
+using Ryujinx.Audio.Renderer.Parameter;
 using WaveBuffer = Ryujinx.Audio.Renderer.Common.WaveBuffer;
 
 namespace Ryujinx.Audio.Renderer.Dsp.Command
@@ -11,48 +11,53 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
     {
         public bool Enabled { get; set; }
 
-        public int NodeId { get; }
+        public int NodeId { get; private set; }
 
         public CommandType CommandType => CommandType.AdpcmDataSourceVersion1;
 
         public uint EstimatedProcessingTime { get; set; }
 
-        public ushort OutputBufferIndex { get; }
-        public uint SampleRate { get; }
+        public ushort OutputBufferIndex { get; private set; }
+        public uint SampleRate { get; private set; }
 
-        public float Pitch { get; }
+        public float Pitch { get; private set; }
 
         public WaveBuffer[] WaveBuffers { get; }
 
-        public Memory<VoiceUpdateState> State { get; }
+        public Memory<VoiceState> State { get; private set; }
 
-        public ulong AdpcmParameter { get; }
-        public ulong AdpcmParameterSize { get; }
+        public ulong AdpcmParameter { get; private set; }
+        public ulong AdpcmParameterSize { get; private set; }
 
-        public DecodingBehaviour DecodingBehaviour { get; }
+        public DecodingBehaviour DecodingBehaviour { get; private set; }
 
-        public AdpcmDataSourceCommandVersion1(ref VoiceState serverState, Memory<VoiceUpdateState> state, ushort outputBufferIndex, int nodeId)
+        public AdpcmDataSourceCommandVersion1()
+        {
+            WaveBuffers = new WaveBuffer[Constants.VoiceWaveBufferCount];
+        }
+
+        public AdpcmDataSourceCommandVersion1 Initialize(ref VoiceInfo serverInfo, Memory<VoiceState> state, ushort outputBufferIndex, int nodeId)
         {
             Enabled = true;
             NodeId = nodeId;
 
             OutputBufferIndex = outputBufferIndex;
-            SampleRate = serverState.SampleRate;
-            Pitch = serverState.Pitch;
-
-            WaveBuffers = new WaveBuffer[Constants.VoiceWaveBufferCount];
+            SampleRate = serverInfo.SampleRate;
+            Pitch = serverInfo.Pitch;
 
             for (int i = 0; i < WaveBuffers.Length; i++)
             {
-                ref Server.Voice.WaveBuffer voiceWaveBuffer = ref serverState.WaveBuffers[i];
+                ref Server.Voice.WaveBuffer voiceWaveBuffer = ref serverInfo.WaveBuffers[i];
 
                 WaveBuffers[i] = voiceWaveBuffer.ToCommon(1);
             }
 
-            AdpcmParameter = serverState.DataSourceStateAddressInfo.GetReference(true);
-            AdpcmParameterSize = serverState.DataSourceStateAddressInfo.Size;
+            AdpcmParameter = serverInfo.DataSourceStateAddressInfo.GetReference(true);
+            AdpcmParameterSize = serverInfo.DataSourceStateAddressInfo.Size;
             State = state;
-            DecodingBehaviour = serverState.DecodingBehaviour;
+            DecodingBehaviour = serverInfo.DecodingBehaviour;
+
+            return this;
         }
 
         public void Process(CommandList context)

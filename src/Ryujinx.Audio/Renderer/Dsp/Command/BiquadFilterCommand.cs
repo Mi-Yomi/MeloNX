@@ -8,22 +8,27 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
     {
         public bool Enabled { get; set; }
 
-        public int NodeId { get; }
+        public int NodeId { get; private set; }
 
         public CommandType CommandType => CommandType.BiquadFilter;
 
         public uint EstimatedProcessingTime { get; set; }
 
-        public Memory<BiquadFilterState> BiquadFilterState { get; }
-        public int InputBufferIndex { get; }
-        public int OutputBufferIndex { get; }
-        public bool NeedInitialization { get; }
+        public Memory<BiquadFilterState> BiquadFilterState { get; private set; }
+        public int InputBufferIndex { get; private set; }
+        public int OutputBufferIndex { get; private set; }
+        public bool NeedInitialization { get; private set; }
 
-        private BiquadFilterParameter _parameter;
+        private BiquadFilterParameter2 _parameter;
 
-        public BiquadFilterCommand(
+        public BiquadFilterCommand()
+        {
+
+        }
+
+        public BiquadFilterCommand Initialize(
             int baseIndex,
-            ref BiquadFilterParameter filter,
+            ref BiquadFilterParameter2 filter,
             Memory<BiquadFilterState> biquadFilterStateMemory,
             int inputBufferOffset,
             int outputBufferOffset,
@@ -38,6 +43,8 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
 
             Enabled = true;
             NodeId = nodeId;
+
+            return this;
         }
 
         public void Process(CommandList context)

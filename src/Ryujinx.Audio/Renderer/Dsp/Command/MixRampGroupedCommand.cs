@@ -8,29 +8,34 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
     {
         public bool Enabled { get; set; }
 
-        public int NodeId { get; }
+        public int NodeId { get; private set; }
 
         public CommandType CommandType => CommandType.MixRampGrouped;
 
         public uint EstimatedProcessingTime { get; set; }
 
-        public uint MixBufferCount { get; }
+        public uint MixBufferCount { get; private set; }
 
-        public ushort[] InputBufferIndices { get; }
-        public ushort[] OutputBufferIndices { get; }
+        public ushort[] InputBufferIndices { get; private set; }
+        public ushort[] OutputBufferIndices { get; private set; }
 
-        public float[] Volume0 { get; }
-        public float[] Volume1 { get; }
+        public float[] Volume0 { get; private set; }
+        public float[] Volume1 { get; private set; }
 
-        public Memory<VoiceUpdateState> State { get; }
+        public Memory<VoiceState> State { get; private set; }
 
-        public MixRampGroupedCommand(
+        public MixRampGroupedCommand()
+        {
+
+        }
+
+        public MixRampGroupedCommand Initialize(
             uint mixBufferCount,
             uint inputBufferIndex,
             uint outputBufferIndex,
             ReadOnlySpan<float> volume0,
             ReadOnlySpan<float> volume1,
-            Memory<VoiceUpdateState> state,
+            Memory<VoiceState> state,
             int nodeId)
         {
             Enabled = true;
@@ -52,6 +57,8 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
             }
 
             State = state;
+
+            return this;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -87,7 +94,7 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
                 float volume0 = Volume0[i];
                 float volume1 = Volume1[i];
 
-                ref VoiceUpdateState state = ref State.Span[0];
+                ref VoiceState state = ref State.Span[0];
 
                 if (volume0 != 0 || volume1 != 0)
                 {

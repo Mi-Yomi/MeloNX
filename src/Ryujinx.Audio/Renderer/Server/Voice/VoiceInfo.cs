@@ -1,23 +1,28 @@
 using Ryujinx.Audio.Common;
 using Ryujinx.Audio.Renderer.Common;
+using Ryujinx.Audio.Renderer.Dsp;
 using Ryujinx.Audio.Renderer.Dsp.State;
 using Ryujinx.Audio.Renderer.Parameter;
 using Ryujinx.Audio.Renderer.Server.MemoryPool;
+using Ryujinx.Common;
 using Ryujinx.Common.Memory;
 using Ryujinx.Common.Utilities;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using static Ryujinx.Audio.Renderer.Common.BehaviourParameter;
-using static Ryujinx.Audio.Renderer.Parameter.VoiceInParameter;
+using static Ryujinx.Audio.Renderer.Parameter.VoiceInParameter1;
 using PlayState = Ryujinx.Audio.Renderer.Server.Types.PlayState;
 
 namespace Ryujinx.Audio.Renderer.Server.Voice
 {
     [StructLayout(LayoutKind.Sequential, Pack = Alignment)]
-    public struct VoiceState
+    public struct VoiceInfo
     {
         public const int Alignment = 0x10;
+
+        private static readonly ObjectPool<Memory<VoiceState>[]> voiceStatesPool = new(() => new Memory<VoiceState>[Constants.VoiceChannelCountMax]);
 
         /// <summary>
         /// Set to true if the voice is used.
@@ -102,7 +107,7 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         /// <summary>
         /// Biquad filters to apply to the output of the voice.
         /// </summary>
-        public Array2<BiquadFilterParameter> BiquadFilters;
+        public Array2<BiquadFilterParameter2> BiquadFilters;
 
         /// <summary>
         /// Total count of <see cref="WaveBufferInternal"/> of the voice.
@@ -185,7 +190,7 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         public Span<bool> BiquadFilterNeedInitialization => SpanHelpers.AsSpan<BiquadFilterNeedInitializationArrayStruct, bool>(ref _biquadFilterNeedInitialization);
 
         /// <summary>
-        /// Initialize the <see cref="VoiceState"/>.
+        /// Initialize the <see cref="VoiceInfo"/>.
         /// </summary>
         public void Initialize()
         {
@@ -215,19 +220,21 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         }
 
         /// <summary>
-        /// Initialize the <see cref="WaveBuffer"/> in this <see cref="VoiceState"/>.
+        /// Initialize the <see cref="WaveBuffer"/> in this <see cref="VoiceInfo"/>.
         /// </summary>
         private void InitializeWaveBuffers()
         {
-            for (int i = 0; i < WaveBuffers.Length; i++)
+            Span<WaveBuffer> waveBuffersSpan = WaveBuffers.AsSpan();
+
+            for (int i = 0; i < waveBuffersSpan.Length; i++)
             {
-                WaveBuffers[i].StartSampleOffset = 0;
-                WaveBuffers[i].EndSampleOffset = 0;
-                WaveBuffers[i].ShouldLoop = false;
-                WaveBuffers[i].IsEndOfStream = false;
-                WaveBuffers[i].BufferAddressInfo.Setup(0, 0);
-                WaveBuffers[i].ContextAddressInfo.Setup(0, 0);
-                WaveBuffers[i].IsSendToAudioProcessor = true;
+                waveBuffersSpan[i].StartSampleOffset = 0;
+                waveBuffersSpan[i].EndSampleOffset = 0;
+                waveBuffersSpan[i].ShouldLoop = false;
+                waveBuffersSpan[i].IsEndOfStream = false;
+                waveBuffersSpan[i].BufferAddressInfo.Setup(0, 0);
+                waveBuffersSpan[i].ContextAddressInfo.Setup(0, 0);
+                waveBuffersSpan[i].IsSendToAudioProcessor = true;
             }
         }
 
@@ -254,7 +261,24 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         /// </summary>
         /// <param name="parameter">The user parameter.</param>
         /// <returns>Return true, if the server voice information needs to be updated.</returns>
-        private readonly bool ShouldUpdateParameters(in VoiceInParameter parameter)
+        private readonly bool ShouldUpdateParameters2(in VoiceInParameter2 parameter)
+        {
+            if (DataSourceStateAddressInfo.CpuAddress == parameter.DataSourceStateAddress)
+            {
+                return DataSourceStateAddressInfo.Size != parameter.DataSourceStateSize;
+            }
+
+            return DataSourceStateAddressInfo.CpuAddress != parameter.DataSourceStateAddress ||
+                   DataSourceStateAddressInfo.Size != parameter.DataSourceStateSize ||
+                   DataSourceStateUnmapped;
+        }
+
+        /// <summary>
+        /// Indicate if the server voice information needs to be updated.
+        /// </summary>
+        /// <param name="parameter">The user parameter.</param>
+        /// <returns>Return true, if the server voice information needs to be updated.</returns>
+        private readonly bool ShouldUpdateParameters1(in VoiceInParameter1 parameter)
         {
             if (DataSourceStateAddressInfo.CpuAddress == parameter.DataSourceStateAddress)
             {
@@ -272,8 +296,8 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         /// <param name="outErrorInfo">The possible <see cref="ErrorInfo"/> that was generated.</param>
         /// <param name="parameter">The user parameter.</param>
         /// <param name="poolMapper">The mapper to use.</param>
-        /// <param name="behaviourContext">The behaviour context.</param>
-        public void UpdateParameters(out ErrorInfo outErrorInfo, in VoiceInParameter parameter, PoolMapper poolMapper, ref BehaviourContext behaviourContext)
+        /// <param name="behaviourInfo">The behaviour context.</param>
+        public void UpdateParameters2(out ErrorInfo outErrorInfo, in VoiceInParameter2 parameter, PoolMapper poolMapper, ref BehaviourInfo behaviourInfo)
         {
             InUse = parameter.InUse;
             Id = parameter.Id;
@@ -294,14 +318,14 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
             WaveBuffersCount = parameter.WaveBuffersCount;
             WaveBuffersIndex = parameter.WaveBuffersIndex;
 
-            if (behaviourContext.IsFlushVoiceWaveBuffersSupported())
+            if (behaviourInfo.IsFlushVoiceWaveBuffersSupported())
             {
                 FlushWaveBufferCount += parameter.FlushWaveBufferCount;
             }
 
             MixId = parameter.MixId;
 
-            if (behaviourContext.IsSplitterSupported())
+            if (behaviourInfo.IsSplitterSupported())
             {
                 SplitterId = parameter.SplitterId;
             }
@@ -314,7 +338,7 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
 
             DecodingBehaviour behaviour = DecodingBehaviour.Default;
 
-            if (behaviourContext.IsDecodingBehaviourFlagSupported())
+            if (behaviourInfo.IsDecodingBehaviourFlagSupported())
             {
                 behaviour = parameter.DecodingBehaviourFlags;
             }
@@ -326,7 +350,78 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
                 VoiceDropFlag = false;
             }
 
-            if (ShouldUpdateParameters(in parameter))
+            if (ShouldUpdateParameters2(in parameter))
+            {
+                DataSourceStateUnmapped = !poolMapper.TryAttachBuffer(out outErrorInfo, ref DataSourceStateAddressInfo, parameter.DataSourceStateAddress, parameter.DataSourceStateSize);
+            }
+            else
+            {
+                outErrorInfo = new ErrorInfo();
+            }
+        }
+
+        /// <summary>
+        /// Update the internal state from a user parameter.
+        /// </summary>
+        /// <param name="outErrorInfo">The possible <see cref="ErrorInfo"/> that was generated.</param>
+        /// <param name="parameter">The user paramter2.</param>
+        /// <param name="poolMapper">The mapper to use.</param>
+        /// <param name="behaviourInfo">The behaviour context.</param>
+        public void UpdateParameters1(out ErrorInfo outErrorInfo, in VoiceInParameter1 parameter, PoolMapper poolMapper, ref BehaviourInfo behaviourInfo)
+        {
+            InUse = parameter.InUse;
+            Id = parameter.Id;
+            NodeId = parameter.NodeId;
+
+            UpdatePlayState(parameter.PlayState);
+
+            SrcQuality = parameter.SrcQuality;
+
+            Priority = parameter.Priority;
+            SortingOrder = parameter.SortingOrder;
+            SampleRate = parameter.SampleRate;
+            SampleFormat = parameter.SampleFormat;
+            ChannelsCount = parameter.ChannelCount;
+            Pitch = parameter.Pitch;
+            Volume = parameter.Volume;
+            BiquadFilters[0] = BiquadFilterHelper.ToBiquadFilterParameter2(parameter.BiquadFilters[0]);
+            BiquadFilters[1] = BiquadFilterHelper.ToBiquadFilterParameter2(parameter.BiquadFilters[1]);
+            WaveBuffersCount = parameter.WaveBuffersCount;
+            WaveBuffersIndex = parameter.WaveBuffersIndex;
+
+            if (behaviourInfo.IsFlushVoiceWaveBuffersSupported())
+            {
+                FlushWaveBufferCount += parameter.FlushWaveBufferCount;
+            }
+
+            MixId = parameter.MixId;
+
+            if (behaviourInfo.IsSplitterSupported())
+            {
+                SplitterId = parameter.SplitterId;
+            }
+            else
+            {
+                SplitterId = Constants.UnusedSplitterId;
+            }
+
+            parameter.ChannelResourceIds.AsSpan().CopyTo(ChannelResourceIds.AsSpan());
+
+            DecodingBehaviour behaviour = DecodingBehaviour.Default;
+
+            if (behaviourInfo.IsDecodingBehaviourFlagSupported())
+            {
+                behaviour = parameter.DecodingBehaviourFlags;
+            }
+
+            DecodingBehaviour = behaviour;
+
+            if (parameter.ResetVoiceDropFlag)
+            {
+                VoiceDropFlag = false;
+            }
+
+            if (ShouldUpdateParameters1(in parameter))
             {
                 DataSourceStateUnmapped = !poolMapper.TryAttachBuffer(out outErrorInfo, ref DataSourceStateAddressInfo, parameter.DataSourceStateAddress, parameter.DataSourceStateSize);
             }
@@ -379,8 +474,8 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         /// </summary>
         /// <param name="outStatus">The given user output.</param>
         /// <param name="parameter">The user parameter.</param>
-        /// <param name="voiceUpdateStates">The voice states associated to the <see cref="VoiceState"/>.</param>
-        public void WriteOutStatus(ref VoiceOutStatus outStatus, in VoiceInParameter parameter, ReadOnlySpan<Memory<VoiceUpdateState>> voiceUpdateStates)
+        /// <param name="voiceStates">The voice states associated to the <see cref="VoiceInfo"/>.</param>
+        public void WriteOutStatus2(ref VoiceOutStatus outStatus, in VoiceInParameter2 parameter, ReadOnlySpan<Memory<VoiceState>> voiceStates)
         {
 #if DEBUG
             // Sanity check in debug mode of the internal state
@@ -388,8 +483,8 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
             {
                 for (int i = 1; i < ChannelsCount; i++)
                 {
-                    ref VoiceUpdateState stateA = ref voiceUpdateStates[i - 1].Span[0];
-                    ref VoiceUpdateState stateB = ref voiceUpdateStates[i].Span[0];
+                    ref VoiceState stateA = ref voiceStates[i - 1].Span[0];
+                    ref VoiceState stateB = ref voiceStates[i].Span[0];
 
                     Debug.Assert(stateA.WaveBufferConsumed == stateB.WaveBufferConsumed);
                     Debug.Assert(stateA.PlayedSampleCount == stateB.PlayedSampleCount);
@@ -410,7 +505,7 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
             }
             else
             {
-                ref VoiceUpdateState state = ref voiceUpdateStates[0].Span[0];
+                ref VoiceState state = ref voiceStates[0].Span[0];
 
                 outStatus.VoiceDropFlag = VoiceDropFlag;
                 outStatus.PlayedWaveBuffersCount = state.WaveBufferConsumed;
@@ -419,21 +514,65 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         }
 
         /// <summary>
-        /// Update the internal state of all the <see cref="WaveBuffer"/> of the <see cref="VoiceState"/>.
+        /// Write the status of the voice to the given user output.
+        /// </summary>
+        /// <param name="outStatus">The given user output.</param>
+        /// <param name="parameter">The user parameter.</param>
+        /// <param name="voiceStates">The voice states associated to the <see cref="VoiceInfo"/>.</param>
+        public void WriteOutStatus1(ref VoiceOutStatus outStatus, in VoiceInParameter1 parameter, ReadOnlySpan<Memory<VoiceState>> voiceStates)
+        {
+#if DEBUG
+            // Sanity check in debug mode of the internal state
+            if (!parameter.IsNew && !IsNew)
+            {
+                for (int i = 1; i < ChannelsCount; i++)
+                {
+                    ref VoiceState stateA = ref voiceStates[i - 1].Span[0];
+                    ref VoiceState stateB = ref voiceStates[i].Span[0];
+
+                    Debug.Assert(stateA.WaveBufferConsumed == stateB.WaveBufferConsumed);
+                    Debug.Assert(stateA.PlayedSampleCount == stateB.PlayedSampleCount);
+                    Debug.Assert(stateA.Offset == stateB.Offset);
+                    Debug.Assert(stateA.WaveBufferIndex == stateB.WaveBufferIndex);
+                    Debug.Assert(stateA.Fraction == stateB.Fraction);
+                    Debug.Assert(stateA.IsWaveBufferValid.SequenceEqual(stateB.IsWaveBufferValid));
+                }
+            }
+#endif
+            if (parameter.IsNew || IsNew)
+            {
+                IsNew = true;
+
+                outStatus.VoiceDropFlag = false;
+                outStatus.PlayedWaveBuffersCount = 0;
+                outStatus.PlayedSampleCount = 0;
+            }
+            else
+            {
+                ref VoiceState state = ref voiceStates[0].Span[0];
+
+                outStatus.VoiceDropFlag = VoiceDropFlag;
+                outStatus.PlayedWaveBuffersCount = state.WaveBufferConsumed;
+                outStatus.PlayedSampleCount = state.PlayedSampleCount;
+            }
+        }
+
+        /// <summary>
+        /// Update the internal state of all the <see cref="WaveBuffer"/> of the <see cref="VoiceInfo"/>.
         /// </summary>
         /// <param name="errorInfos">An array of <see cref="ErrorInfo"/> used to report errors when mapping any of the <see cref="WaveBuffer"/>.</param>
         /// <param name="parameter">The user parameter.</param>
-        /// <param name="voiceUpdateStates">The voice states associated to the <see cref="VoiceState"/>.</param>
+        /// <param name="voiceStates">The voice states associated to the <see cref="VoiceInfo"/>.</param>
         /// <param name="mapper">The mapper to use.</param>
-        /// <param name="behaviourContext">The behaviour context.</param>
-        public void UpdateWaveBuffers(
+        /// <param name="behaviourInfo">The behaviour context.</param>
+        public void UpdateWaveBuffers2(
             out ErrorInfo[] errorInfos,
-            in VoiceInParameter parameter,
-            ReadOnlySpan<Memory<VoiceUpdateState>> voiceUpdateStates,
+            in VoiceInParameter2 parameter,
+            ReadOnlySpan<Memory<VoiceState>> voiceStates,
             PoolMapper mapper,
-            ref BehaviourContext behaviourContext)
+            ref BehaviourInfo behaviourInfo)
         {
-            errorInfos = new ErrorInfo[Constants.VoiceWaveBufferCount * 2];
+
 
             if (parameter.IsNew)
             {
@@ -441,20 +580,67 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
 
                 for (int i = 0; i < parameter.ChannelCount; i++)
                 {
-                    voiceUpdateStates[i].Span[0].IsWaveBufferValid.Clear();
+                    voiceStates[i].Span[0].IsWaveBufferValid.Clear();
                 }
             }
 
-            ref VoiceUpdateState voiceUpdateState = ref voiceUpdateStates[0].Span[0];
+            ref VoiceState voiceState = ref voiceStates[0].Span[0];
+
+            Span<WaveBuffer> waveBuffersSpan = WaveBuffers.AsSpan();
+            Span<WaveBufferInternal> pWaveBuffersSpan = parameter.WaveBuffers.AsSpan();
+            List<ErrorInfo> errorInfosList = [];
 
             for (int i = 0; i < Constants.VoiceWaveBufferCount; i++)
             {
-                UpdateWaveBuffer(errorInfos.AsSpan(i * 2, 2), ref WaveBuffers[i], ref parameter.WaveBuffers[i], parameter.SampleFormat, voiceUpdateState.IsWaveBufferValid[i], mapper, ref behaviourContext);
+                UpdateWaveBuffer(errorInfosList, ref waveBuffersSpan[i], ref pWaveBuffersSpan[i], parameter.SampleFormat, voiceState.IsWaveBufferValid[i], mapper, ref behaviourInfo);
             }
+
+            errorInfos = errorInfosList.ToArray();
         }
 
         /// <summary>
-        /// Update the internal state of one of the <see cref="WaveBuffer"/> of the <see cref="VoiceState"/>.
+        /// Update the internal state of all the <see cref="WaveBuffer"/> of the <see cref="VoiceInfo"/>.
+        /// </summary>
+        /// <param name="errorInfos">An array of <see cref="ErrorInfo"/> used to report errors when mapping any of the <see cref="WaveBuffer"/>.</param>
+        /// <param name="parameter">The user parameter.</param>
+        /// <param name="voiceStates">The voice states associated to the <see cref="VoiceInfo"/>.</param>
+        /// <param name="mapper">The mapper to use.</param>
+        /// <param name="behaviourInfo">The behaviour context.</param>
+        public void UpdateWaveBuffers1(
+            out ErrorInfo[] errorInfos,
+            in VoiceInParameter1 parameter,
+            ReadOnlySpan<Memory<VoiceState>> voiceStates,
+            PoolMapper mapper,
+            ref BehaviourInfo behaviourInfo)
+        {
+
+
+            if (parameter.IsNew)
+            {
+                InitializeWaveBuffers();
+
+                for (int i = 0; i < parameter.ChannelCount; i++)
+                {
+                    voiceStates[i].Span[0].IsWaveBufferValid.Clear();
+                }
+            }
+
+            ref VoiceState voiceState = ref voiceStates[0].Span[0];
+
+            Span<WaveBuffer> waveBuffersSpan = WaveBuffers.AsSpan();
+            Span<WaveBufferInternal> pWaveBuffersSpan = parameter.WaveBuffers.AsSpan();
+            List<ErrorInfo> errorInfosList = [];
+
+            for (int i = 0; i < Constants.VoiceWaveBufferCount; i++)
+            {
+                UpdateWaveBuffer(errorInfosList, ref waveBuffersSpan[i], ref pWaveBuffersSpan[i], parameter.SampleFormat, voiceState.IsWaveBufferValid[i], mapper, ref behaviourInfo);
+            }
+
+            errorInfos = errorInfosList.ToArray();
+        }
+
+        /// <summary>
+        /// Update the internal state of one of the <see cref="WaveBuffer"/> of the <see cref="VoiceInfo"/>.
         /// </summary>
         /// <param name="errorInfos">A <see cref="Span{ErrorInfo}"/> used to report errors when mapping the <see cref="WaveBuffer"/>.</param>
         /// <param name="waveBuffer">The <see cref="WaveBuffer"/> to update.</param>
@@ -462,15 +648,15 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         /// <param name="sampleFormat">The <see cref="SampleFormat"/> from the user input.</param>
         /// <param name="isValid">If set to true, the server side wavebuffer is considered valid.</param>
         /// <param name="mapper">The mapper to use.</param>
-        /// <param name="behaviourContext">The behaviour context.</param>
+        /// <param name="behaviourInfo">The behaviour context.</param>
         private void UpdateWaveBuffer(
-            Span<ErrorInfo> errorInfos,
+            List<ErrorInfo> errorInfos,
             ref WaveBuffer waveBuffer,
             ref WaveBufferInternal inputWaveBuffer,
             SampleFormat sampleFormat,
             bool isValid,
             PoolMapper mapper,
-            ref BehaviourContext behaviourContext)
+            ref BehaviourInfo behaviourInfo)
         {
             if (!isValid && waveBuffer.IsSendToAudioProcessor && waveBuffer.BufferAddressInfo.CpuAddress != 0)
             {
@@ -495,24 +681,30 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
 
                     BufferInfoUnmapped = !mapper.TryAttachBuffer(out ErrorInfo bufferInfoError, ref waveBuffer.BufferAddressInfo, inputWaveBuffer.Address, inputWaveBuffer.Size);
 
-                    errorInfos[0] = bufferInfoError;
+                    if (bufferInfoError.ErrorCode != ResultCode.Success)
+                    {
+                        errorInfos.Add(bufferInfoError);
+                    }
 
-                    if (sampleFormat == SampleFormat.Adpcm && behaviourContext.IsAdpcmLoopContextBugFixed() && inputWaveBuffer.ContextAddress != 0)
+                    if (sampleFormat == SampleFormat.Adpcm && behaviourInfo.IsAdpcmLoopContextBugFixed() && inputWaveBuffer.ContextAddress != 0)
                     {
                         bool adpcmLoopContextMapped = mapper.TryAttachBuffer(out ErrorInfo adpcmLoopContextInfoError,
                                                                              ref waveBuffer.ContextAddressInfo,
                                                                              inputWaveBuffer.ContextAddress,
                                                                              inputWaveBuffer.ContextSize);
 
-                        errorInfos[1] = adpcmLoopContextInfoError;
-
-                        if (adpcmLoopContextMapped)
+                        if (adpcmLoopContextInfoError.ErrorCode != ResultCode.Success)
                         {
-                            BufferInfoUnmapped = DataSourceStateUnmapped;
+                            errorInfos.Add(adpcmLoopContextInfoError);
+                        }
+
+                        if (!adpcmLoopContextMapped || BufferInfoUnmapped)
+                        {
+                            BufferInfoUnmapped = true;
                         }
                         else
                         {
-                            BufferInfoUnmapped = true;
+                            BufferInfoUnmapped = false;
                         }
                     }
                     else
@@ -522,14 +714,17 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
                 }
                 else
                 {
-                    errorInfos[0].ErrorCode = ResultCode.InvalidAddressInfo;
-                    errorInfos[0].ExtraErrorInfo = inputWaveBuffer.Address;
+                    errorInfos.Add(new ErrorInfo
+                    {
+                        ErrorCode = ResultCode.InvalidAddressInfo,
+                        ExtraErrorInfo = inputWaveBuffer.Address
+                    });
                 }
             }
         }
 
         /// <summary>
-        /// Reset the resources associated to this <see cref="VoiceState"/>.
+        /// Reset the resources associated to this <see cref="VoiceInfo"/>.
         /// </summary>
         /// <param name="context">The voice context.</param>
         private void ResetResources(VoiceContext context)
@@ -542,9 +737,9 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
 
                 Debug.Assert(voiceChannelResource.IsUsed);
 
-                Memory<VoiceUpdateState> dspSharedState = context.GetUpdateStateForDsp(channelResourceId);
+                Memory<VoiceState> dspSharedState = context.GetUpdateStateForDsp(channelResourceId);
 
-                MemoryMarshal.Cast<VoiceUpdateState, byte>(dspSharedState.Span).Clear();
+                MemoryMarshal.Cast<VoiceState, byte>(dspSharedState.Span).Clear();
 
                 voiceChannelResource.UpdateState();
             }
@@ -554,24 +749,31 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         /// Flush a certain amount of <see cref="WaveBuffer"/>.
         /// </summary>
         /// <param name="waveBufferCount">The amount of wavebuffer to flush.</param>
-        /// <param name="voiceUpdateStates">The voice states associated to the <see cref="VoiceState"/>.</param>
+        /// <param name="voiceStates">The voice states associated to the <see cref="VoiceInfo"/>.</param>
         /// <param name="channelCount">The channel count from user input.</param>
-        private void FlushWaveBuffers(uint waveBufferCount, Memory<VoiceUpdateState>[] voiceUpdateStates, uint channelCount)
+        private void FlushWaveBuffers(uint waveBufferCount, Memory<VoiceState>[] voiceStates, uint channelCount)
         {
             uint waveBufferIndex = WaveBuffersIndex;
 
+            Span<WaveBuffer> waveBuffersSpan = WaveBuffers.AsSpan();
+
             for (int i = 0; i < waveBufferCount; i++)
             {
-                WaveBuffers[(int)waveBufferIndex].IsSendToAudioProcessor = true;
+                waveBuffersSpan[(int)waveBufferIndex].IsSendToAudioProcessor = true;
 
                 for (int j = 0; j < channelCount; j++)
                 {
-                    ref VoiceUpdateState voiceUpdateState = ref voiceUpdateStates[j].Span[0];
+                    ref VoiceState voiceState = ref voiceStates[j].Span[0];
 
-                    voiceUpdateState.WaveBufferIndex = (voiceUpdateState.WaveBufferIndex + 1) % Constants.VoiceWaveBufferCount;
-                    voiceUpdateState.WaveBufferConsumed++;
-                    voiceUpdateState.IsWaveBufferValid[(int)waveBufferIndex] = false;
+                    if (!waveBuffersSpan[(int)waveBufferIndex].IsSendToAudioProcessor || voiceState.IsWaveBufferValid[(int)waveBufferIndex])
+                    {
+                        voiceState.WaveBufferIndex = (voiceState.WaveBufferIndex + 1) % Constants.VoiceWaveBufferCount;
+                        voiceState.WaveBufferConsumed++;
+                        voiceState.IsWaveBufferValid[(int)waveBufferIndex] = false;
+                    }
                 }
+
+                waveBuffersSpan[(int)waveBufferIndex].IsSendToAudioProcessor = true;
 
                 waveBufferIndex = (waveBufferIndex + 1) % Constants.VoiceWaveBufferCount;
             }
@@ -580,13 +782,13 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
         /// <summary>
         /// Update the internal parameters for command generation.
         /// </summary>
-        /// <param name="voiceUpdateStates">The voice states associated to the <see cref="VoiceState"/>.</param>
+        /// <param name="voiceStates">The voice states associated to the <see cref="VoiceInfo"/>.</param>
         /// <returns>Return true if this voice should be played.</returns>
-        public bool UpdateParametersForCommandGeneration(Memory<VoiceUpdateState>[] voiceUpdateStates)
+        public bool UpdateParametersForCommandGeneration(Memory<VoiceState>[] voiceStates)
         {
             if (FlushWaveBufferCount != 0)
             {
-                FlushWaveBuffers(FlushWaveBufferCount, voiceUpdateStates, ChannelsCount);
+                FlushWaveBuffers(FlushWaveBufferCount, voiceStates, ChannelsCount);
 
                 FlushWaveBufferCount = 0;
             }
@@ -602,9 +804,9 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
                         {
                             for (int y = 0; y < ChannelsCount; y++)
                             {
-                                Debug.Assert(!voiceUpdateStates[y].Span[0].IsWaveBufferValid[i]);
+                                Debug.Assert(!voiceStates[y].Span[0].IsWaveBufferValid[i]);
 
-                                voiceUpdateStates[y].Span[0].IsWaveBufferValid[i] = true;
+                                voiceStates[y].Span[0].IsWaveBufferValid[i] = true;
                             }
 
                             wavebuffer.IsSendToAudioProcessor = true;
@@ -613,11 +815,11 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
 
                     WasPlaying = false;
 
-                    ref VoiceUpdateState primaryVoiceUpdateState = ref voiceUpdateStates[0].Span[0];
+                    ref VoiceState primaryVoiceState = ref voiceStates[0].Span[0];
 
-                    for (int i = 0; i < primaryVoiceUpdateState.IsWaveBufferValid.Length; i++)
+                    for (int i = 0; i < primaryVoiceState.IsWaveBufferValid.Length; i++)
                     {
-                        if (primaryVoiceUpdateState.IsWaveBufferValid[i])
+                        if (primaryVoiceState.IsWaveBufferValid[i])
                         {
                             return true;
                         }
@@ -634,27 +836,27 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
 
                         for (int j = 0; j < ChannelsCount; j++)
                         {
-                            ref VoiceUpdateState voiceUpdateState = ref voiceUpdateStates[j].Span[0];
+                            ref VoiceState voiceState = ref voiceStates[j].Span[0];
 
-                            if (voiceUpdateState.IsWaveBufferValid[i])
+                            if (voiceState.IsWaveBufferValid[i])
                             {
-                                voiceUpdateState.WaveBufferIndex = (voiceUpdateState.WaveBufferIndex + 1) % Constants.VoiceWaveBufferCount;
-                                voiceUpdateState.WaveBufferConsumed++;
+                                voiceState.WaveBufferIndex = (voiceState.WaveBufferIndex + 1) % Constants.VoiceWaveBufferCount;
+                                voiceState.WaveBufferConsumed++;
                             }
 
-                            voiceUpdateState.IsWaveBufferValid[i] = false;
+                            voiceState.IsWaveBufferValid[i] = false;
                         }
                     }
 
                     for (int i = 0; i < ChannelsCount; i++)
                     {
-                        ref VoiceUpdateState voiceUpdateState = ref voiceUpdateStates[i].Span[0];
+                        ref VoiceState voiceState = ref voiceStates[i].Span[0];
 
-                        voiceUpdateState.Offset = 0;
-                        voiceUpdateState.PlayedSampleCount = 0;
-                        voiceUpdateState.Pitch.AsSpan().Clear();
-                        voiceUpdateState.Fraction = 0;
-                        voiceUpdateState.LoopContext = new AdpcmLoopContext();
+                        voiceState.Offset = 0;
+                        voiceState.PlayedSampleCount = 0;
+                        voiceState.Pitch.AsSpan().Clear();
+                        voiceState.Fraction = 0;
+                        voiceState.LoopContext = new AdpcmLoopContext();
                     }
 
                     PlayState = PlayState.Stopped;
@@ -700,14 +902,19 @@ namespace Ryujinx.Audio.Renderer.Server.Voice
                 IsNew = false;
             }
 
-            Memory<VoiceUpdateState>[] voiceUpdateStates = new Memory<VoiceUpdateState>[Constants.VoiceChannelCountMax];
+            Memory<VoiceState>[] voiceStates = voiceStatesPool.Allocate();
 
             for (int i = 0; i < ChannelsCount; i++)
             {
-                voiceUpdateStates[i] = context.GetUpdateStateForDsp(ChannelResourceIds[i]);
+                voiceStates[i] = context.GetUpdateStateForDsp(ChannelResourceIds[i]);
             }
 
-            return UpdateParametersForCommandGeneration(voiceUpdateStates);
+            bool result = UpdateParametersForCommandGeneration(voiceStates);
+
+            voiceStatesPool.Release(voiceStates);
+            //might contain garbage data, but said data will never be accessed
+
+            return result;
         }
     }
 }

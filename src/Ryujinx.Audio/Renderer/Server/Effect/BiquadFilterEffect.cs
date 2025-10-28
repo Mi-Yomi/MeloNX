@@ -1,4 +1,5 @@
 using Ryujinx.Audio.Renderer.Common;
+using Ryujinx.Audio.Renderer.Dsp;
 using Ryujinx.Audio.Renderer.Dsp.State;
 using Ryujinx.Audio.Renderer.Parameter;
 using Ryujinx.Audio.Renderer.Parameter.Effect;
@@ -17,7 +18,7 @@ namespace Ryujinx.Audio.Renderer.Server.Effect
         /// <summary>
         /// The biquad filter parameter.
         /// </summary>
-        public BiquadFilterEffectParameter Parameter;
+        public BiquadFilterEffectParameter2 Parameter;
 
         /// <summary>
         /// The biquad filter state.
@@ -25,12 +26,18 @@ namespace Ryujinx.Audio.Renderer.Server.Effect
         public Memory<BiquadFilterState> State { get; }
 
         /// <summary>
+        /// The biquad filter effect version.
+        /// </summary>
+        public int BiquadFilterEffectVersion;
+
+        /// <summary>
         /// Create a new <see cref="BiquadFilterEffect"/>.
         /// </summary>
-        public BiquadFilterEffect()
+        public BiquadFilterEffect(int version)
         {
-            Parameter = new BiquadFilterEffectParameter();
+            Parameter = new BiquadFilterEffectParameter2();
             State = new BiquadFilterState[Constants.ChannelCountMax];
+            BiquadFilterEffectVersion = version;
         }
 
         public override EffectType TargetEffectType => EffectType.BiquadFilter;
@@ -51,7 +58,17 @@ namespace Ryujinx.Audio.Renderer.Server.Effect
 
             UpdateParameterBase(in parameter);
 
-            Parameter = MemoryMarshal.Cast<byte, BiquadFilterEffectParameter>(parameter.SpecificData)[0];
+            if (BiquadFilterEffectVersion == 2)
+            {
+                Parameter = MemoryMarshal.Cast<byte, BiquadFilterEffectParameter2>(parameter.SpecificData)[0];
+            }
+            else
+            {
+                BiquadFilterEffectParameter1 oldParameter =
+                    MemoryMarshal.Cast<byte, BiquadFilterEffectParameter1>(parameter.SpecificData)[0];
+                Parameter = BiquadFilterHelper.ToBiquadFilterEffectParameter2(oldParameter);
+            }
+
             IsEnabled = parameter.IsEnabled;
 
             updateErrorInfo = new BehaviourParameter.ErrorInfo();

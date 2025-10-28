@@ -21,7 +21,7 @@ namespace Ryujinx.Audio.Renderer.Parameter
         /// <summary>
         /// Biquad filter parameters.
         /// </summary>
-        Array2<BiquadFilterParameter> BiquadFilters { get; }
+        Array2<BiquadFilterParameter2> BiquadFilters2 { get; }
 
         /// <summary>
         /// Set to true if in use.

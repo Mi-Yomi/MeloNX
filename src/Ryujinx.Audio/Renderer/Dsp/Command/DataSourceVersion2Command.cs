@@ -2,7 +2,8 @@ using Ryujinx.Audio.Common;
 using Ryujinx.Audio.Renderer.Common;
 using Ryujinx.Audio.Renderer.Server.Voice;
 using System;
-using static Ryujinx.Audio.Renderer.Parameter.VoiceInParameter;
+using Ryujinx.Audio.Renderer.Parameter;
+using Ryujinx.Memory;
 using WaveBuffer = Ryujinx.Audio.Renderer.Common.WaveBuffer;
 
 namespace Ryujinx.Audio.Renderer.Dsp.Command
@@ -11,65 +12,70 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
     {
         public bool Enabled { get; set; }
 
-        public int NodeId { get; }
+        public int NodeId { get; private set; }
 
-        public CommandType CommandType { get; }
+        public CommandType CommandType { get; private set; }
 
         public uint EstimatedProcessingTime { get; set; }
 
-        public ushort OutputBufferIndex { get; }
-        public uint SampleRate { get; }
+        public ushort OutputBufferIndex { get; private set; }
+        public uint SampleRate { get; private set; }
 
-        public float Pitch { get; }
+        public float Pitch { get; private set; }
 
         public WaveBuffer[] WaveBuffers { get; }
 
-        public Memory<VoiceUpdateState> State { get; }
+        public Memory<VoiceState> State { get; private set; }
 
-        public ulong ExtraParameter { get; }
-        public ulong ExtraParameterSize { get; }
+        public ulong ExtraParameter { get; private set; }
+        public ulong ExtraParameterSize { get; private set; }
 
-        public uint ChannelIndex { get; }
+        public uint ChannelIndex { get; private set; }
 
-        public uint ChannelCount { get; }
+        public uint ChannelCount { get; private set; }
 
-        public DecodingBehaviour DecodingBehaviour { get; }
+        public DecodingBehaviour DecodingBehaviour { get; private set; }
 
-        public SampleFormat SampleFormat { get; }
+        public SampleFormat SampleFormat { get; private set; }
 
-        public SampleRateConversionQuality SrcQuality { get; }
+        public SampleRateConversionQuality SrcQuality { get; private set; }
 
-        public DataSourceVersion2Command(ref VoiceState serverState, Memory<VoiceUpdateState> state, ushort outputBufferIndex, ushort channelIndex, int nodeId)
+        public DataSourceVersion2Command()
+        {
+            WaveBuffers = new WaveBuffer[Constants.VoiceWaveBufferCount];
+        }
+
+        public DataSourceVersion2Command Initialize(ref VoiceInfo serverInfo, Memory<VoiceState> state, ushort outputBufferIndex, ushort channelIndex, int nodeId)
         {
             Enabled = true;
             NodeId = nodeId;
             ChannelIndex = channelIndex;
-            ChannelCount = serverState.ChannelsCount;
-            SampleFormat = serverState.SampleFormat;
-            SrcQuality = serverState.SrcQuality;
+            ChannelCount = serverInfo.ChannelsCount;
+            SampleFormat = serverInfo.SampleFormat;
+            SrcQuality = serverInfo.SrcQuality;
             CommandType = GetCommandTypeBySampleFormat(SampleFormat);
 
             OutputBufferIndex = (ushort)(channelIndex + outputBufferIndex);
-            SampleRate = serverState.SampleRate;
-            Pitch = serverState.Pitch;
-
-            WaveBuffers = new WaveBuffer[Constants.VoiceWaveBufferCount];
+            SampleRate = serverInfo.SampleRate;
+            Pitch = serverInfo.Pitch;
 
             for (int i = 0; i < WaveBuffers.Length; i++)
             {
-                ref Server.Voice.WaveBuffer voiceWaveBuffer = ref serverState.WaveBuffers[i];
+                ref Server.Voice.WaveBuffer voiceWaveBuffer = ref serverInfo.WaveBuffers[i];
 
                 WaveBuffers[i] = voiceWaveBuffer.ToCommon(2);
             }
 
             if (SampleFormat == SampleFormat.Adpcm)
             {
-                ExtraParameter = serverState.DataSourceStateAddressInfo.GetReference(true);
-                ExtraParameterSize = serverState.DataSourceStateAddressInfo.Size;
+                ExtraParameter = serverInfo.DataSourceStateAddressInfo.GetReference(true);
+                ExtraParameterSize = serverInfo.DataSourceStateAddressInfo.Size;
             }
 
             State = state;
-            DecodingBehaviour = serverState.DecodingBehaviour;
+            DecodingBehaviour = serverInfo.DecodingBehaviour;
+
+            return this;
         }
 
         private static CommandType GetCommandTypeBySampleFormat(SampleFormat sampleFormat)

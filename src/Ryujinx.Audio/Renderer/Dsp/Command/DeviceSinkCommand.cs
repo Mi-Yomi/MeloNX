@@ -10,22 +10,27 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
     {
         public bool Enabled { get; set; }
 
-        public int NodeId { get; }
+        public int NodeId { get; private set; }
 
         public CommandType CommandType => CommandType.DeviceSink;
 
         public uint EstimatedProcessingTime { get; set; }
 
-        public string DeviceName { get; }
+        public string DeviceName { get; private set; }
 
-        public int SessionId { get; }
+        public int SessionId { get; private set; }
 
-        public uint InputCount { get; }
-        public ushort[] InputBufferIndices { get; }
+        public uint InputCount { get; private set; }
+        public ushort[] InputBufferIndices { get; private set; }
 
-        public Memory<float> Buffers { get; }
+        public Memory<float> Buffers { get; private set; }
 
-        public DeviceSinkCommand(uint bufferOffset, DeviceSink sink, int sessionId, Memory<float> buffers, int nodeId)
+        public DeviceSinkCommand()
+        {
+
+        }
+
+        public DeviceSinkCommand Initialize(uint bufferOffset, DeviceSink sink, int sessionId, Memory<float> buffers, int nodeId)
         {
             Enabled = true;
             NodeId = nodeId;
@@ -40,14 +45,16 @@ namespace Ryujinx.Audio.Renderer.Dsp.Command
                 InputBufferIndices[i] = (ushort)(bufferOffset + sink.Parameter.Input[i]);
             }
 
-            if (sink.UpsamplerState != null)
+            if (sink.UpsamplerInfo != null)
             {
-                Buffers = sink.UpsamplerState.OutputBuffer;
+                Buffers = sink.UpsamplerInfo.OutputBuffer;
             }
             else
             {
                 Buffers = buffers;
             }
+
+            return this;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

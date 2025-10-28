@@ -1,3 +1,4 @@
+using Ryujinx.Common;
 using Ryujinx.Common.Collections;
 using Ryujinx.Common.Memory.PartialUnmaps;
 using System;

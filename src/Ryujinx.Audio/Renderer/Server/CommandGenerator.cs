@@ -1,5 +1,6 @@
 using Ryujinx.Audio.Common;
 using Ryujinx.Audio.Renderer.Common;
+using Ryujinx.Audio.Renderer.Dsp;
 using Ryujinx.Audio.Renderer.Dsp.Command;
 using Ryujinx.Audio.Renderer.Dsp.State;
 using Ryujinx.Audio.Renderer.Parameter;
@@ -41,27 +42,27 @@ namespace Ryujinx.Audio.Renderer.Server
             _commandBuffer.GenerateClearMixBuffer(Constants.InvalidNodeId);
         }
 
-        private void GenerateDataSource(ref VoiceState voiceState, Memory<VoiceUpdateState> dspState, int channelIndex)
+        private void GenerateDataSource(ref VoiceInfo voiceInfo, Memory<VoiceState> dspState, int channelIndex)
         {
-            if (voiceState.MixId != Constants.UnusedMixId)
+            if (voiceInfo.MixId != Constants.UnusedMixId)
             {
-                ref MixState mix = ref _mixContext.GetState(voiceState.MixId);
+                ref MixInfo mix = ref _mixContext.GetState(voiceInfo.MixId);
 
                 _commandBuffer.GenerateDepopPrepare(
                     dspState,
                     _rendererContext.DepopBuffer,
                     mix.BufferCount,
                     mix.BufferOffset,
-                    voiceState.NodeId,
-                    voiceState.WasPlaying);
+                    voiceInfo.NodeId,
+                    voiceInfo.WasPlaying);
             }
-            else if (voiceState.SplitterId != Constants.UnusedSplitterId)
+            else if (voiceInfo.SplitterId != Constants.UnusedSplitterId)
             {
                 int destinationId = 0;
 
                 while (true)
                 {
-                    SplitterDestination destination = _splitterContext.GetDestination((int)voiceState.SplitterId, destinationId++);
+                    SplitterDestination destination = _splitterContext.GetDestination((int)voiceInfo.SplitterId, destinationId++);
 
                     if (destination.IsNull)
                     {
@@ -74,15 +75,15 @@ namespace Ryujinx.Audio.Renderer.Server
 
                         if (mixId < _mixContext.GetCount() && mixId != Constants.UnusedSplitterIdInt)
                         {
-                            ref MixState mix = ref _mixContext.GetState(mixId);
+                            ref MixInfo mix = ref _mixContext.GetState(mixId);
 
                             _commandBuffer.GenerateDepopPrepare(
                                 dspState,
                                 _rendererContext.DepopBuffer,
                                 mix.BufferCount,
                                 mix.BufferOffset,
-                                voiceState.NodeId,
-                                voiceState.WasPlaying);
+                                voiceInfo.NodeId,
+                                voiceInfo.WasPlaying);
 
                             destination.MarkAsNeedToUpdateInternalState();
                         }
@@ -90,69 +91,71 @@ namespace Ryujinx.Audio.Renderer.Server
                 }
             }
 
-            if (!voiceState.WasPlaying)
+            if (!voiceInfo.WasPlaying)
             {
-                Debug.Assert(voiceState.SampleFormat != SampleFormat.Adpcm || channelIndex == 0);
+                Debug.Assert(voiceInfo.SampleFormat != SampleFormat.Adpcm || channelIndex == 0);
 
-                if (_rendererContext.BehaviourContext.IsWaveBufferVersion2Supported())
+                if (_rendererContext.BehaviourInfo.IsWaveBufferVersion2Supported())
                 {
                     _commandBuffer.GenerateDataSourceVersion2(
-                        ref voiceState,
+                        ref voiceInfo,
                         dspState,
                         (ushort)_rendererContext.MixBufferCount,
                         (ushort)channelIndex,
-                        voiceState.NodeId);
+                        voiceInfo.NodeId);
                 }
                 else
                 {
-                    switch (voiceState.SampleFormat)
+                    switch (voiceInfo.SampleFormat)
                     {
                         case SampleFormat.PcmInt16:
                             _commandBuffer.GeneratePcmInt16DataSourceVersion1(
-                                ref voiceState,
+                                ref voiceInfo,
                                 dspState,
                                 (ushort)_rendererContext.MixBufferCount,
                                 (ushort)channelIndex,
-                                voiceState.NodeId);
+                                voiceInfo.NodeId);
                             break;
                         case SampleFormat.PcmFloat:
                             _commandBuffer.GeneratePcmFloatDataSourceVersion1(
-                                ref voiceState,
+                                ref voiceInfo,
                                 dspState,
                                 (ushort)_rendererContext.MixBufferCount,
                                 (ushort)channelIndex,
-                                voiceState.NodeId);
+                                voiceInfo.NodeId);
                             break;
                         case SampleFormat.Adpcm:
                             _commandBuffer.GenerateAdpcmDataSourceVersion1(
-                                ref voiceState,
+                                ref voiceInfo,
                                 dspState,
                                 (ushort)_rendererContext.MixBufferCount,
-                                voiceState.NodeId);
+                                voiceInfo.NodeId);
                             break;
                         default:
-                            throw new NotImplementedException($"Unsupported data source {voiceState.SampleFormat}");
+                            throw new NotImplementedException($"Unsupported data source {voiceInfo.SampleFormat}");
                     }
                 }
             }
         }
 
-        private void GenerateBiquadFilterForVoice(ref VoiceState voiceState, Memory<VoiceUpdateState> state, int baseIndex, int bufferOffset, int nodeId)
+        private void GenerateBiquadFilterForVoice(ref VoiceInfo voiceInfo, Memory<VoiceState> state, int baseIndex, int bufferOffset, int nodeId)
         {
-            bool supportsOptimizedPath = _rendererContext.BehaviourContext.UseMultiTapBiquadFilterProcessing();
+            bool supportsOptimizedPath = _rendererContext.BehaviourInfo.UseMultiTapBiquadFilterProcessing();
 
-            if (supportsOptimizedPath && voiceState.BiquadFilters[0].Enable && voiceState.BiquadFilters[1].Enable)
+            Span<BiquadFilterParameter2> biquadFiltersSpan = voiceInfo.BiquadFilters.AsSpan();
+
+            if (supportsOptimizedPath && biquadFiltersSpan[0].Enable && biquadFiltersSpan[1].Enable)
             {
                 Memory<byte> biquadStateRawMemory = SpanMemoryManager<byte>.Cast(state)[..(Unsafe.SizeOf<BiquadFilterState>() * Constants.VoiceBiquadFilterCount)];
                 Memory<BiquadFilterState> stateMemory = SpanMemoryManager<BiquadFilterState>.Cast(biquadStateRawMemory);
 
-                _commandBuffer.GenerateMultiTapBiquadFilter(baseIndex, voiceState.BiquadFilters.AsSpan(), stateMemory, bufferOffset, bufferOffset, voiceState.BiquadFilterNeedInitialization, nodeId);
+                _commandBuffer.GenerateMultiTapBiquadFilter(baseIndex, biquadFiltersSpan, stateMemory, bufferOffset, bufferOffset, voiceInfo.BiquadFilterNeedInitialization, nodeId);
             }
             else
             {
-                for (int i = 0; i < voiceState.BiquadFilters.Length; i++)
+                for (int i = 0; i < biquadFiltersSpan.Length; i++)
                 {
-                    ref BiquadFilterParameter filter = ref voiceState.BiquadFilters[i];
+                    ref BiquadFilterParameter2 filter = ref biquadFiltersSpan[i];
 
                     if (filter.Enable)
                     {
@@ -165,7 +168,7 @@ namespace Ryujinx.Audio.Renderer.Server
                             stateMemory.Slice(i, 1),
                             bufferOffset,
                             bufferOffset,
-                            !voiceState.BiquadFilterNeedInitialization[i],
+                            !voiceInfo.BiquadFilterNeedInitialization[i],
                             nodeId);
                     }
                 }
@@ -174,7 +177,7 @@ namespace Ryujinx.Audio.Renderer.Server
 
         private void GenerateVoiceMixWithSplitter(
             SplitterDestination destination,
-            Memory<VoiceUpdateState> state,
+            Memory<VoiceState> state,
             uint bufferOffset,
             uint bufferCount,
             uint bufferIndex,
@@ -183,8 +186,8 @@ namespace Ryujinx.Audio.Renderer.Server
             ReadOnlySpan<float> mixVolumes = destination.MixBufferVolume;
             ReadOnlySpan<float> previousMixVolumes = destination.PreviousMixBufferVolume;
 
-            ref BiquadFilterParameter bqf0 = ref destination.GetBiquadFilterParameter(0);
-            ref BiquadFilterParameter bqf1 = ref destination.GetBiquadFilterParameter(1);
+            ref BiquadFilterParameter2 bqf0 = ref destination.GetBiquadFilterParameter(0);
+            ref BiquadFilterParameter2 bqf1 = ref destination.GetBiquadFilterParameter(1);
 
             Memory<BiquadFilterState> bqfState = _splitterContext.GetBiquadFilterState(destination);
 
@@ -268,7 +271,7 @@ namespace Ryujinx.Audio.Renderer.Server
         private void GenerateVoiceMix(
             ReadOnlySpan<float> mixVolumes,
             ReadOnlySpan<float> previousMixVolumes,
-            Memory<VoiceUpdateState> state,
+            Memory<VoiceState> state,
             uint bufferOffset,
             uint bufferCount,
             uint bufferIndex,
@@ -307,31 +310,34 @@ namespace Ryujinx.Audio.Renderer.Server
             }
         }
 
-        private void GenerateVoice(ref VoiceState voiceState)
+        private void GenerateVoice(ref VoiceInfo voiceInfo)
         {
-            int nodeId = voiceState.NodeId;
-            uint channelsCount = voiceState.ChannelsCount;
+            int nodeId = voiceInfo.NodeId;
+            uint channelsCount = voiceInfo.ChannelsCount;
+
+            Span<int> channelResourceIdsSpan = voiceInfo.ChannelResourceIds.AsSpan();
+            Span<BiquadFilterParameter2> biquadFiltersSpan = voiceInfo.BiquadFilters.AsSpan();
 
             for (int channelIndex = 0; channelIndex < channelsCount; channelIndex++)
             {
-                Memory<VoiceUpdateState> dspStateMemory = _voiceContext.GetUpdateStateForDsp(voiceState.ChannelResourceIds[channelIndex]);
+                Memory<VoiceState> dspStateMemory = _voiceContext.GetUpdateStateForDsp(channelResourceIdsSpan[channelIndex]);
 
-                ref VoiceChannelResource channelResource = ref _voiceContext.GetChannelResource(voiceState.ChannelResourceIds[channelIndex]);
+                ref VoiceChannelResource channelResource = ref _voiceContext.GetChannelResource(channelResourceIdsSpan[channelIndex]);
 
                 PerformanceDetailType dataSourceDetailType = PerformanceDetailType.Adpcm;
 
-                if (voiceState.SampleFormat == SampleFormat.PcmInt16)
+                if (voiceInfo.SampleFormat == SampleFormat.PcmInt16)
                 {
                     dataSourceDetailType = PerformanceDetailType.PcmInt16;
                 }
-                else if (voiceState.SampleFormat == SampleFormat.PcmFloat)
+                else if (voiceInfo.SampleFormat == SampleFormat.PcmFloat)
                 {
                     dataSourceDetailType = PerformanceDetailType.PcmFloat;
                 }
 
                 bool performanceInitialized = false;
 
-                PerformanceEntryAddresses performanceEntry = new();
+                PerformanceEntryAddresses performanceEntry = null;
 
                 if (_performanceManager != null && _performanceManager.IsTargetNodeId(nodeId) && _performanceManager.GetNextEntry(out performanceEntry, dataSourceDetailType, PerformanceEntryType.Voice, nodeId))
                 {
@@ -340,18 +346,18 @@ namespace Ryujinx.Audio.Renderer.Server
                     GeneratePerformance(ref performanceEntry, PerformanceCommand.Type.Start, nodeId);
                 }
 
-                GenerateDataSource(ref voiceState, dspStateMemory, channelIndex);
+                GenerateDataSource(ref voiceInfo, dspStateMemory, channelIndex);
 
                 if (performanceInitialized)
                 {
                     GeneratePerformance(ref performanceEntry, PerformanceCommand.Type.End, nodeId);
                 }
 
-                if (voiceState.WasPlaying)
+                if (voiceInfo.WasPlaying)
                 {
-                    voiceState.PreviousVolume = 0.0f;
+                    voiceInfo.PreviousVolume = 0.0f;
                 }
-                else if (voiceState.HasAnyDestination())
+                else if (voiceInfo.HasAnyDestination())
                 {
                     performanceInitialized = false;
 
@@ -362,7 +368,7 @@ namespace Ryujinx.Audio.Renderer.Server
                         GeneratePerformance(ref performanceEntry, PerformanceCommand.Type.Start, nodeId);
                     }
 
-                    GenerateBiquadFilterForVoice(ref voiceState, dspStateMemory, (int)_rendererContext.MixBufferCount, channelIndex, nodeId);
+                    GenerateBiquadFilterForVoice(ref voiceInfo, dspStateMemory, (int)_rendererContext.MixBufferCount, channelIndex, nodeId);
 
                     if (performanceInitialized)
                     {
@@ -379,8 +385,8 @@ namespace Ryujinx.Audio.Renderer.Server
                     }
 
                     _commandBuffer.GenerateVolumeRamp(
-                        voiceState.PreviousVolume,
-                        voiceState.Volume,
+                        voiceInfo.PreviousVolume,
+                        voiceInfo.Volume,
                         _rendererContext.MixBufferCount + (uint)channelIndex,
                         nodeId);
 
@@ -389,17 +395,17 @@ namespace Ryujinx.Audio.Renderer.Server
                         GeneratePerformance(ref performanceEntry, PerformanceCommand.Type.End, nodeId);
                     }
 
-                    voiceState.PreviousVolume = voiceState.Volume;
+                    voiceInfo.PreviousVolume = voiceInfo.Volume;
 
-                    if (voiceState.MixId == Constants.UnusedMixId)
+                    if (voiceInfo.MixId == Constants.UnusedMixId)
                     {
-                        if (voiceState.SplitterId != Constants.UnusedSplitterId)
+                        if (voiceInfo.SplitterId != Constants.UnusedSplitterId)
                         {
                             int destinationId = channelIndex;
 
                             while (true)
                             {
-                                SplitterDestination destination = _splitterContext.GetDestination((int)voiceState.SplitterId, destinationId);
+                                SplitterDestination destination = _splitterContext.GetDestination((int)voiceInfo.SplitterId, destinationId);
 
                                 if (destination.IsNull)
                                 {
@@ -414,7 +420,7 @@ namespace Ryujinx.Audio.Renderer.Server
 
                                     if (mixId < _mixContext.GetCount() && mixId != Constants.UnusedSplitterIdInt)
                                     {
-                                        ref MixState mix = ref _mixContext.GetState(mixId);
+                                        ref MixInfo mix = ref _mixContext.GetState(mixId);
 
                                         if (destination.IsBiquadFilterEnabled())
                                         {
@@ -446,7 +452,7 @@ namespace Ryujinx.Audio.Renderer.Server
                     }
                     else
                     {
-                        ref MixState mix = ref _mixContext.GetState(voiceState.MixId);
+                        ref MixInfo mix = ref _mixContext.GetState(voiceInfo.MixId);
 
                         performanceInitialized = false;
 
@@ -474,9 +480,9 @@ namespace Ryujinx.Audio.Renderer.Server
                         channelResource.UpdateState();
                     }
 
-                    for (int i = 0; i < voiceState.BiquadFilterNeedInitialization.Length; i++)
+                    for (int i = 0; i < voiceInfo.BiquadFilterNeedInitialization.Length; i++)
                     {
-                        voiceState.BiquadFilterNeedInitialization[i] = voiceState.BiquadFilters[i].Enable;
+                        voiceInfo.BiquadFilterNeedInitialization[i] = biquadFiltersSpan[i].Enable;
                     }
                 }
             }
@@ -486,13 +492,13 @@ namespace Ryujinx.Audio.Renderer.Server
         {
             for (int i = 0; i < _voiceContext.GetCount(); i++)
             {
-                ref VoiceState sortedState = ref _voiceContext.GetSortedState(i);
+                ref VoiceInfo sortedInfo = ref _voiceContext.GetSortedState(i);
 
-                if (!sortedState.ShouldSkip() && sortedState.UpdateForCommandGeneration(_voiceContext))
+                if (!sortedInfo.ShouldSkip() && sortedInfo.UpdateForCommandGeneration(_voiceContext))
                 {
-                    int nodeId = sortedState.NodeId;
+                    int nodeId = sortedInfo.NodeId;
 
-                    PerformanceEntryAddresses performanceEntry = new();
+                    PerformanceEntryAddresses performanceEntry = null;
 
                     bool performanceInitialized = false;
 
@@ -503,7 +509,7 @@ namespace Ryujinx.Audio.Renderer.Server
                         GeneratePerformance(ref performanceEntry, PerformanceCommand.Type.Start, nodeId);
                     }
 
-                    GenerateVoice(ref sortedState);
+                    GenerateVoice(ref sortedInfo);
 
                     if (performanceInitialized)
                     {
@@ -620,12 +626,15 @@ namespace Ryujinx.Audio.Renderer.Server
         {
             Debug.Assert(effect.Type == EffectType.BiquadFilter);
 
+            Span<byte> inputSpan = effect.Parameter.Input.AsSpan();
+            Span<byte> outputSpan = effect.Parameter.Output.AsSpan();
+
             if (effect.IsEnabled)
             {
                 bool needInitialization = effect.Parameter.Status == UsageState.Invalid ||
-                    (effect.Parameter.Status == UsageState.New && !_rendererContext.BehaviourContext.IsBiquadFilterEffectStateClearBugFixed());
+                    (effect.Parameter.Status == UsageState.New && !_rendererContext.BehaviourInfo.IsBiquadFilterEffectStateClearBugFixed());
 
-                BiquadFilterParameter parameter = new()
+                BiquadFilterParameter2 parameter = new()
                 {
                     Enable = true,
                 };
@@ -639,8 +648,8 @@ namespace Ryujinx.Audio.Renderer.Server
                         (int)bufferOffset,
                         ref parameter,
                         effect.State.Slice(i, 1),
-                        effect.Parameter.Input[i],
-                        effect.Parameter.Output[i],
+                        inputSpan[i],
+                        outputSpan[i],
                         needInitialization,
                         nodeId);
                 }
@@ -649,8 +658,8 @@ namespace Ryujinx.Audio.Renderer.Server
             {
                 for (int i = 0; i < effect.Parameter.ChannelCount; i++)
                 {
-                    uint inputBufferIndex = bufferOffset + effect.Parameter.Input[i];
-                    uint outputBufferIndex = bufferOffset + effect.Parameter.Output[i];
+                    uint inputBufferIndex = bufferOffset + inputSpan[i];
+                    uint outputBufferIndex = bufferOffset + outputSpan[i];
 
                     // If the input and output isn't the same, generate a command.
                     if (inputBufferIndex != outputBufferIndex)
@@ -667,7 +676,7 @@ namespace Ryujinx.Audio.Renderer.Server
 
             ulong workBuffer = effect.GetWorkBuffer(-1);
 
-            if (_rendererContext.BehaviourContext.IsEffectInfoVersion2Supported())
+            if (_rendererContext.BehaviourInfo.IsEffectInfoVersion2Supported())
             {
                 Memory<EffectResultState> dspResultState;
 
@@ -759,13 +768,13 @@ namespace Ryujinx.Audio.Renderer.Server
                 nodeId);
         }
 
-        private void GenerateEffect(ref MixState mix, int effectId, BaseEffect effect)
+        private void GenerateEffect(ref MixInfo mix, int effectId, BaseEffect effect)
         {
             int nodeId = mix.NodeId;
 
             bool isFinalMix = mix.MixId == Constants.FinalMixId;
 
-            PerformanceEntryAddresses performanceEntry = new();
+            PerformanceEntryAddresses performanceEntry = null;
 
             bool performanceInitialized = false;
 
@@ -789,13 +798,13 @@ namespace Ryujinx.Audio.Renderer.Server
                     GenerateAuxEffect(mix.BufferOffset, (AuxiliaryBufferEffect)effect, nodeId);
                     break;
                 case EffectType.Delay:
-                    GenerateDelayEffect(mix.BufferOffset, (DelayEffect)effect, nodeId, _rendererContext.BehaviourContext.IsNewEffectChannelMappingSupported());
+                    GenerateDelayEffect(mix.BufferOffset, (DelayEffect)effect, nodeId, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
                     break;
                 case EffectType.Reverb:
-                    GenerateReverbEffect(mix.BufferOffset, (ReverbEffect)effect, nodeId, mix.IsLongSizePreDelaySupported, _rendererContext.BehaviourContext.IsNewEffectChannelMappingSupported());
+                    GenerateReverbEffect(mix.BufferOffset, (ReverbEffect)effect, nodeId, mix.IsLongSizePreDelaySupported, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
                     break;
                 case EffectType.Reverb3d:
-                    GenerateReverb3dEffect(mix.BufferOffset, (Reverb3dEffect)effect, nodeId, _rendererContext.BehaviourContext.IsNewEffectChannelMappingSupported());
+                    GenerateReverb3dEffect(mix.BufferOffset, (Reverb3dEffect)effect, nodeId, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
                     break;
                 case EffectType.BiquadFilter:
                     GenerateBiquadFilterEffect(mix.BufferOffset, (BiquadFilterEffect)effect, nodeId);
@@ -821,7 +830,7 @@ namespace Ryujinx.Audio.Renderer.Server
             effect.UpdateForCommandGeneration();
         }
 
-        private void GenerateEffects(ref MixState mix)
+        private void GenerateEffects(ref MixInfo mix)
         {
             ReadOnlySpan<int> effectProcessingOrderArray = mix.EffectProcessingOrderArray;
 
@@ -857,8 +866,8 @@ namespace Ryujinx.Audio.Renderer.Server
             ref bool isFirstMixBuffer,
             int nodeId)
         {
-            ref BiquadFilterParameter bqf0 = ref destination.GetBiquadFilterParameter(0);
-            ref BiquadFilterParameter bqf1 = ref destination.GetBiquadFilterParameter(1);
+            ref BiquadFilterParameter2 bqf0 = ref destination.GetBiquadFilterParameter(0);
+            ref BiquadFilterParameter2 bqf1 = ref destination.GetBiquadFilterParameter(1);
 
             Memory<BiquadFilterState> bqfState = _splitterContext.GetBiquadFilterState(destination);
 
@@ -870,7 +879,7 @@ namespace Ryujinx.Audio.Renderer.Server
                     inputBufferIndex,
                     outputBufferIndex,
                     0,
-                    Memory<VoiceUpdateState>.Empty,
+                    Memory<VoiceState>.Empty,
                     ref bqf0,
                     ref bqf1,
                     bqfState[..1],
@@ -894,7 +903,7 @@ namespace Ryujinx.Audio.Renderer.Server
                     inputBufferIndex,
                     outputBufferIndex,
                     0,
-                    Memory<VoiceUpdateState>.Empty,
+                    Memory<VoiceState>.Empty,
                     ref bqf0,
                     bqfState[..1],
                     bqfState.Slice(1, 1),
@@ -913,7 +922,7 @@ namespace Ryujinx.Audio.Renderer.Server
                     inputBufferIndex,
                     outputBufferIndex,
                     0,
-                    Memory<VoiceUpdateState>.Empty,
+                    Memory<VoiceState>.Empty,
                     ref bqf1,
                     bqfState[..1],
                     bqfState.Slice(1, 1),
@@ -928,7 +937,7 @@ namespace Ryujinx.Audio.Renderer.Server
             isFirstMixBuffer = false;
         }
 
-        private void GenerateMix(ref MixState mix)
+        private void GenerateMix(ref MixInfo mix)
         {
             if (mix.HasAnyDestination())
             {
@@ -957,7 +966,7 @@ namespace Ryujinx.Audio.Renderer.Server
 
                                 if (mixId < _mixContext.GetCount() && mixId != Constants.UnusedSplitterIdInt)
                                 {
-                                    ref MixState destinationMix = ref _mixContext.GetState(mixId);
+                                    ref MixInfo destinationMix = ref _mixContext.GetState(mixId);
 
                                     uint inputBufferIndex = mix.BufferOffset + ((uint)destinationIndex % mix.BufferCount);
 
@@ -996,7 +1005,7 @@ namespace Ryujinx.Audio.Renderer.Server
                 }
                 else
                 {
-                    ref MixState destinationMix = ref _mixContext.GetState(mix.DestinationMixId);
+                    ref MixInfo destinationMix = ref _mixContext.GetState(mix.DestinationMixId);
 
                     for (uint bufferIndex = 0; bufferIndex < mix.BufferCount; bufferIndex++)
                     {
@@ -1018,7 +1027,7 @@ namespace Ryujinx.Audio.Renderer.Server
             }
         }
 
-        private void GenerateSubMix(ref MixState subMix)
+        private void GenerateSubMix(ref MixInfo subMix)
         {
             _commandBuffer.GenerateDepopForMixBuffers(
                 _rendererContext.DepopBuffer,
@@ -1029,7 +1038,7 @@ namespace Ryujinx.Audio.Renderer.Server
 
             GenerateEffects(ref subMix);
 
-            PerformanceEntryAddresses performanceEntry = new();
+            PerformanceEntryAddresses performanceEntry = null;
 
             int nodeId = subMix.NodeId;
 
@@ -1054,13 +1063,13 @@ namespace Ryujinx.Audio.Renderer.Server
         {
             for (int id = 0; id < _mixContext.GetCount(); id++)
             {
-                ref MixState sortedState = ref _mixContext.GetSortedState(id);
+                ref MixInfo sortedState = ref _mixContext.GetSortedState(id);
 
                 if (sortedState.IsUsed && sortedState.MixId != Constants.FinalMixId)
                 {
                     int nodeId = sortedState.NodeId;
 
-                    PerformanceEntryAddresses performanceEntry = new();
+                    PerformanceEntryAddresses performanceEntry = null;
 
                     bool performanceInitialized = false;
 
@@ -1083,7 +1092,7 @@ namespace Ryujinx.Audio.Renderer.Server
 
         private void GenerateFinalMix()
         {
-            ref MixState finalMix = ref _mixContext.GetFinalState();
+            ref MixInfo finalMix = ref _mixContext.GetFinalState();
 
             _commandBuffer.GenerateDepopForMixBuffers(
                 _rendererContext.DepopBuffer,
@@ -1094,7 +1103,7 @@ namespace Ryujinx.Audio.Renderer.Server
 
             GenerateEffects(ref finalMix);
 
-            PerformanceEntryAddresses performanceEntry = new();
+            PerformanceEntryAddresses performanceEntry = null;
 
             int nodeId = finalMix.NodeId;
 
@@ -1143,7 +1152,7 @@ namespace Ryujinx.Audio.Renderer.Server
         {
             int nodeId = _mixContext.GetFinalState().NodeId;
 
-            PerformanceEntryAddresses performanceEntry = new();
+            PerformanceEntryAddresses performanceEntry = null;
 
             bool performanceInitialized = false;
 
@@ -1162,16 +1171,16 @@ namespace Ryujinx.Audio.Renderer.Server
             }
         }
 
-        private void GenerateCircularBuffer(CircularBufferSink sink, ref MixState finalMix)
+        private void GenerateCircularBuffer(CircularBufferSink sink, ref MixInfo finalMix)
         {
             _commandBuffer.GenerateCircularBuffer(finalMix.BufferOffset, sink, Constants.InvalidNodeId);
         }
 
-        private void GenerateDevice(DeviceSink sink, ref MixState finalMix)
+        private void GenerateDevice(DeviceSink sink, ref MixInfo finalMix)
         {
-            if (_commandBuffer.CommandList.SampleRate != 48000 && sink.UpsamplerState == null)
+            if (_commandBuffer.CommandList.SampleRate != 48000 && sink.UpsamplerInfo == null)
             {
-                sink.UpsamplerState = _rendererContext.UpsamplerManager.Allocate();
+                sink.UpsamplerInfo = _rendererContext.UpsamplerManager.Allocate();
             }
 
             bool useCustomDownMixingCommand = _rendererContext.ChannelCount == 2 && sink.Parameter.DownMixParameterEnabled;
@@ -1198,11 +1207,11 @@ namespace Ryujinx.Audio.Renderer.Server
 
             CommandList commandList = _commandBuffer.CommandList;
 
-            if (sink.UpsamplerState != null)
+            if (sink.UpsamplerInfo != null)
             {
                 _commandBuffer.GenerateUpsample(
                     finalMix.BufferOffset,
-                    sink.UpsamplerState,
+                    sink.UpsamplerInfo,
                     sink.Parameter.InputCount,
                     sink.Parameter.Input.AsSpan(),
                     commandList.BufferCount,
@@ -1219,11 +1228,11 @@ namespace Ryujinx.Audio.Renderer.Server
                 Constants.InvalidNodeId);
         }
 
-        private void GenerateSink(BaseSink sink, ref MixState finalMix)
+        private void GenerateSink(BaseSink sink, ref MixInfo finalMix)
         {
             bool performanceInitialized = false;
 
-            PerformanceEntryAddresses performanceEntry = new();
+            PerformanceEntryAddresses performanceEntry = null;
 
             if (_performanceManager != null && _performanceManager.GetNextEntry(out performanceEntry, PerformanceEntryType.Sink, sink.NodeId))
             {
@@ -1257,7 +1266,7 @@ namespace Ryujinx.Audio.Renderer.Server
 
         public void GenerateSinks()
         {
-            ref MixState finalMix = ref _mixContext.GetFinalState();
+            ref MixInfo finalMix = ref _mixContext.GetFinalState();
 
             for (int i = 0; i < _sinkContext.GetCount(); i++)
             {
