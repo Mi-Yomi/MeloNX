@@ -768,7 +768,7 @@ namespace Ryujinx.Graphics.Vulkan
                 supportsShaderBallot: false,
                 supportsShaderBarrierDivergence: Vendor != Vendor.Intel,
                 supportsShaderFloat64: Capabilities.SupportsShaderFloat64,
-                supportsTextureGatherOffsets: features2.Features.ShaderImageGatherExtended && !IsMoltenVk,
+                supportsTextureGatherOffsets: features2.Features.ShaderImageGatherExtended,
                 supportsTextureShadowLod: false,
                 supportsVertexStoreAndAtomics: features2.Features.VertexPipelineStoresAndAtomics,
                 supportsViewportIndexVertexTessellation: featuresVk12.ShaderOutputViewportIndex,

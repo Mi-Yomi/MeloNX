@@ -13,7 +13,6 @@ struct EmulationView: View {
     @AppStorage("isVirtualController") var isVCA: Bool = true
     @AppStorage("showScreenShotButton") var ssb: Bool = false
     @AppStorage("showlogsgame") var showlogsgame: Bool = false
-    @AppStorage("showBatteryPercentage") var showBatteryPercentage: Bool = false
     
     @AppStorage("On-ScreenControllerOpacity") var controllerOpacity: Double = 1.0
     
@@ -28,9 +27,8 @@ struct EmulationView: View {
     @State var pauseEmu = true
     @AppStorage("location-enabled") var locationenabled: Bool = false
     @FocusState private var isFocused: Bool
-    @ObservedObject var ryujijnx = Ryujinx.shared
+    @ObservedObject var ryujinx = Ryujinx.shared
     @State var rotationlock = false
-    @State private var batteryLevel: Int = Int(UIDevice.current.batteryLevel * 100)
     
     var body: some View {
         ZStack {
@@ -48,12 +46,41 @@ struct EmulationView: View {
                     .onAppear {
                         Air.play(AnyView(MetalView().ignoresSafeArea().edgesIgnoringSafeArea(.all)))
                     }
+                    .overlay(alignment: .topTrailing) {
+                        if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
+                            PerformanceOverlayView()
+                                .opacity(controllerOpacity)
+                                .padding(5)
+                        }
+                    }
             } else {
-                MetalViewContainer() // The Emulation View
+                // The Emulation View
+                if ryujinx.aspectRatio == .stretched || (ryujinx.aspectRatio == .fixed4x3 && isScreenAspectRatio(4, 3)) {
+                    MetalView()
+                        .allowsHitTesting(true)
+                        .ignoresSafeArea(.all)
+                        .edgesIgnoringSafeArea(.all)
+                        .overlay(alignment: .topTrailing) {
+                            if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
+                                PerformanceOverlayView()
+                                    .opacity(controllerOpacity)
+                                    .padding(5)
+                            }
+                        }
+                } else {
+                    MetalViewContainer()
+                        .allowsHitTesting(true)
+                        .overlay(alignment: .topTrailing) {
+                            if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
+                                PerformanceOverlayView()
+                                    .opacity(controllerOpacity)
+                                    .padding(5)
+                            }
+                        }
+                }
             }
             
             // Above Emulation View
-            
             if isVCA {
                 ControllerView(isEditing: .constant(false), gameId: startgame?.titleId) // Virtual Controller
                     .contentShape(Rectangle())
@@ -75,7 +102,7 @@ struct EmulationView: View {
                     if ssb {
                         Menu {
                             Button {
-                                pause_emulation(pauseEmu)
+                                RyujinxBridge.pauseEmulation(pauseEmu)
                                 pauseEmu.toggle()
                             } label: {
                                 Label {
@@ -87,10 +114,10 @@ struct EmulationView: View {
                             
                             Button {
                                 // ryujijnx.config?.aspectRatio
-                                ryujijnx.aspectRatio = nextAspectRatio(current: ryujijnx.aspectRatio)
+                                ryujinx.aspectRatio = nextAspectRatio(current: ryujinx.aspectRatio)
                             } label: {
                                 Label {
-                                    Text(ryujijnx.aspectRatio.displayName)
+                                    Text(ryujinx.aspectRatio.displayName)
                                 } icon: {
                                     Image(systemName: "rectangle.expand.vertical")
                                 }
@@ -117,9 +144,7 @@ struct EmulationView: View {
                             }
                             
                             Button(role: .destructive) {
-                                startgame = nil
-                                stop_emulation()
-                                try? Ryujinx.shared.stop()
+                                stop()
                             } label: {
                                 Label {
                                     Text("Exit (Unstable)")
@@ -137,24 +162,6 @@ struct EmulationView: View {
                     
                     
                     Spacer()
-                    
-                    if showBatteryPercentage {
-                        Image(systemName: "battery.0percent")
-                            .resizable()
-                            .frame(maxWidth: 70, maxHeight: 35)
-                            .overlay {
-                                Text("\(batteryLevel)%")
-                                    .font(.caption2)
-                            }
-                            .opacity(controllerOpacity)
-                    }
-                    
-                    if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
-                        PerformanceOverlayView()
-                            .opacity(controllerOpacity)
-                            .padding(.horizontal)
-                    }
-                    
                 }
                 
                 Spacer()
@@ -163,41 +170,30 @@ struct EmulationView: View {
             if showlogsgame, !Ryujinx.shared.showLoading {
                 VStack {
                     LogFileView(isfps: false)
+                        .allowsHitTesting(false)
                     
                     Spacer()
                 }
+                .allowsHitTesting(false)
             }
         }
         .onAppear {
-            DispatchQueue.main.async {
+           Task { @MainActor in
                 isFocused = true
             }
             
             LocationManager.sharedInstance.startUpdatingLocation()
             Air.shared.connectionCallbacks.append { cool in
-                DispatchQueue.main.async {
+               Task { @MainActor in
                     isAirplaying = cool
                     // print(cool)
                 }
             }
             
-            UIDevice.current.isBatteryMonitoringEnabled = true
-            batteryLevel = Int(UIDevice.current.batteryLevel * 100)
-            
-            NotificationCenter.default.addObserver(
-                forName: UIDevice.batteryLevelDidChangeNotification,
-                object: nil,
-                queue: .main
-            ) { _ in
-                batteryLevel = Int(UIDevice.current.batteryLevel * 100)
-            }
-            
             RegisterCallback("exit-emulation") { cool in
-                DispatchQueue.main.async {
+               Task { @MainActor in
                     print(cool)
-                    startgame = nil
-                    stop_emulation()
-                    try? ryujijnx.stop()
+                    self.stop()
                 }
             }
         }
@@ -207,13 +203,13 @@ struct EmulationView: View {
         .onChange(of: scenePhase) { newPhase in
             // Detect when the app enters the background
             if newPhase == .background {
-                pause_emulation(true)
+                RyujinxBridge.pauseEmulation(true)
                 isInBackground = true
             } else if newPhase == .active {
-                pause_emulation(false)
+                RyujinxBridge.pauseEmulation(false)
                 isInBackground = false
             } else if newPhase == .inactive {
-                pause_emulation(true)
+                RyujinxBridge.pauseEmulation(true)
                 isInBackground = true
             }
         }
@@ -223,6 +219,12 @@ struct EmulationView: View {
                     // InGameSettingsManager.shared.saveSettings()
                 // }
         }
+    }
+    
+    func stop() {
+        startgame = nil
+        RyujinxBridge.stopEmulation()
+        try? ryujinx.stop()
     }
     
     func nextAspectRatio(current: AspectRatio) -> AspectRatio {
@@ -252,4 +254,3 @@ extension View {
         }
     }
 }
-

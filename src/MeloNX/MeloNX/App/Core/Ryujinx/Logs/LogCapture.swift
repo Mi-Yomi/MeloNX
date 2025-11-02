@@ -6,9 +6,9 @@
 //
 
 
-import SwiftUI
+import Foundation
 
-class LogCapture {
+final class LogCapture: ObservableObject {
     static let shared = LogCapture()
 
     private var stdoutPipe: Pipe?
@@ -16,13 +16,17 @@ class LogCapture {
     private let originalStdout: Int32
     private let originalStderr: Int32
 
-    var capturedLogs: [String] = [] {
-        didSet {
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .newLogCaptured, object: nil)
+    private var continuation: AsyncStream<String>.Continuation?
+    public private(set) var capturedLogs: [String] = []
+
+    lazy var logs: AsyncStream<String> = {
+        AsyncStream { continuation in
+            self.continuation = continuation
+            continuation.onTermination = { _ in
+                self.continuation = nil
             }
         }
-    }
+    }()
 
     private init() {
         originalStdout = dup(STDOUT_FILENO)
@@ -55,24 +59,34 @@ class LogCapture {
 
     private func setupReadabilityHandler(for pipe: Pipe, isStdout: Bool) {
         pipe.fileHandleForReading.readabilityHandler = { [weak self] fileHandle in
-            let data = fileHandle.availableData
-            let originalFD = isStdout ? self?.originalStdout : self?.originalStderr
-            write(originalFD ?? STDOUT_FILENO, (data as NSData).bytes, data.count)
+            guard let self else { return }
 
-            if let logString = String(data: data, encoding: .utf8),
-               let cleanedLog = self?.cleanLog(logString), !cleanedLog.isEmpty {
-                self?.capturedLogs.append(cleanedLog)
-            }
+            let data = fileHandle.availableData
+            let originalFD = isStdout ? self.originalStdout : self.originalStderr
+            write(originalFD, (data as NSData).bytes, data.count)
+
+            guard let logString = String(data: data, encoding: .utf8),
+                  let cleanedLog = self.cleanLog(logString),
+                  !cleanedLog.0.isEmpty else { return }
+
+            self.capturedLogs.append(cleanedLog.1)
+            self.continuation?.yield(cleanedLog.0) 
+
         }
     }
 
-    private func cleanLog(_ raw: String) -> String? {
+    private func cleanLog(_ raw: String) -> (String, String)? {
         let lines = raw.split(separator: "\n")
+        
         let filteredLines = lines.filter { line in
-            !line.contains("SwiftUI") &&
-            !line.contains("ForEach") &&
-            !line.contains("VStack") &&
-            !line.contains("Invalid frame dimension (negative or non-finite).")
+            if UserDefaults.standard.bool(forKey: "Show-Full=Logs") {
+                return true
+            }
+            
+            let regex = try? NSRegularExpression(pattern: "\\d{2}:\\d{2}:\\d{2}\\.\\d{3} \\|[A-Z]+\\|", options: .caseInsensitive)
+            let matches = regex?.matches(in: String(line), options: [], range: NSRange(location: 0, length: line.utf16.count)) ?? []
+            
+            return matches.count >= 1
         }
 
         let cleaned = filteredLines.map { line -> String in
@@ -81,16 +95,20 @@ class LogCapture {
             }
             return line.trimmingCharacters(in: .whitespacesAndNewlines)
         }.joined(separator: "\n")
+        
+        
+        let cleaned2 = lines.map { line -> String in
+            if let tabRange = line.range(of: "\t") {
+                return line[tabRange.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            return line.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.joined(separator: "\n")
 
-        return cleaned.isEmpty ? nil : cleaned.replacingOccurrences(of: "\n\n", with: "\n")
+        return cleaned.isEmpty ? nil : (cleaned.replacingOccurrences(of: "\n\n", with: "\n"), cleaned2)
     }
 
     deinit {
         stopCapturing()
+        continuation?.finish()
     }
-}
-
-
-extension Notification.Name {
-    static let newLogCaptured = Notification.Name("newLogCaptured")
 }

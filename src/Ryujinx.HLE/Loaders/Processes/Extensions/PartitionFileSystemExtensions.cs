@@ -106,53 +106,7 @@ namespace Ryujinx.HLE.Loaders.Processes.Extensions
                 }
 
                 // Load Update NCAs.
-                Nca updatePatchNca = null;
-                Nca updateControlNca = null;
-
-                if (ulong.TryParse(mainNca.Header.TitleId.ToString("x16"), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out ulong titleIdBase))
-                {
-                    // Clear the program index part.
-                    titleIdBase &= ~0xFUL;
-
-                    // Load update information if exists.
-                    string titleUpdateMetadataPath = System.IO.Path.Combine(AppDataManager.GamesDirPath, titleIdBase.ToString("x16"), "updates.json");
-                    if (File.Exists(titleUpdateMetadataPath))
-                    {
-                        string updatePath = PlatformRelative(JsonHelper.DeserializeFromFile(titleUpdateMetadataPath, _titleSerializerContext.TitleUpdateMetadata).Selected);
-                        if (File.Exists(updatePath))
-                        {
-                            PartitionFileSystem updatePartitionFileSystem = new();
-                            updatePartitionFileSystem.Initialize(new FileStream(updatePath, FileMode.Open, FileAccess.Read).AsStorage()).ThrowIfFailure();
-
-                            device.Configuration.VirtualFileSystem.ImportTickets(updatePartitionFileSystem);
-
-                            // TODO: This should use CNMT NCA instead.
-                            foreach (DirectoryEntryEx fileEntry in updatePartitionFileSystem.EnumerateEntries("/", "*.nca"))
-                            {
-                                Nca nca = updatePartitionFileSystem.GetNca(device, fileEntry.FullPath);
-
-                                if (nca.GetProgramIndex() != device.Configuration.UserChannelPersistence.Index)
-                                {
-                                    continue;
-                                }
-
-                                if ($"{nca.Header.TitleId.ToString("x16")[..^3]}000" != titleIdBase.ToString("x16"))
-                                {
-                                    break;
-                                }
-
-                                if (nca.IsProgram())
-                                {
-                                    updatePatchNca = nca;
-                                }
-                                else if (nca.IsControl())
-                                {
-                                    updateControlNca = nca;
-                                }
-                            }
-                        }
-                    }
-                }
+                (Nca updatePatchNca, Nca updateControlNca) = mainNca.GetUpdateData(device.FileSystem, device.System.FsIntegrityCheckLevel, device.Configuration.UserChannelPersistence.Index, out string _);
 
                 if (updatePatchNca != null)
                 {

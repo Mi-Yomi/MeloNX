@@ -111,6 +111,18 @@ namespace Ryujinx.Memory
         }
 
         /// <summary>
+        /// Detaches StikDebug from the app, Indicating that the JIT regions have been mapped.
+        /// AFter this is called, We will not be able to map any more JIT memory for iOS 26+ (TXM)
+        /// </summary>
+        public void Detach()
+        {
+            if (_dualMappedAllocator != null && _dualMappedAllocator.hasTXM)
+            {
+                DualMappedJitAllocator.BreakJITDetach();
+            }
+        }
+
+        /// <summary>
         /// Commits a region of memory that has previously been reserved.
         /// This can be used to allocate memory on demand.
         /// </summary>

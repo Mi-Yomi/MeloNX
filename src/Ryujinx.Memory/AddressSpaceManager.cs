@@ -75,6 +75,7 @@ namespace Ryujinx.Memory
                 size -= PageSize;
             }
         }
+        
 
         /// <inheritdoc/>
         public void Unmap(ulong va, ulong size)

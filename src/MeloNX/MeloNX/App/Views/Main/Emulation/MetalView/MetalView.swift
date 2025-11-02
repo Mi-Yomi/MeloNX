@@ -7,9 +7,9 @@
 
 import SwiftUI
 import MetalKit
+import Metal
 
 struct MetalView: UIViewRepresentable {
-    
     var airplay: Bool = Air.shared.connected // just in case :3
     
     func makeUIView(context: Context) -> UIView {
@@ -21,10 +21,23 @@ struct MetalView: UIViewRepresentable {
                 fatalError("[Swift] Error: MTKView's layer is not a CAMetalLayer")
             }
             
+            UIApplication.shared.isIdleTimerDisabled = true
+            
+            metalLayer.presentsWithTransaction = false
+            metalLayer.allowsNextDrawableTimeout = false
+            
+            let setterSelector = NSSelectorFromString("setDisplaySyncEnabled:")
+            
+            if metalLayer.responds(to: setterSelector) {
+                metalLayer.perform(setterSelector, with: NSNumber(value: false))
+            }
+            
+            
             notnil(metalLayer.device) ? () : (metalLayer.device = MTLCreateSystemDefaultDevice())
             
+            
             let layerPtr = Unmanaged.passUnretained(metalLayer).toOpaque()
-            set_native_window(layerPtr)
+            RyujinxBridge.setNativeWindow(layerPtr)
             
             Ryujinx.shared.emulationUIView = view
             
@@ -36,9 +49,11 @@ struct MetalView: UIViewRepresentable {
         if Double(UIDevice.current.systemVersion)! < 17.0 {
             
             let uiview = MTKView()
+            
             let layer = Ryujinx.shared.metalLayer!
             
             layer.frame = uiview.bounds
+            
             
             uiview.layer.addSublayer(layer)
             

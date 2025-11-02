@@ -12,7 +12,7 @@ struct Joystick: View {
     @AppStorage("On-ScreenControllerScale") var controllerScale: Double = 1.0
     @State var right = true
     @Binding var position: CGPoint
-    @State var joystickSize: CGFloat
+    let joystickSize: CGFloat
     var boundarySize: CGFloat
     
     @State private var offset: CGSize = .zero
@@ -20,6 +20,10 @@ struct Joystick: View {
     @State var joystickSmallSize = false
     
     let sensitivity: CGFloat = 1.2
+    
+    private var displayJoystickSize: CGFloat {
+        joystickSmallSize ? joystickSize * 1.4 : joystickSize
+    }
     
     var dragGesture: some Gesture {
         DragGesture()
@@ -59,11 +63,13 @@ struct Joystick: View {
             }
     }
     
+    let virtualController = ControllerManager.shared.virtualController
+    
     func setPos() {
         if right {
-            ControllerManager.virtualController.thumbstickMoved(.right, x: position.x, y: position.y)
+            virtualController.thumbstickMoved(.right, x: position.x, y: position.y)
         } else {
-            ControllerManager.virtualController.thumbstickMoved(.left, x: position.x, y: position.y)
+            virtualController.thumbstickMoved(.left, x: position.x, y: position.y)
         }
     }
     
@@ -84,23 +90,16 @@ struct Joystick: View {
             
             Circle()
                 .fill(Color.white.opacity(0.5))
-                .frame(width: joystickSize, height: joystickSize)
+                .frame(width: displayJoystickSize, height: displayJoystickSize)
                 .background(
                     Circle()
                         .fill(Color.gray.opacity(0.3))
-                        .frame(width: joystickSize * 1.25, height: joystickSize * 1.25)
+                        .frame(width: displayJoystickSize * 1.25, height: displayJoystickSize * 1.25)
                 )
                 .offset(offset)
                 .gesture(dragGesture)
                 .scaleEffect(controllerScale)
         }
         .frame(width: boundarySize, height: boundarySize)
-        .onChange(of: joystickSmallSize) { newValue in
-            if newValue {
-                joystickSize *= 1.4
-            } else {
-                joystickSize = (boundarySize * 0.2)
-            }
-        }
     }
 }

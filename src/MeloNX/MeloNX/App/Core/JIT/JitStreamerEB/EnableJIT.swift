@@ -36,7 +36,7 @@ func enableJITEBRequest() {
             return
         }
         
-        DispatchQueue.main.async {
+       Task { @MainActor in
             if let data = data, let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                 showLaunchAppAlert(jsonData: data, in: windowScene.windows.last!.rootViewController!)
             } else {
@@ -58,12 +58,12 @@ func waitForVPNConnection(timeout: TimeInterval = 30, interval: TimeInterval = 1
         pingSite { connected in
             if connected {
                 timer.cancel()
-                DispatchQueue.main.async {
+               Task { @MainActor in
                     completion(true)
                 }
             } else if Date().timeIntervalSince(startTime) > timeout {
                 timer.cancel()
-                DispatchQueue.main.async {
+               Task { @MainActor in
                     completion(false)
                 }
             }
@@ -112,7 +112,7 @@ func presentAlert(title: String, message: String, completion: (() -> Void)? = ni
             completion?()
         })
         
-        DispatchQueue.main.async {
+       Task { @MainActor in
             lastWindow.rootViewController?.present(alert, animated: true)
         }
     }
@@ -137,7 +137,7 @@ func showLaunchAppAlert(jsonData: Data, in viewController: UIViewController) {
             let alert = UIAlertController(title: "JIT Error", message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default))
             
-            DispatchQueue.main.async {
+           Task { @MainActor in
                 viewController.present(alert, animated: true)
             }
         } else {
@@ -150,7 +150,7 @@ func showLaunchAppAlert(jsonData: Data, in viewController: UIViewController) {
         let alert = UIAlertController(title: "Decoding Error", message: error.localizedDescription, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         
-        DispatchQueue.main.async {
+       Task { @MainActor in
             viewController.present(alert, animated: true)
         }
     }

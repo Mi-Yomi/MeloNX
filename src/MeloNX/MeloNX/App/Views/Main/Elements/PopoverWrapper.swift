@@ -108,7 +108,7 @@ class CenteredPopoverWrapper: UIView {
         
         sizeObservation = hostingController.view.observe(\.intrinsicContentSize, options: [.new]) { [weak self] view, change in
             guard let self = self else { return }
-            DispatchQueue.main.async {
+           Task { @MainActor in
                 self.updateSizeIfNeeded()
             }
         }
@@ -272,7 +272,7 @@ struct PopoverUIKit<Content: View>: UIViewRepresentable {
         if isPresented {
             if context.coordinator.popover == nil {
                 let popover = CenteredPopoverWrapper(rootView: content) {
-                    DispatchQueue.main.async {
+                   Task { @MainActor in
                         context.coordinator.isPresented.wrappedValue = false
                     }
                 }
@@ -313,7 +313,7 @@ extension View {
 }
 
 fileprivate func dismissPopover() {
-    DispatchQueue.main.async {
+   Task { @MainActor in
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first(where: { $0.isKeyWindow }) {
             

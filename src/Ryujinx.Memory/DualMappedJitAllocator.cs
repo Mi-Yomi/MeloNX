@@ -22,7 +22,16 @@ namespace Ryujinx.Memory
         public ulong Size { get; private set; }
 
         [DllImport("BreakpointJIT.framework/BreakpointJIT", EntryPoint = "BreakGetJITMapping")]
-        public static extern unsafe byte* BreakGetJITMappingPub(nuint bytes);
+        public static extern unsafe byte* BreakGetJITMappingPub(byte* addr, nuint bytes);
+
+        [DllImport("BreakpointJIT.framework/BreakpointJIT", EntryPoint = "BreakMarkJITMapping")]
+        public static extern unsafe byte* BreakMarkJITMapping(nuint bytes);
+
+        [DllImport("BreakpointJIT.framework/BreakpointJIT", EntryPoint = "BreakJITDetach")]
+        public static extern unsafe void BreakJITDetach();
+
+        public readonly bool hasTXM = Environment.GetEnvironmentVariable("HAS_TXM") == "1"; 
+
 
         private IntPtr _mmapPtr;
 
@@ -41,12 +50,17 @@ namespace Ryujinx.Memory
         {
             unsafe
             {
-                byte* ptr = BreakGetJITMappingPub(bytes);
-                Logger.Info?.Print(LogClass.Cpu, "testing for BreakGetJITMapping.");
-                if (ptr == null || ptr == (byte*)0 || ptr == (byte*)-1)
+                byte* ptr = BreakMarkJITMapping(bytes);
+                Logger.Info?.Print(LogClass.Cpu, $"testing for BreakGetJITMapping, got {(ulong)ptr}");
+                if (ptr == null || ptr == (byte*)0 || ptr == (byte*)-1 || ptr == (byte*)14757395257293275360 || ptr == (byte*)1761607904)
                 {
-                    Logger.Info?.Print(LogClass.Cpu, "Failed to get JIT mapping from BreakGetJITMapping.");
-                    return MAP_FAILED;
+                    ptr = BreakGetJITMappingPub(null, bytes);
+                    Logger.Info?.Print(LogClass.Cpu, $"testing for BreakGetJITMapping Again, got {(ulong)ptr}");
+                    if (ptr == null || ptr == (byte*)0 || ptr == (byte*)-1)
+                    {
+                        Logger.Info?.Print(LogClass.Cpu, "Failed to get JIT mapping from BreakGetJITMapping.");
+                        throw new Exception("Failed to get JIT, Are you using StikDebug and Picture in Picture is enabled?");
+                    }
                 }
 
                 return (IntPtr)ptr;
@@ -56,19 +70,19 @@ namespace Ryujinx.Memory
         private void AllocateDualMapping()
         {
             IntPtr _mmapPtr;
-            string hasTXM = Environment.GetEnvironmentVariable("HAS_TXM");
 
-            if (hasTXM.Contains("0"))
-            {
-                _mmapPtr = mmap(IntPtr.Zero, (UIntPtr)Size, PROT_READ | PROT_EXEC, MAP_ANON | MAP_PRIVATE, -1, 0);
-            }
-            else
+            if (hasTXM)
             {
                 _mmapPtr = BreakGetJITMapping((nuint)Size);
             }
+            else
+            {
+                _mmapPtr = mmap(IntPtr.Zero, (UIntPtr)Size, PROT_READ | PROT_EXEC, MAP_ANON | MAP_PRIVATE, -1, 0);
 
-            if (_mmapPtr == MAP_FAILED)
-                throw new Exception("Failed to mmap memory");
+
+                if (_mmapPtr == MAP_FAILED)
+                    throw new Exception("Failed to mmap memory");
+            }
 
             var bufRX = (ulong)_mmapPtr;
             ulong bufRW = 0;
@@ -97,7 +111,6 @@ namespace Ryujinx.Memory
         }
 
         private const int PROT_READ = 1;
-        private const int PROT_WRITE = 2;
         private const int PROT_EXEC = 4;
         private const int MAP_ANON = 0x1000;
         private const int MAP_PRIVATE = 0x2;
@@ -108,7 +121,6 @@ namespace Ryujinx.Memory
         private const int KERN_SUCCESS = 0;
         private const int VM_PROT_READ = 1;
         private const int VM_PROT_WRITE = 2;
-        private const int VM_PROT_EXECUTE = 4;
 
         [DllImport("libc", SetLastError = true)]
         private static extern IntPtr mmap(IntPtr addr, UIntPtr len, int prot, int flags, int fd, long offset);

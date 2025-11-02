@@ -11,6 +11,7 @@ namespace Ryujinx.Graphics.Vulkan
 {
     readonly struct VulkanPhysicalDevice
     {
+        public static uint MaxPerStageDescriptorSamplers = 33;
         public readonly PhysicalDevice PhysicalDevice;
         public readonly PhysicalDeviceFeatures PhysicalDeviceFeatures;
         public readonly PhysicalDeviceProperties PhysicalDeviceProperties;
@@ -34,6 +35,11 @@ namespace Ryujinx.Graphics.Vulkan
                 DeviceName = Marshal.PtrToStringAnsi((IntPtr)physicalDeviceProperties.DeviceName);
             }
 
+            Console.WriteLine($"Device: {DeviceName}");
+            Console.WriteLine($"Max per-stage descriptor samplers: {physicalDeviceProperties.Limits.MaxPerStageDescriptorSamplers}");
+            Console.WriteLine($"Max descriptor set samplers: {physicalDeviceProperties.Limits.MaxDescriptorSetSamplers}");
+            Console.WriteLine($"Max per-stage resources: {physicalDeviceProperties.Limits.MaxPerStageResources}");
+            VulkanPhysicalDevice.MaxPerStageDescriptorSamplers = physicalDeviceProperties.Limits.MaxPerStageDescriptorSamplers;
             uint propertiesCount = 0;
 
             api.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, SpanHelpers.AsSpan(ref propertiesCount), Span<QueueFamilyProperties>.Empty);

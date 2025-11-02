@@ -42,14 +42,14 @@ namespace Ryujinx.HLE.HOS.Tamper
             catch (TamperCompilationException ex)
             {
                 // Just print the message without the stack trace.
-                Logger.Error?.Print(LogClass.TamperMachine, ex.Message);
+                Logger.Warning?.Print(LogClass.TamperMachine, ex.Message);
             }
             catch (Exception ex)
             {
-                Logger.Error?.Print(LogClass.TamperMachine, ex.ToString());
+                Logger.Warning?.Print(LogClass.TamperMachine, ex.ToString());
             }
 
-            Logger.Error?.Print(LogClass.TamperMachine, "There was a problem while compiling the Atmosphere cheat");
+            Logger.Warning?.Print(LogClass.TamperMachine, "There was a problem while compiling the Atmosphere cheat");
 
             return null;
         }
@@ -144,6 +144,8 @@ namespace Ryujinx.HLE.HOS.Tamper
             {
                 throw new TamperCompilationException("Reached end of compilation with unmatched conditional(s) or loop(s)");
             }
+
+            Logger.Debug?.Print(LogClass.TamperMachine, "Compilation successful, creating AtmosphereProgram");
 
             return new AtmosphereProgram(name, _process, context.PressedKeys, new Block(context.CurrentOperations));
         }

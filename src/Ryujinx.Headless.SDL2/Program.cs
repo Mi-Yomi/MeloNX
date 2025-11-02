@@ -305,7 +305,7 @@ namespace Ryujinx.Headless.SDL2
             
             return list;
         }
-        
+
         private static Nca TryCreateNca(IStorage ncaStorage, string containerPath)
         {
             try
@@ -318,6 +318,13 @@ namespace Ryujinx.Headless.SDL2
             }
 
             return null;
+        }
+        
+
+        [UnmanagedCallersOnly(EntryPoint = "add_gamepad_handle")]
+        public static void AddGamepadHandle(IntPtr handle, IntPtr idPtr)
+        {
+            SDL2GamepadDriver.AddGamepadHandle(handle, idPtr);
         }
 
         [UnmanagedCallersOnly(EntryPoint = "get_current_fps")]

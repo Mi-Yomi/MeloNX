@@ -144,6 +144,8 @@ namespace Ryujinx.Cpu.Signal
             _codeBlock.Write(0, code);
             _codeBlock.Reprotect(0, codeSizeAligned, MemoryPermission.ReadAndExecute);
 
+            _codeBlock.Detach();
+
             return _codeBlock.RxPointer;
         }
 

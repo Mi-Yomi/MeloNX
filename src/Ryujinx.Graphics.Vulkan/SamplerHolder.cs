@@ -9,6 +9,8 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly VulkanRenderer _gd;
         private readonly Auto<DisposableSampler> _sampler;
 
+        public readonly SamplerCreateInfo samplerInfo;
+
         public unsafe SamplerHolder(VulkanRenderer gd, Device device, SamplerCreateInfo info)
         {
             _gd = gd;
@@ -25,6 +27,8 @@ namespace Ryujinx.Graphics.Vulkan
                 minLod = 0;
                 maxLod = 0.25f;
             }
+
+            samplerInfo = info;
 
             var borderColor = GetConstrainedBorderColor(info.BorderColor, out var cantConstrain);
 

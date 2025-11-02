@@ -369,9 +369,9 @@ struct PerGameSettingsView: View {
                     
                     Divider()
                     
-                    PerSettingsToggle(isOn: configBinding(\.enableTextureRecompression), icon: "rectangle.compress.vertical", label: "Texture Recompression")
+                    // PerSettingsToggle(isOn: configBinding(\.enableTextureRecompression), icon: "rectangle.compress.vertical", label: "Texture Recompression")
                     
-                    Divider()
+                    // Divider()
                     
                     PerSettingsToggle(isOn: configBinding(\.disableDockedMode), icon: "dock.rectangle", label: "Docked Mode")
                     

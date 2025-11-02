@@ -52,6 +52,14 @@ namespace Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.Lib
         [CommandCmif(1)]
         public ResultCode PushOutData(ServiceCtx context)
         {
+            return ResultCode.Success;
+        }
+
+
+        [CommandCmif(10)]
+        // ExitProcessAndReturn() -> nn::am::service::ExitProcessAndReturn
+        public ResultCode ExitProcessAndReturn(ServiceCtx context)
+        {
             TriggerCallback("exit-emulation");
             return ResultCode.Success;
         }

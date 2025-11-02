@@ -11,29 +11,23 @@ struct MetalViewContainer: View {
     @ObservedObject var ryujinx = Ryujinx.shared
     @AppStorage("OldView") var oldView = true
     @Environment(\.colorScheme) var colorScheme
+    static var height = 0
+    @AppStorage("performacehud") var performacehud: Bool = false
+    @AppStorage("On-ScreenControllerOpacity") var controllerOpacity: Double = 1.0
+    
     
     var body: some View {
         GeometryReader { geo in
             let containerSize = geo.size
-            if ryujinx.aspectRatio == .stretched || (ryujinx.aspectRatio == .fixed4x3 && isScreenAspectRatio(4, 3)) {
-                if ryujinx.aspectRatio == .stretched || (ryujinx.aspectRatio == .fixed4x3 && isScreenAspectRatio(4, 3)) {
-                    Color.clear
-                        .overlay(
-                            MetalView()
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .ignoresSafeArea(.all)
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .ignoresSafeArea(.all)
-                }
+            if oldView {
+                oldViewLayout(containerSize: containerSize)
+                    .allowsHitTesting(true)
             } else {
-                if oldView {
-                    oldViewLayout(containerSize: containerSize)
-                } else {
-                    newViewLayout(containerSize: containerSize)
-                }
+                newViewLayout(containerSize: containerSize)
+                    .allowsHitTesting(true)
             }
         }
+        .allowsHitTesting(true)
     }
     
     @ViewBuilder
@@ -51,6 +45,7 @@ struct MetalViewContainer: View {
                 Spacer(minLength: 0)
                 
                 MetalView()
+                    .allowsHitTesting(true)
                     .frame(width: targetSize.width, height: targetSize.height)
                     .ignoresSafeArea(.container, edges: isLandscape ? .all : .horizontal)
                 
@@ -92,6 +87,7 @@ struct MetalViewContainer: View {
                     
                     // Metal view with proper insets
                     MetalView()
+                        .allowsHitTesting(true)
                         .frame(
                             width: targetSize.width - borderWidth * 2,
                             height: targetSize.height - borderWidth * 2
@@ -113,47 +109,49 @@ struct MetalViewContainer: View {
         }
     }
     
-    func targetSize(for containerSize: CGSize) -> CGSize {
-        var targetAspect: CGFloat
-        
-        switch ryujinx.aspectRatio {
-        case .fixed4x3:
-            targetAspect = 4.0 / 3.0
-        case .fixed16x9:
-            targetAspect = 16.0 / 9.0
-        case .fixed16x10:
-            targetAspect = 16.0 / 10.0
-        case .fixed21x9:
-            targetAspect = 21.0 / 9.0
-        case .fixed32x9:
-            targetAspect = 32.0 / 9.0
-        case .stretched:
-            return containerSize
-        }
-        
-        let containerAspect = containerSize.width / containerSize.height
-        
-        if containerAspect > targetAspect {
-            // Container is wider than target - fit to height
-            let targetHeight = containerSize.height
-            let targetWidth = targetHeight * targetAspect
-            return CGSize(width: targetWidth, height: targetHeight)
-        } else {
-            // Container is taller than target - fit to width
-            let targetWidth = containerSize.width
-            let targetHeight = targetWidth / targetAspect
-            return CGSize(width: targetWidth, height: targetHeight)
-        }
+}
+
+
+func targetSize(for containerSize: CGSize, ratio: AspectRatio = Ryujinx.shared.aspectRatio) -> CGSize {
+    var targetAspect: CGFloat
+    
+    switch ratio {
+    case .fixed4x3:
+        targetAspect = 4.0 / 3.0
+    case .fixed16x9:
+        targetAspect = 16.0 / 9.0
+    case .fixed16x10:
+        targetAspect = 16.0 / 10.0
+    case .fixed21x9:
+        targetAspect = 21.0 / 9.0
+    case .fixed32x9:
+        targetAspect = 32.0 / 9.0
+    case .stretched:
+        return containerSize
     }
     
-    func isScreenAspectRatio(_ targetWidth: CGFloat, _ targetHeight: CGFloat, tolerance: CGFloat = 0.05) -> Bool {
-        let screenSize = UIScreen.main.bounds.size
-        let width = max(screenSize.width, screenSize.height)
-        let height = min(screenSize.width, screenSize.height)
-
-        let actualRatio = width / height
-        let targetRatio = targetWidth / targetHeight
-
-        return abs(actualRatio - targetRatio) < tolerance
+    let containerAspect = containerSize.width / containerSize.height
+    
+    if containerAspect > targetAspect {
+        // Container is wider than target - fit to height
+        let targetHeight = containerSize.height
+        let targetWidth = targetHeight * targetAspect
+        return CGSize(width: targetWidth, height: targetHeight)
+    } else {
+        // Container is taller than target - fit to width
+        let targetWidth = containerSize.width
+        let targetHeight = targetWidth / targetAspect
+        return CGSize(width: targetWidth, height: targetHeight)
     }
+}
+
+func isScreenAspectRatio(_ targetWidth: CGFloat, _ targetHeight: CGFloat, tolerance: CGFloat = 0.05) -> Bool {
+    let screenSize = UIScreen.main.bounds.size
+    let width = max(screenSize.width, screenSize.height)
+    let height = min(screenSize.width, screenSize.height)
+
+    let actualRatio = width / height
+    let targetRatio = targetWidth / targetHeight
+
+    return abs(actualRatio - targetRatio) < tolerance
 }

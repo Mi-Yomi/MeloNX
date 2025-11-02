@@ -61,7 +61,6 @@ struct MeloNXApp: App {
                                 checkLatestVersion()
                             }
                             
-                            
                             print(metalHudEnabler.canMetalHud)
                             
                             UserDefaults.standard.set(false, forKey: "lockInApp")
@@ -94,7 +93,7 @@ struct MeloNXApp: App {
                 }
             }
             .onAppear() {
-                UIDocumentPickerViewController.swizzleInitWithContentTypes()
+                setup26JITHandler()
                 if #available(iOS 19, *), ProcessInfo.processInfo.hasTXM, !ignores19 {
                     ios19 = true
                 }
@@ -148,7 +147,7 @@ struct MeloNXApp: App {
                 let latestAPIVersionStripped = latestVersionResponse.version_number_stripped
                 
                 if Int(strippedAppVersion) ?? 0 > Int(latestAPIVersionStripped) ?? 0 {
-                    DispatchQueue.main.async {
+                   Task { @MainActor in
                         updateInfo = latestVersionResponse
                         showOutOfDateSheet = true
                     }
@@ -167,3 +166,43 @@ func changeAppUI(_ string: String) -> String? {
     return String(data: data, encoding: .utf8)
 }
 
+func isDebuggerAttached() -> Bool {
+    var info = kinfo_proc()
+    var mib = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+    var size = MemoryLayout.stride(ofValue: info)
+    
+    let result = sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
+    if result != 0 {
+        perror("sysctl failed")
+        return false
+    }
+    
+    return (info.kp_proc.p_flag & P_TRACED) != 0
+}
+
+func trapHandler(signal: Int32, info: UnsafeMutablePointer<__siginfo>?, uap: UnsafeMutableRawPointer?) {
+    guard let uap = uap else { return }
+    
+    let context = uap.assumingMemoryBound(to: ucontext_t.self)
+    
+#if arch(arm64)
+    if !isDebuggerAttached() {
+        context.pointee.uc_mcontext.pointee.__ss.__x.0 = 0
+    }
+    
+    context.pointee.uc_mcontext.pointee.__ss.__pc += 4
+#elseif arch(x86_64)
+    if !isDebuggerAttached() {
+        context.pointee.uc_mcontext.pointee.__ss.__rax = 0
+    }
+    context.pointee.uc_mcontext.pointee.__ss.__rip += 1
+#endif
+}
+
+func setup26JITHandler() {
+    var sa = sigaction()
+    sa.__sigaction_u.__sa_sigaction = trapHandler
+    sa.sa_flags = SA_SIGINFO
+    sigemptyset(&sa.sa_mask)
+    sigaction(SIGTRAP, &sa, nil)
+}

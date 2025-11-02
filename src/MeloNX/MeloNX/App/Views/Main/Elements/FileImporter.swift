@@ -25,12 +25,12 @@ class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate 
         completion: @escaping (Result<[URL], Error>) -> Void
     ) {
         self.currentCompletion = { result in
-            DispatchQueue.main.async {
+           Task { @MainActor in
                 completion(result)
             }
         }
         
-        let documentPicker = UIDocumentPickerViewController(forOpeningContentTypes: types)
+        let documentPicker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: shouldAsCopy)
         documentPicker.delegate = self
         documentPicker.allowsMultipleSelection = allowMultiple
         documentPicker.modalPresentationStyle = .formSheet

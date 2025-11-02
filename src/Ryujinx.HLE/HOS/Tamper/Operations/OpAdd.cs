@@ -15,7 +15,8 @@ namespace Ryujinx.HLE.HOS.Tamper.Operations
 
         public void Execute()
         {
-            _destination.Set((T)((dynamic)_lhs.Get<T>() + (dynamic)_rhs.Get<T>()));
+            T result = TypeSafeOperations.Add(_lhs.Get<T>(), _rhs.Get<T>());
+            _destination.Set(result);
         }
     }
 }

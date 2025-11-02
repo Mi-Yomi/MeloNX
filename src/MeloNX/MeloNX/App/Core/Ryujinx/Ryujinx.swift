@@ -11,6 +11,7 @@ import GameController
 import MetalKit
 import Metal
 import Darwin
+import NavigationStackBackport
 
 
 struct iOSNav<Content: View>: View {
@@ -18,11 +19,9 @@ struct iOSNav<Content: View>: View {
 
     var body: some View {
         if #available(iOS 16, *) {
-            NavigationStack(root: content)
+            SwiftUI.NavigationStack(root: content)
         } else {
-            NavigationView(content: content)
-                .navigationViewStyle(StackNavigationViewStyle())
-                .navigationViewStyle(.stack)
+            NavigationStackBackport.NavigationStack(root: content)
         }
     }
 }
@@ -225,8 +224,10 @@ class Ryujinx : ObservableObject {
             throw RyujinxError.alreadyRunning
         }
         
+        
         self.config = config
         
+        self.isRunning = true
         
         if UserDefaults.standard.bool(forKey: "lockInApp") {
             let cool = Thread {
@@ -255,47 +256,38 @@ class Ryujinx : ObservableObject {
         
         
         runloop { [self] in
-            
-            isRunning = true
-            
             let url = URL(string: config.gamepath)
             
             do {
                 let args = self.buildCommandLineArgs(from: config)
                 let accessing = url?.startAccessingSecurityScopedResource()
                 
-                // Convert Arguments to ones that Ryujinx can Read
-                let cArgs = args.map { strdup($0) }
-                defer { cArgs.forEach { free($0) } }
-                var argvPtrs = cArgs
-                
                 // Start the emulation
                 if isRunning {
-                    let result = main_ryujinx_sdl(Int32(args.count), &argvPtrs)
+                    let result = RyujinxBridge.mainRyu(argv: args)//main_ryujinx_sdl(Int32(args.count), &argvPtrs)
                     
                     if result != 0 {
-                        DispatchQueue.main.async {
+                        Task { @MainActor in
                             self.isRunning = false
                         }
                         if let accessing, accessing {
                             url!.stopAccessingSecurityScopedResource()
                         }
                         
-                        throw RyujinxError.executionError(code: result)
+                        throw RyujinxError.executionError(code: Int32(result))
                     }
                 }
             } catch {
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     self.isRunning = false
                 }
                 Thread.sleep(forTimeInterval: 0.3)
                 let logs = LogCapture.shared.capturedLogs
                 let parsedLogs = extractExceptionInfo(logs)
                 if let parsedLogs {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         let result = Array(logs.suffix(from: parsedLogs.lineIndex))
                         
-                        LogCapture.shared.capturedLogs = Array(LogCapture.shared.capturedLogs.prefix(upTo: parsedLogs.lineIndex))
                         let dateFormatter = DateFormatter()
                         dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
                         let currentDate = Date()
@@ -313,7 +305,7 @@ class Ryujinx : ObservableObject {
                         }
                     }
                 } else {
-                    DispatchQueue.main.async {
+                    Task { @MainActor in
                         presentAlert(title: "MeloNX Crashed!", message:  "Unknown Error") {
                             UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
@@ -486,10 +478,9 @@ class Ryujinx : ObservableObject {
 
                     do {
                         let handle = try FileHandle(forReadingFrom: fileURL)
-                        let fileExtension = (fileURL.pathExtension as NSString).utf8String
-                        let extensionPtr = UnsafeMutablePointer<CChar>(mutating: fileExtension)
+                        let fileExtension = (fileURL.pathExtension as NSString)
 
-                        let gameInfo = get_game_info(handle.fileDescriptor, extensionPtr)
+                        let gameInfo = RyujinxBridge.getGameInfo(arg0: handle.fileDescriptor, arg1: fileExtension)
 
                         let game = Game.convertGameInfoToGame(gameInfo: gameInfo, url: fileURL)
 
@@ -520,8 +511,15 @@ class Ryujinx : ObservableObject {
         args.append(contentsOf: ["--memory-manager-mode", config.memoryManagerMode])
         
         args.append(contentsOf: ["--exclusive-fullscreen", String(true)])
-        args.append(contentsOf: ["--exclusive-fullscreen-width", "\(Int(UIScreen.main.bounds.width))"])
-        args.append(contentsOf: ["--exclusive-fullscreen-height", "\(Int(UIScreen.main.bounds.height))"])
+        if self.aspectRatio == .stretched {
+            args.append(contentsOf: ["--exclusive-fullscreen-width", "\(Int(UIScreen.main.bounds.width))"])
+            args.append(contentsOf: ["--exclusive-fullscreen-height", "\(Int(UIScreen.main.bounds.height))"])
+        } else {
+            let windowSize = UIApplication.shared.windows.first?.bounds.size ?? UIScreen.main.bounds.size
+            let target = targetSize(for: windowSize)
+            args.append(contentsOf: ["--exclusive-fullscreen-width", "\(Int(target.width))"])
+            args.append(contentsOf: ["--exclusive-fullscreen-height", "\(Int(target.height))"])
+        }
         // We don't need this. Ryujinx should handle it fine :3
         // this also causes crashes in some games :3
         
@@ -547,7 +545,7 @@ class Ryujinx : ObservableObject {
         
         args.append(contentsOf: ["--system-region", config.regioncode.rawValue])
         
-        DispatchQueue.main.async {
+        Task { @MainActor in
             self.aspectRatio = config.aspectRatio
         }
         
@@ -642,15 +640,16 @@ class Ryujinx : ObservableObject {
         if !config.inputids.isEmpty {
             config.inputids.prefix(8).enumerated().forEach { index, inputId in
                 // controllerType
-                if let controller = controllerManager.controllerTypes[index], controller == .handheld {
+                if let controller = controllerManager.controllerForString(inputId), controller.type == .handheld {
                     args.append(contentsOf: ["--input-id-handheld", inputId])
-                    // args.append(contentsOf: ["\(index == 0 ? "--input-id-handheld" : "--input-id-\(index + 1)")", inputId])
                 } else {
                     args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
                 }
                 
-                if let controller = controllerManager.controllerTypes[index] {
-                    args.append(contentsOf: ["--controller-type-\(index + 1)", controller.rawValue])
+                if let controller = controllerManager.controllerForString(inputId) {
+                    args.append(contentsOf: ["--controller-type-\(index + 1)", controller.type.rawValue])
+                } else {
+                    args.append(contentsOf: ["--controller-type-\(index + 1)", ControllerType.proController.rawValue])
                 }
             }
         }
@@ -682,16 +681,9 @@ class Ryujinx : ObservableObject {
             return "1"
         }
         
-        let firmwareVersionPointer = installed_firmware_version()
-        if let pointer = firmwareVersionPointer {
-            let firmwareVersion = String(cString: pointer)
-            DispatchQueue.main.async {
-                self.firmwareversion = firmwareVersion
-            }
-            return firmwareVersion
-        }
+        let firmwareVersionPointer = RyujinxBridge.installedFirmwareVersion
 
-        return "0"
+        return firmwareVersionPointer.isEmpty ? "0" : firmwareVersionPointer
     }
     
     func installFirmware(firmwarePath: String) {
@@ -700,7 +692,7 @@ class Ryujinx : ObservableObject {
             return
         }
 
-        install_firmware(cString)
+        RyujinxBridge.installFirmware(at: firmwarePath)
         
         let version = fetchFirmwareVersion()
         if !version.isEmpty {
@@ -709,14 +701,8 @@ class Ryujinx : ObservableObject {
     }
 
     func getDlcNcaList(titleId: String, path: String) -> [DownloadableContentNca] {
-        guard let titleIdCString = titleId.cString(using: .utf8),
-            let pathCString = path.cString(using: .utf8)
-        else {
-            // print("Invalid path")
-            return []
-        }
 
-        let listPointer = get_dlc_nca_list(titleIdCString, pathCString)
+        let listPointer = RyujinxBridge.getDlcList(titleId: titleId, path: path)//get_dlc_nca_list(titleIdCString, pathCString)
         // print("DLC parcing success: \(listPointer.success)")
         guard listPointer.success else { return [] }
 

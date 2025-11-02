@@ -19,7 +19,11 @@ extern "C" {
  * @param bytes Size parameter for mapping
  * @return char* pointer result
  */
-__attribute__((noinline, optnone, naked)) char* BreakGetJITMapping(size_t bytes);
+__attribute__((noinline, optnone, naked)) void* BreakGetJITMapping(void *addr, size_t len);
+
+__attribute__((noinline,optnone,naked)) void BreakJITDetach(void);
+
+__attribute__((noinline, optnone, naked)) void* BreakMarkJITMapping(size_t bytes);
 
 #ifdef __cplusplus
 }

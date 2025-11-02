@@ -97,6 +97,22 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             }
         }
 
+        public void MapForeign(ulong va, nuint hostPointer, ulong size)
+        {
+            while (size != 0)
+            {
+                _pageTable.Map(va, (ulong)hostPointer);
+
+                EnsureCommitment(va);
+
+                _nativePageTable.Write((va / PageSize) * PteSize, GetPte(va, (IntPtr)hostPointer));
+
+                va += PageSize;
+                hostPointer += PageSize;
+                size -= PageSize;
+            }
+        }
+
         public ulong Read(ulong va)
         {
             ulong pte = _nativePageTable.Read<ulong>((va / PageSize) * PteSize);

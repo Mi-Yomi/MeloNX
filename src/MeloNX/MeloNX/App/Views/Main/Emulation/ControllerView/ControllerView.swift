@@ -130,7 +130,7 @@ struct ControllerView: View {
     // Game-specific layout support
     var gameId: String?
     @State private var layout: LayoutConfig = LayoutConfig()
-    @State private var showingLayoutOptions = true
+    @State private var showingLayoutOptions = false
     
     var body: some View {
         ZStack {
@@ -984,6 +984,8 @@ struct ButtonView: View {
         }
     }
     
+    let virtualController = ControllerManager.shared.virtualController
+    
     private func handleButtonPress() {
         DispatchQueue.global(qos: .userInteractive).async {
             guard !isPressed || istoggle else { return }
@@ -992,11 +994,11 @@ struct ButtonView: View {
                 toggleState.toggle()
                 isPressed = toggleState
                 let value = toggleState ? 1 : 0
-                ControllerManager.virtualController.setButtonState(Uint8(value), for: button)
+                virtualController.setButtonState(Uint8(value), for: button)
                 Haptics.shared.play(.soft)
             } else {
                 isPressed = true
-                ControllerManager.virtualController.setButtonState(1, for: button)
+                virtualController.setButtonState(1, for: button)
                 Haptics.shared.play(.soft)
             }
         }
@@ -1008,7 +1010,7 @@ struct ButtonView: View {
 
         isPressed = false
         DispatchQueue.global(qos: .userInteractive).async {
-            ControllerManager.virtualController.setButtonState(0, for: button)
+            virtualController.setButtonState(0, for: button)
         }
     }
     

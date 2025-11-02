@@ -766,11 +766,15 @@ namespace Ryujinx.HLE.HOS
         {
             DirectoryInfo contentDirectory = FindApplicationDir(new DirectoryInfo(Path.Combine(GetModsBasePath(), AmsContentsDir)), $"{applicationId:x16}");
             string enabledCheatsPath = Path.Combine(contentDirectory.FullName, CheatDir, "enabled.txt");
+            string[] enabledCheats = Array.Empty<string>();
 
             if (File.Exists(enabledCheatsPath))
             {
-                tamperMachine.EnableCheats(File.ReadAllLines(enabledCheatsPath));
+                enabledCheats = File.ReadAllLines(enabledCheatsPath);
             }
+
+            tamperMachine.EnableCheats(enabledCheats);
+
         }
 
         private static bool ApplyProgramPatches(IEnumerable<Mod<DirectoryInfo>> mods, int protectedOffset, params IExecutable[] programs)

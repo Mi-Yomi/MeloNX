@@ -142,7 +142,8 @@ namespace Ryujinx.HLE.Loaders.Processes.Extensions
             string titleUpdateMetadataPath = Path.Combine(AppDataManager.GamesDirPath, titleIdBase.ToString("x16"), "updates.json");
             if (File.Exists(titleUpdateMetadataPath))
             {
-                updatePath = JsonHelper.DeserializeFromFile(titleUpdateMetadataPath, _applicationSerializerContext.TitleUpdateMetadata).Selected;
+                updatePath = AppDataManager.BaseDirPath + "/" + JsonHelper.DeserializeFromFile(titleUpdateMetadataPath, _applicationSerializerContext.TitleUpdateMetadata).Selected;
+                Logger.Info?.Print(LogClass.Loader, $"Using update path: {updatePath}");
                 if (File.Exists(updatePath))
                 {
                     IFileSystem updatePartitionFileSystem = PartitionFileSystemUtils.OpenApplicationFileSystem(updatePath, fileSystem);

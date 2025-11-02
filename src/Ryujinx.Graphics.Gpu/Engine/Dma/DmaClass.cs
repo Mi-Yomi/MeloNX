@@ -2,6 +2,7 @@ using Ryujinx.Common;
 using Ryujinx.Common.Memory;
 using Ryujinx.Graphics.Device;
 using Ryujinx.Graphics.Gpu.Engine.Threed;
+using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Texture;
 using System;
@@ -306,7 +307,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.Dma
                         src.MemoryLayout.UnpackGobBlocksInY(),
                         src.MemoryLayout.UnpackGobBlocksInZ());
 
-                    if (source != null && source.Height == yCount)
+                    if (source != null && source.Height == yCount && source.Info.FormatInfo.Format is not (Format.R32G32B32A32Float or Format.R16G16B16A16Float))
                     {
                         source.SynchronizeMemory();
 

@@ -8,6 +8,7 @@
 
 import CoreMotion
 import GameController           // GCController
+import os
 
 //──────────────────────────────────────────────────────────────────────── MARK:- Providers
 
@@ -24,27 +25,18 @@ final class DeviceMotionProvider: DSUMotionProvider {
     // ───── Internals
     private let mm = CMMotionManager()
     
-    // Thread Safety
-    private let dataLock = NSLock()
-    private var _latest: CMDeviceMotion?
-    private var latest: CMDeviceMotion? {
-        get { dataLock.lock(); defer { dataLock.unlock() }; return _latest }
-        set { dataLock.lock(); _latest = newValue; dataLock.unlock() }
-    }
-
     private var orientation: UIDeviceOrientation =
         UIDevice.current.orientation == .unknown ? .landscapeLeft : UIDevice.current.orientation
 
     init(slot: UInt8) {
         precondition(slot < 8, "DSU only supports slots 0…7")
         self.slot = slot
-
+        
         // ── start Core Motion
         mm.deviceMotionUpdateInterval = 1.0 / motionRate
         mm.startDeviceMotionUpdates(to: .main) { [weak self] m, _ in
             guard let self = self, let m = m else { return }
-            self.latest = m
-            if let sample = self.nextSample() {
+            if let sample = self.nextSample(m) {
                 DSUServer.shared.pushSample(sample, from: self)
             }
         }
@@ -65,9 +57,9 @@ final class DeviceMotionProvider: DSUMotionProvider {
         orientation = o
     }
 
-    func nextSample() -> DSUMotionSample? {
-        guard let m = latest else { return nil }
-
+    func nextSample(_ m2: Any?) -> DSUMotionSample? {
+        guard let m = m2 as? CMDeviceMotion ?? mm.deviceMotion else { return nil }
+        
         // Raw values
         let gx = Float(m.rotationRate.x)
         let gy = Float(m.rotationRate.y)
@@ -111,37 +103,40 @@ final class ControllerMotionProvider: DSUMotionProvider {
 
     // DSUMotionProvider
     let slot: UInt8
-    let mac:  [UInt8] = [0xAB,0x12,0xCD,0x34,0xEF,0x56]
+    let mac:  [UInt8]
     let connectionType: UInt8 = 2
     var batteryLevel: UInt8 {
         UInt8((pad.battery?.batteryLevel ?? 0.3) * 5).clamped(to: 0...5)
     }
 
-    private let pad: GCController
-    
-    // Thread Safety
-    private let dataLock = NSLock()
-    private var _latest: GCMotion?
-    private var latest: GCMotion? {
-        get { dataLock.lock(); defer { dataLock.unlock() }; return _latest }
-        set { dataLock.lock(); _latest = newValue; dataLock.unlock() }
-    }
+    private var pad: GCController
 
     init(controller: GCController, slot: UInt8) {
         self.pad  = controller
         self.slot = slot
+        self.mac = (0..<6).map { _ in UInt8.random(in: 0...255) }
         pad.motion?.sensorsActive = true
         pad.motion?.valueChangedHandler = { [weak self] motion in
             guard let self = self else { return }
-            self.latest = motion
-            if let sample = self.nextSample() {
+            if let sample = self.nextSample(motion) {
+                DSUServer.shared.pushSample(sample, from: self)
+            }
+        }
+    }
+    
+    func setNewController(_ controller: GCController) {
+        self.pad = controller
+        pad.motion?.sensorsActive = true
+        pad.motion?.valueChangedHandler = { [weak self] motion in
+            guard let self = self else { return }
+            if let sample = self.nextSample(motion) {
                 DSUServer.shared.pushSample(sample, from: self)
             }
         }
     }
 
-    func nextSample() -> DSUMotionSample? {
-        guard let m = latest else { return nil }
+    func nextSample(_ m2: Any?) -> DSUMotionSample? {
+        guard let m = m2 as? GCMotion ?? pad.motion else { return nil }
 
         // Extract and convert acceleration to SIMD3<Float>
         let a = SIMD3<Float>(

@@ -66,9 +66,9 @@ namespace Ryujinx.HLE.HOS
                     mode = MemoryManagerMode.SoftwarePageTable;
                 }
 
-                ICpuEngine cpuEngine = isArm64Host && (mode == MemoryManagerMode.HostMapped || mode == MemoryManagerMode.HostMappedUnsafe)
+                ICpuEngine cpuEngine = OperatingSystem.IsIOS() //isArm64Host && (mode == MemoryManagerMode.HostMapped || mode == MemoryManagerMode.HostMappedUnsafe)
                     ? new LightningJitEngine(_tickSource)
-                    : new JitEngine(_tickSource);
+                    : isArm64Host && (mode == MemoryManagerMode.HostMapped || mode == MemoryManagerMode.HostMappedUnsafe) ? new LightningJitEngine(_tickSource) : new JitEngine(_tickSource);
 
                 AddressSpace addressSpace = null;
 

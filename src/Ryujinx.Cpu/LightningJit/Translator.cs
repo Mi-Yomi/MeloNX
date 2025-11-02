@@ -110,6 +110,7 @@ namespace Ryujinx.Cpu.LightningJit
 
             Stubs.DispatchLoop(context.NativeContextPtr, address);
 
+
             NativeInterface.UnregisterThread();
             _noWxCache?.ClearEntireThreadLocalCache();
             _dualMappedCache?.ClearEntireThreadLocalCache();

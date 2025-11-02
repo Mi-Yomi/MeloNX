@@ -11,69 +11,66 @@ struct PerformanceOverlayView: View  {
     @StateObject private var memorymonitor = MemoryUsageMonitor()
     
     @StateObject private var fpsmonitor = FPSMonitor()
+    @State private var batteryLevel: Int = Int(UIDevice.current.batteryLevel * 100)
+    
+    @AppStorage("showBatteryPercentage") var showBatteryPercentage: Bool = false
+    
+    @AppStorage("horizontalorvertical") var horizontalorvertical: Bool = false
+    
+    @ViewBuilder
+    var content: some View {
+        if horizontalorvertical {
+            HStack(spacing: 8) {
+                if showBatteryPercentage {
+                    Text("Battery: \(batteryLevel)%")
+                        .foregroundStyle(.white)
+                }
+                Text("\(fpsmonitor.formatFPS())")
+                    .foregroundStyle(.white)
+                Text("RAM: " + memorymonitor.formatMemorySize(memorymonitor.memoryUsage))
+                    .foregroundStyle(.white)
+            }
+            .padding(10)
+        } else {
+            VStack(alignment: .trailing, spacing: 8) {
+                if showBatteryPercentage {
+                    Text("Battery: \(batteryLevel)%")
+                        .foregroundStyle(.white)
+                }
+                Text("\(fpsmonitor.formatFPS())")
+                    .foregroundStyle(.white)
+                Text("RAM: " + memorymonitor.formatMemorySize(memorymonitor.memoryUsage))
+                    .foregroundStyle(.white)
+            }
+            .padding(10)
+            .frame(minWidth: 150)
+        }
+    }
     
     var body: some View {
-        VStack {
-            if ProcessInfo.processInfo.isLowPowerModeEnabled {
-                Text("\(fpsmonitor.formatFPS())")
-                    .foregroundStyle(.white)
-                    .stroke(color: .orange, width: 2)
-                Text(memorymonitor.formatMemorySize(memorymonitor.memoryUsage))
-                    .foregroundStyle(.white)
-                    .stroke(color: .orange, width: 2)
+        Group {
+            if #available(iOS 19.0, *) {
+                GlassEffectContainer {
+                    content
+                        .glassEffect(.clear.tint(.black.opacity(0.6)),in: RoundedRectangle(cornerRadius: 5))
+                }
             } else {
-                Text("\(fpsmonitor.formatFPS())")
-                    .foregroundStyle(.white)
-                    .stroke(color: .black, width: 2)
-                Text(memorymonitor.formatMemorySize(memorymonitor.memoryUsage))
-                    .foregroundStyle(.white)
-                    .stroke(color: .black, width: 2)
+                content
+                    .background(Color.black.opacity(0.7))
+            }
+        }
+        .onAppear() {
+            UIDevice.current.isBatteryMonitoringEnabled = true
+            batteryLevel = Int(UIDevice.current.batteryLevel * 100)
+            
+            NotificationCenter.default.addObserver(
+                forName: UIDevice.batteryLevelDidChangeNotification,
+                object: nil,
+                queue: .main
+            ) { _ in
+                batteryLevel = Int(UIDevice.current.batteryLevel * 100)
             }
         }
     }
 }
 
-extension View {
-    func stroke(color: Color, width: CGFloat = 1) -> some View {
-        modifier(StrokeModifier(strokeSize: width, strokeColor: color))
-    }
-}
-
-struct StrokeModifier: ViewModifier {
-    private let id = UUID()
-    var strokeSize: CGFloat = 1
-    var strokeColor: Color = .blue
-    
-    func body(content: Content) -> some View {
-        if strokeSize > 0 {
-            appliedStrokeBackground(content: content)
-        } else {
-            content
-        }
-    }
-    
-    private func appliedStrokeBackground(content: Content) -> some View {
-        content
-            .padding(strokeSize*2)
-            .background(
-                Rectangle()
-                    .foregroundColor(strokeColor)
-                    .mask(alignment: .center) {
-                        mask(content: content)
-                    }
-            )
-    }
-    
-    func mask(content: Content) -> some View {
-        Canvas { context, size in
-            context.addFilter(.alphaThreshold(min: 0.01))
-            if let resolvedView = context.resolveSymbol(id: id) {
-                context.draw(resolvedView, at: .init(x: size.width/2, y: size.height/2))
-            }
-        } symbols: {
-            content
-                .tag(id)
-                .blur(radius: strokeSize)
-        }
-    }
-}

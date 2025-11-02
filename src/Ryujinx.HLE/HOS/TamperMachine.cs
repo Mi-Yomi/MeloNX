@@ -46,10 +46,14 @@ namespace Ryujinx.HLE.HOS
 
             if (program != null)
             {
+                Logger.Info?.Print(LogClass.TamperMachine, $"Installing tampering program {name} on process {info.Process.Pid} ({info.Process.Name})");
                 program.TampersCodeMemory = false;
 
                 _programs.Enqueue(program);
                 _programDictionary.TryAdd($"{buildId}-{name}", program);
+            } else
+            {
+                Logger.Warning?.Print(LogClass.TamperMachine, $"Failed to compile tampering program {name} on process {info.Process.Pid} ({info.Process.Name})");
             }
 
             Activate();
@@ -70,17 +74,23 @@ namespace Ryujinx.HLE.HOS
 
         public void EnableCheats(string[] enabledCheats)
         {
+            // foreach (var program in _programDictionary.Values)
+            // {
+            //     program.IsEnabled = false;
+            // }
+
+            // foreach (var cheat in enabledCheats)
+            // {
+            //     if (_programDictionary.TryGetValue(cheat, out var program))
+            //     {
+            //         program.IsEnabled = true;
+            //     }
+            // }
+            
+            // simply enable all cheats since we don't have a way to select them yet
             foreach (var program in _programDictionary.Values)
             {
-                program.IsEnabled = false;
-            }
-
-            foreach (var cheat in enabledCheats)
-            {
-                if (_programDictionary.TryGetValue(cheat, out var program))
-                {
-                    program.IsEnabled = true;
-                }
+                program.IsEnabled = true;
             }
         }
 
@@ -162,6 +172,11 @@ namespace Ryujinx.HLE.HOS
                 if (!string.IsNullOrEmpty(ex.Message))
                 {
                     Logger.Debug?.Print(LogClass.TamperMachine, ex.Message);
+                }
+
+                if (!string.IsNullOrEmpty(ex.StackTrace))
+                {
+                    Logger.Debug?.Print(LogClass.TamperMachine, ex.StackTrace);
                 }
             }
 

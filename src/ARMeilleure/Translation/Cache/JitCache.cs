@@ -163,7 +163,7 @@ namespace ARMeilleure.Translation.Cache
         {
             if (OperatingSystem.IsIOS())
             {
-                // return;
+                return;
             }
 
             lock (_lock)

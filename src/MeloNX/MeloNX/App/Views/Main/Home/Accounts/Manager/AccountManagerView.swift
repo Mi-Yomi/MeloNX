@@ -155,7 +155,7 @@ struct AccountManagerView: View {
             let data = try JSONEncoder().encode(updatedProfiles)
             try data.write(to: profilePath)
             
-            refresh_account_manager()
+            RyujinxBridge.refreshAccountManager()
             loadAccounts()
         } catch {
             print("Failed to save profiles: \(error)")

@@ -133,7 +133,7 @@ struct PhotoPicker: UIViewControllerRepresentable {
             
             provider.loadObject(ofClass: UIImage.self) { object, _ in
                 if let image = object as? UIImage {
-                    DispatchQueue.main.async {
+                   Task { @MainActor in
                         let resized = self.resizeImage(image: image, targetSize: CGSize(width: 256, height: 256))
                         self.parent.selectedImage = resized
                     }

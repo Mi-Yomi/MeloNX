@@ -35,11 +35,7 @@ class InGameSettingsManager: PerGameSettingsManaging {
             Ryujinx.shared.config = config[currentgame.titleId]
             let args = Ryujinx.shared.buildCommandLineArgs(from: config[currentgame.titleId] ?? Ryujinx.Arguments())
             
-            let cArgs = args.map { strdup($0) }
-            defer { cArgs.forEach { free($0) } }
-            var argvPtrs = cArgs
-            
-            let result = update_settings_external(Int32(args.count), &argvPtrs)
+            let result = RyujinxBridge.updateSettingsExternal(argv: args)//update_settings_external(Int32(args.count), &argvPtrs)
             
             print(result)
         }

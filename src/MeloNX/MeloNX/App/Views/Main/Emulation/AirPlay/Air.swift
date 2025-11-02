@@ -120,7 +120,7 @@ public class Air {
         guard let windowScene: UIWindowScene = matchingWindowScene else {
             // Only recurse once to avoid infinite loops
             if shouldRecurse {
-                DispatchQueue.main.async {
+               Task { @MainActor in
                     self.findWindowScene(for: screen, shouldRecurse: false) { windowScene in
                         completion(windowScene)
                     }

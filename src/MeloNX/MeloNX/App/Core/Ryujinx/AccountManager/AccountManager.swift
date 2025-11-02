@@ -11,26 +11,24 @@ class AccountManager {
     static func createAccount(name: String, imageData: Data) {
         name.withCString { namePtr in
             imageData.withUnsafeBytes { bufferPtr in
-                let imagePtr = bufferPtr.baseAddress!.assumingMemoryBound(to: CChar.self)
-                create_account(UnsafeMutablePointer(mutating: namePtr), UnsafeMutablePointer(mutating: imagePtr), Int32(imageData.count))
+                let imagePtr = String(cString: bufferPtr.baseAddress!.assumingMemoryBound(to: CChar.self))
+                
+                RyujinxBridge.createAccount(name: name, image: imagePtr)
+                // create_account(UnsafeMutablePointer(mutating: namePtr), UnsafeMutablePointer(mutating: imagePtr), Int32(imageData.count))
             }
         }
     }
     
     static func openUser(_ id: String) {
-        id.withCString { idPtr in
-            open_user(UnsafeMutablePointer(mutating: idPtr))
-        }
+        RyujinxBridge.openUser(userId: id)
     }
     
     static func closeUser(_ id: String) {
-        id.withCString { idPtr in
-            close_user(UnsafeMutablePointer(mutating: idPtr))
-        }
+        RyujinxBridge.closeUser(userId: id)
     }
     
     static func getFirmwareIcons() -> [Avatar] {
-        let avatarArray = get_avatars()
+        let avatarArray = RyujinxBridge.avatars
         let count = Int(avatarArray.Count)
         var result: [Avatar] = []
         

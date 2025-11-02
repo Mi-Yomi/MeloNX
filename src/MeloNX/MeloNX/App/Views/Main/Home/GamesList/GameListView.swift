@@ -175,8 +175,6 @@ struct GameLibraryView: View {
                         
                         Button {
                             showingAccounts = true
-                            
-                    
                         } label: {
                             Label("Profile Manager", systemImage: "person.2")
                         }
@@ -185,6 +183,17 @@ struct GameLibraryView: View {
                         Label("Options", systemImage: "ellipsis.circle")
                             .labelStyle(.iconOnly)
                             .foregroundColor(.blue)
+                    }
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    if (isInLiveContainer.0 || isInLiveContainer.1 != nil) && !isInLiveContainer.2 {
+                        Button {
+                            _ = relaunchLiveContainer()
+                        } label: {
+                            Label("Exit to LiveContainer", systemImage: "escape")
+                                .labelStyle(.iconOnly)
+                                .foregroundColor(.blue)
+                        }
                     }
                 }
             }
@@ -358,7 +367,7 @@ struct GameLibraryView: View {
         Group {
             if firmwareversion == "0" {
                     Button {
-                        DispatchQueue.main.async {
+                       Task { @MainActor in
                             firmwareInstaller.toggle()
                         }
                     } label: {
@@ -477,14 +486,13 @@ struct GameLibraryView: View {
             
             do {
                 let handle = try FileHandle(forReadingFrom: url)
-                let fileExtension = (url.pathExtension as NSString).utf8String
-                let extensionPtr = UnsafeMutablePointer<CChar>(mutating: fileExtension)
-                
-                let gameInfo = get_game_info(handle.fileDescriptor, extensionPtr)
+                let fileExtension = (url.pathExtension as NSString)
+
+                let gameInfo = RyujinxBridge.getGameInfo(arg0: handle.fileDescriptor, arg1: fileExtension)
                 
                 let game = Game.convertGameInfoToGame(gameInfo: gameInfo, url: url)
                 
-                DispatchQueue.main.async {
+               Task { @MainActor in
                     startemu = game
                 }
             } catch {

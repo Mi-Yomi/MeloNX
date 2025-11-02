@@ -19,69 +19,11 @@ class MeloMTKView: MTKView {
 
     func setAspectRatio(_ ratio: AspectRatio) {
         self.aspectRatio = ratio
+        RyujinxBridge.setViewSize(width: Int(self.bounds.width), height: Int(self.bounds.height))
     }
-
-    private func scaleToTargetResolution(_ location: CGPoint) -> CGPoint? {
-        let viewWidth = self.frame.width
-        let viewHeight = self.frame.height
-        
-        var scaleX: CGFloat
-        var scaleY: CGFloat
-        var offsetX: CGFloat = 0
-        var offsetY: CGFloat = 0
-        
-        var targetAspect: CGFloat
-        
-        switch aspectRatio {
-        case .fixed4x3:
-            targetAspect = 4.0 / 3.0
-        case .fixed16x9:
-            targetAspect = 16.0 / 9.0
-        case .fixed16x10:
-            targetAspect = 16.0 / 10.0
-        case .fixed21x9:
-            targetAspect = 21.0 / 9.0
-        case .fixed32x9:
-            targetAspect = 32.0 / 9.0
-        case .stretched:
-            scaleX = baseWidth / viewWidth
-            scaleY = baseHeight / viewHeight
-            
-            let adjustedX = location.x
-            let adjustedY = location.y
-            
-            let scaledX = max(0, min(adjustedX * scaleX, baseWidth))
-            let scaledY = max(0, min(adjustedY * scaleY, baseHeight))
-            
-            return CGPoint(x: scaledX, y: scaledY)
-        }
-        
-        let viewAspect = viewWidth / viewHeight
-        
-        if viewAspect > targetAspect {
-            let scaledWidth = viewHeight * targetAspect
-            offsetX = (viewWidth - scaledWidth) / 2
-            scaleX = baseWidth / scaledWidth
-            scaleY = baseHeight / viewHeight
-        } else {
-            let scaledHeight = viewWidth / targetAspect
-            offsetY = (viewHeight - scaledHeight) / 2
-            scaleX = baseWidth / viewWidth
-            scaleY = baseHeight / scaledHeight
-        }
-        
-        if location.x < offsetX || location.x > (viewWidth - offsetX) ||
-           location.y < offsetY || location.y > (viewHeight - offsetY) {
-            return nil
-        }
-        
-        let adjustedX = location.x - offsetX
-        let adjustedY = location.y - offsetY
-        
-        let scaledX = max(0, min(adjustedX * scaleX, baseWidth))
-        let scaledY = max(0, min(adjustedY * scaleY, baseHeight))
-
-        return CGPoint(x: scaledX, y: scaledY)
+    
+    private func transformToTargetCoordinates(_ point: CGPoint) -> CGPoint {
+        return point
     }
 
     private func getNextAvailableIndex() -> Int {
@@ -103,16 +45,12 @@ class MeloMTKView: MTKView {
 
         for touch in touches {
             let location = touch.location(in: self)
-            guard let scaledLocation = scaleToTargetResolution(location) else {
-                ignoredTouches.insert(touch)
-                continue
-            }
-
             let index = getNextAvailableIndex()
             touchIndexMap[touch] = index
             activeTouches.append(touch)
-            
-            touch_began(Float(scaledLocation.x), Float(scaledLocation.y), Int32(index))
+            print("Touch location: \(location)")
+            let transformed = transformToTargetCoordinates(location)
+            RyujinxBridge.touchBegan(x: Float(transformed.x), y: Float(transformed.y), index: index)
         }
     }
 
@@ -137,7 +75,7 @@ class MeloMTKView: MTKView {
             }
 
             if let touchIndex = touchIndexMap[touch] {
-                touch_ended(Int32(touchIndex))
+                RyujinxBridge.touchEnded(index: touchIndex)
                 
                 if let arrayIndex = activeTouches.firstIndex(of: touch) {
                     activeTouches.remove(at: arrayIndex)
@@ -165,18 +103,8 @@ class MeloMTKView: MTKView {
             }
 
             let location = touch.location(in: self)
-            guard let scaledLocation = scaleToTargetResolution(location) else {
-                touch_ended(Int32(touchIndex))
-                
-                if let arrayIndex = activeTouches.firstIndex(of: touch) {
-                    activeTouches.remove(at: arrayIndex)
-                }
-                touchIndexMap.removeValue(forKey: touch)
-                ignoredTouches.insert(touch)
-                continue
-            }
-
-            touch_moved(Float(scaledLocation.x), Float(scaledLocation.y), Int32(touchIndex))
+            let transformed = transformToTargetCoordinates(location)
+            RyujinxBridge.touchMoved(x: Float(transformed.x), y: Float(transformed.y), index: touchIndex)
         }
     }
 

@@ -1,6 +1,7 @@
 using Ryujinx.SDL2.Common;
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using static SDL2.SDL;
 
 namespace Ryujinx.Input.SDL2
@@ -9,7 +10,9 @@ namespace Ryujinx.Input.SDL2
     {
         private readonly Dictionary<int, string> _gamepadsInstanceIdsMapping;
         private readonly List<string> _gamepadsIds;
-        private readonly object _lock = new object();
+        private static readonly object _lock = new object();
+
+        private static readonly Dictionary<string, IntPtr> _gamepadHandles = new Dictionary<string, IntPtr>();
 
         public ReadOnlySpan<string> GamepadsIds
         {
@@ -31,6 +34,7 @@ namespace Ryujinx.Input.SDL2
         {
             _gamepadsInstanceIdsMapping = new Dictionary<int, string>();
             _gamepadsIds = new List<string>();
+            _gamepadHandles.Clear();
 
             SDL2Driver.Instance.Initialize();
             SDL2Driver.Instance.OnJoyStickConnected += HandleJoyStickConnected;
@@ -42,6 +46,21 @@ namespace Ryujinx.Input.SDL2
             for (int joystickIndex = 0; joystickIndex < numJoysticks; joystickIndex++)
             {
                 HandleJoyStickConnected(joystickIndex, SDL_JoystickGetDeviceInstanceID(joystickIndex));
+            }
+        }
+
+        public static void AddGamepadHandle(IntPtr handle, IntPtr idPtr)
+        {
+            if (handle == IntPtr.Zero)
+            {
+                return;
+            }
+
+            lock (_lock)
+            {
+                string id = Marshal.PtrToStringAnsi(idPtr);
+
+                _gamepadHandles.Add(id, handle);
             }
         }
 
@@ -80,6 +99,8 @@ namespace Ryujinx.Input.SDL2
                 lock (_lock)
                 {
                     _gamepadsIds.Remove(id);
+
+                    _gamepadHandles.Remove(id);
                 }
 
                 OnGamepadDisconnected?.Invoke(id);
@@ -141,6 +162,8 @@ namespace Ryujinx.Input.SDL2
                 lock (_lock)
                 {
                     _gamepadsIds.Clear();
+
+                    _gamepadHandles.Clear();
                 }
 
                 SDL2Driver.Instance.Dispose();
@@ -155,6 +178,17 @@ namespace Ryujinx.Input.SDL2
 
         public IGamepad GetGamepad(string id)
         {
+            lock (_lock)
+            {
+                if (_gamepadHandles.ContainsKey(id))
+                {
+                    nint handle = _gamepadHandles[id];
+
+                    return new SDL2Gamepad(handle, id);
+                }
+            }
+
+
             int joystickIndex = GetJoystickIndexByGamepadId(id);
 
             if (joystickIndex == -1)

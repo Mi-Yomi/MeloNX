@@ -18,6 +18,8 @@ struct SetupView: View {
     @State private var firmImported = false
     @Binding var finished: Bool
     
+    let cool: LocalizedStringKey = "MeloNX has issues with Certificates and should not be used. Official Install Guides is [here](https://melonx.org)"
+    
     var body: some View {
         iOSNav {
             ZStack {
@@ -39,20 +41,6 @@ struct SetupView: View {
                     )
                 }
             }
-            .fileImporter(
-                isPresented: $isImportingKeys,
-                allowedContentTypes: [.item],
-                allowsMultipleSelection: true
-            ) { result in
-                handleKeysImport(result: result)
-            }
-        }
-        .fileImporter(
-            isPresented: $isImportingFirmware,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: false
-        ) { result in
-            handleFirmwareImport(result: result)
         }
         .alert(isPresented: $showAlert) {
             Alert(title: Text(alertMessage), dismissButton: .default(Text("OK")))
@@ -66,8 +54,24 @@ struct SetupView: View {
                 secondaryButton: .cancel()
             )
         }
+        .onChange(of: isImportingFirmware) { newValue in
+            if newValue {
+                FileImporterManager.shared.importFiles(types: [.folder, .zip]) { result in
+                    handleFirmwareImport(result: result)
+                }
+                isImportingFirmware = false
+            }
+        }
+        .onChange(of: isImportingKeys) { newValue in
+            if newValue {
+                FileImporterManager.shared.importFiles(types: [.item], allowMultiple: true) { result in
+                    handleKeysImport(result: result)
+                }
+                isImportingKeys = false
+            }
+        }
         .onAppear {
-            initialize()
+            RyujinxBridge.initialize()
             finished = false
             keysImported = Ryujinx.shared.checkIfKeysImported()
             
@@ -126,6 +130,14 @@ struct SetupView: View {
                                 .onTapGesture(count: 2) {
                                     showSkipAlert = true
                                 }
+                            
+                            if shouldAsCopy && !isInLiveContainer.0 {
+                                Text(cool)
+                                    .font(.callout)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.primary)
+                                    .multilineTextAlignment(.center)
+                            }
                             
                             Text("Set up your Nintendo Switch emulation environment by importing keys and firmware.")
                                 .font(.subheadline)
@@ -233,6 +245,14 @@ struct SetupView: View {
                             .onTapGesture(count: 2) {
                                 showSkipAlert = true
                             }
+                        
+                        if shouldAsCopy && !isInLiveContainer.0 {
+                            Text(cool)
+                                .font(.title2)
+                                .fontWeight(.bold)
+                                .foregroundColor(.primary)
+                                .padding(.bottom, 20)
+                        }
                         
                         setupStep(
                             title: "Import Keys",

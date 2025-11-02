@@ -44,7 +44,7 @@ namespace Ryujinx.Graphics.Vulkan
                     ResourceDescriptor descriptor = rdc.Descriptors[descIndex];
                     ResourceStages stages = descriptor.Stages;
 
-                    if (descriptor.Type == ResourceType.StorageBuffer && isMoltenVk)
+                    if (descriptor.Type == ResourceType.StorageBuffer && isMoltenVk && !OperatingSystem.IsIOSVersionAtLeast(17))
                     {
                         // There's a bug on MoltenVK where using the same buffer across different stages
                         // causes invalid resource errors, allow the binding on all active stages as workaround.

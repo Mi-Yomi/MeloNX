@@ -15,12 +15,13 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_syswm.h>
 #include "MobileGestalt.h"
+#include "HookNSBundle.h"
+
+
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
 
 
 struct GameInfo {
@@ -63,43 +64,19 @@ typedef void (^SwiftCallback2)(NSData *result);
 void RegisterCallback(NSString *identifier, SwiftCallback callback);
 void RegisterCallbackWithData(NSString *identifier, SwiftCallback2 callback);
 
-extern struct GameInfo get_game_info(int, char*);
+__attribute__((noinline,optnone,naked))
+void BreakSendJITScript(char* script, size_t len) {
+    asm("mov x16, #2 \n"
+        "brk #0xf00d \n"
+        "ret");
+}
 
-extern struct DlcNcaList get_dlc_nca_list(const char* titleIdPtr, const char* pathPtr);
-
-void install_firmware(const char* inputPtr);
-
-char* installed_firmware_version();
-
-void set_native_window(void *layerPtr);
-
-void pause_emulation(bool shouldPause);
-
-void stop_emulation();
-
-void initialize();
-
-int main_ryujinx_sdl(int argc, char **argv);
-
-int update_settings_external(int argc, char **argv);
-
-int get_current_fps();
-
-void touch_began(float x, float y, int index);
-
-void touch_moved(float x, float y, int index);
-
-void touch_ended(int index);
-
-void refresh_account_manager();
-
-void create_account(char* name, char* image, int imagelength);
-
-void open_user(char* userid);
-
-void close_user(char* userid);
-
-extern struct AvatarArray get_avatars();
+__attribute__((noinline,optnone,naked))
+bool BreakTestJITScript() {
+    asm("mov x16, #3 \n"
+        "brk #0xf00d \n"
+        "ret");
+}
 
 #ifdef __cplusplus
 }

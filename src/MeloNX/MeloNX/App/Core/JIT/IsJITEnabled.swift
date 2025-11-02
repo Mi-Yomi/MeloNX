@@ -11,8 +11,7 @@ import Foundation
 func csops(pid: Int32, ops: Int32, useraddr: UnsafeMutableRawPointer?, usersize: Int32) -> Int32
 
 func isJITEnabled() -> Bool {
-    var flags: Int = 0
-    
+
     if checkAppEntitlement("dynamic-codesigning") {
         return allocateTest()
     }
@@ -64,11 +63,10 @@ func allocateTest() -> Bool {
         munmap(jitMemory, pageSize)
     }
     
+    
     memcpy(jitMemory, code, code.count)
     
-    if mprotect(jitMemory, pageSize, PROT_READ | PROT_EXEC) != 0 {
-        return false
-    }
+    _ = mprotect(jitMemory, pageSize, PROT_READ | PROT_EXEC)
     
     let checkMem = checkMemoryPermissions(at: jitMemory)
     

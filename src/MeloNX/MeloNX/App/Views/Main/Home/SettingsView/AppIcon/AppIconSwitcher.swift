@@ -177,7 +177,7 @@ struct AppIconSwitcherView: View {
                 if let error = error {
                     print("Error setting icon: \(error)")
                 } else {
-                    DispatchQueue.main.async {
+                   Task { @MainActor in
                         currentIconName = nil
                         refresh = Int.random(in: 0...100)
                     }
@@ -188,7 +188,7 @@ struct AppIconSwitcherView: View {
                 if let error = error {
                     print("Error setting icon: \(error)")
                 } else {
-                    DispatchQueue.main.async {
+                   Task { @MainActor in
                         currentIconName = iconName
                         refresh = Int.random(in: 0...100)
                     }

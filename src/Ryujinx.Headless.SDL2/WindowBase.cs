@@ -57,8 +57,8 @@ namespace Ryujinx.Headless.SDL2
         public IntPtr WindowHandle;
 
         public IHostUITheme HostUITheme { get; }
-        public int Width { get; private set; }
-        public int Height { get; private set; }
+        public static int Width { get; private set; }
+        public static int Height { get; private set; }
         public int DisplayId { get; set; }
         public bool IsFullscreen { get; set; }
         public bool IsExclusiveFullscreen { get; set; }
@@ -160,6 +160,14 @@ namespace Ryujinx.Headless.SDL2
             }
         }
 
+        [UnmanagedCallersOnly(EntryPoint = "set_view_size")]
+        static unsafe void set_view_size(int width, int height)
+        {
+            Width = width;
+            Height = height;
+             
+        }
+
         private void InitializeWindow()
         {
             if (this is Vulkan.MoltenVKWindow) {
@@ -167,8 +175,8 @@ namespace Ryujinx.Headless.SDL2
 
                 Logger.Info?.Print(LogClass.Application, message);
 
-                Width = DefaultWidth;
-                Height = DefaultHeight;
+                Width = ExclusiveFullscreenWidth;
+                Height = ExclusiveFullscreenHeight;
 
                 MouseDriver.SetClientSize(Width, Height);
             } else {
@@ -439,12 +447,11 @@ namespace Ryujinx.Headless.SDL2
             NpadManager.Update();
 
             // Touchscreen
-            bool hasTouch = true;
-            
+            bool hasTouch;
+
             MouseDriver.SetClientSize(Width, Height);
 
-            hasTouch = TouchScreenManager.Update(true, (_inputManager.MouseDriver as iOSTouchDriver).IsButtonPressed(MouseButton.Button1), _aspectRatio.ToFloat());
-
+            hasTouch = TouchScreenManager.Update(true, (_inputManager.MouseDriver as iOSTouchDriver).IsButtonPressed(MouseButton.Button1), (float)Width / Height);
 
             if (!hasTouch)
             {

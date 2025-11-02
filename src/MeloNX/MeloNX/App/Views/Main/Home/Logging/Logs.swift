@@ -9,7 +9,8 @@ import SwiftUI
 import Combine
 
 struct LogFileView: View {
-    @StateObject var logsModel = LogViewModel()
+    @StateObject var logsModel = LogCapture.shared
+    @State var logs: [String] = []
     @State private var showingLogs = false
     
     public var isfps: Bool
@@ -19,7 +20,7 @@ struct LogFileView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(logsModel.logs.suffix(maxDisplayLines), id: \.self) { log in
+            ForEach(logs.suffix(maxDisplayLines), id: \.self) { log in
                 Text(log)
                     .font(.caption)
                     .foregroundColor(.white)
@@ -30,6 +31,11 @@ struct LogFileView: View {
             }
         }
         .padding()
+        .task {
+            for await log in LogCapture.shared.logs {
+                logs.append(log)
+            }
+        }
     }
     
     private func stopLogFileWatching() {
@@ -38,29 +44,3 @@ struct LogFileView: View {
 }
 
 
-class LogViewModel: ObservableObject {
-    @Published var logs: [String] = []
-    private var cancellables = Set<AnyCancellable>()
-    
-    init() {
-        _ = LogCapture.shared
-        
-        NotificationCenter.default.publisher(for: .newLogCaptured)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.updateLogs()
-            }
-            .store(in: &cancellables)
-        
-        updateLogs()
-    }
-    
-    func updateLogs() {
-        logs = LogCapture.shared.capturedLogs
-    }
-    
-    func clearLogs() {
-        LogCapture.shared.capturedLogs = []
-        updateLogs()
-    }
-}

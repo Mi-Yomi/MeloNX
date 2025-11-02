@@ -13,7 +13,8 @@ namespace Ryujinx.HLE.HOS.Tamper.Operations
 
         public void Execute()
         {
-            _destination.Set((T)(~(dynamic)_source.Get<T>()));
+            T result = TypeSafeOperations.BitwiseNot(_source.Get<T>());
+            _destination.Set(result);
         }
     }
 }

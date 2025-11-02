@@ -166,6 +166,17 @@ namespace Ryujinx.Cpu.Jit
         }
 
         /// <inheritdoc/>
+        public override void MapForeign(ulong va, nuint hostPointer, ulong size)
+        {
+            AssertValidAddressAndSize(va, size);
+
+            _pages.AddMapping(va, size);
+            _nativePageTable.MapForeign(va, hostPointer, size);
+
+            Tracking.Map(va, size);
+        }
+
+        /// <inheritdoc/>
         public void Unmap(ulong va, ulong size)
         {
             AssertValidAddressAndSize(va, size);

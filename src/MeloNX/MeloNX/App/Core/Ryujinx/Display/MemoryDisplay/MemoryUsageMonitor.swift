@@ -8,20 +8,28 @@
 import Foundation
 import SwiftUI
 
+@MainActor
 class MemoryUsageMonitor: ObservableObject {
     @Published private(set) var memoryUsage: UInt64 = 0
-    private var timer: Timer?
-    
+    private var task: Task<Void, Never>?
+
     init() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-            self?.updateMemoryUsage()
+        task = Task {
+            await monitorMemoryUsage()
         }
     }
-    
+
     deinit {
-        timer?.invalidate()
+        task?.cancel()
     }
-    
+
+    private func monitorMemoryUsage() async {
+        while !Task.isCancelled {
+            updateMemoryUsage()
+            try? await Task.sleep(nanoseconds: 200_000_000) 
+        }
+    }
+
     private func updateMemoryUsage() {
         var taskInfo = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.stride) / 4
@@ -40,7 +48,6 @@ class MemoryUsageMonitor: ObservableObject {
         }
     }
 
-    
     func formatMemorySize(_ bytes: UInt64) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useMB, .useGB]
@@ -48,5 +55,3 @@ class MemoryUsageMonitor: ObservableObject {
         return formatter.string(fromByteCount: Int64(bytes))
     }
 }
-
-

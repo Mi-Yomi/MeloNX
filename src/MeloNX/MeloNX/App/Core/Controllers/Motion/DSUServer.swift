@@ -19,7 +19,7 @@ protocol DSUMotionProvider: AnyObject {
     var connectionType: UInt8      { get }        // 0 = USB, 2 = BT
     var batteryLevel:   UInt8      { get }        // 0-5 (Cemuhook)
     
-    func nextSample() -> DSUMotionSample?
+    func nextSample(_ m2: Any?) -> DSUMotionSample?
 }
 
 /// Raw motion payload returned by providers.
@@ -88,15 +88,14 @@ extension DSUServer: GCDAsyncUdpSocketDelegate {
                    didReceive data: Data,
                    fromAddress addr: Data,
                    withFilterContext ctx: Any?) {
-
         lastClientAddress = addr
-
+        
         // Light validation
         guard data.count >= 20,
               String(decoding: data[0..<4], as: UTF8.self) == C.headerMagic,
               data.readUInt16LE(at: 4) == C.protocolVersion
         else { return }
-
+        
         let type = data.readUInt32LE(at: 16)
         switch type {
         case 0x100001: sendPortInfo(to: addr)   // client asks for port list

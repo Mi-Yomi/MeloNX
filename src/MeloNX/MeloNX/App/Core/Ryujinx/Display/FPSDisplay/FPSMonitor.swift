@@ -6,36 +6,33 @@
 //
 
 import Foundation
-import SwiftUI
+import Combine
 
+@MainActor
 class FPSMonitor: ObservableObject {
     @Published private(set) var currentFPS: UInt64 = 0
-    private var timer: Timer?
-    
+    private var task: Task<Void, Never>?
+
     init() {
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            self?.updateFPS()
+        task = Task {
+            await monitorFPS()
         }
     }
-    
+
     deinit {
-        timer?.invalidate()
+        task?.cancel()
     }
-    
-    private func updateFPS() {
-        let currentfps = UInt64(get_current_fps())
-        
-        self.currentFPS = currentfps
+
+    private func monitorFPS() async {
+        while !Task.isCancelled {
+            let currentfps = UInt64(RyujinxBridge.currentFPS)
+            currentFPS = currentfps
+
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
     }
-    
-    
+
     func formatFPS() -> String {
-        let fps = Double(currentFPS)
-        let fpsString = String(format: "FPS: %.2f", fps)
-        
-        return fpsString
+        String(format: "FPS: %.2f", Double(currentFPS))
     }
 }
-
-
-
