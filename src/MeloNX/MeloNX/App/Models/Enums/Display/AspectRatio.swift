@@ -17,7 +17,7 @@ public enum AspectRatio: String, Codable, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .fixed4x3: return "4:3"
+        case .fixed4x3: return "4:3" // :3
         case .fixed16x9: return "16:9 (Default)"
         case .fixed16x10: return "16:10"
         case .fixed21x9: return "21:9"
