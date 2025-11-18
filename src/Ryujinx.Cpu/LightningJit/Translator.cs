@@ -15,6 +15,12 @@ using System.IO;
 
 namespace Ryujinx.Cpu.LightningJit
 {
+    public class DualMappedTranslator {
+        public static bool InitializeDualMapped() {
+            return Translator.InitializeDualMapped();
+        }
+    }
+
     class Translator : IDisposable
     {
         // Should be enabled on platforms that enforce W^X.
@@ -41,7 +47,7 @@ namespace Ryujinx.Cpu.LightningJit
 
         private readonly ConcurrentQueue<KeyValuePair<ulong, TranslatedFunction>> _oldFuncs;
         private readonly NoWxCache _noWxCache;
-        private readonly DualMappedNoWxCache _dualMappedCache;
+        static private DualMappedNoWxCache _dualMappedCache;
         private bool _disposed;
 
         internal TranslatorCache<TranslatedFunction> Functions { get; }
@@ -61,13 +67,19 @@ namespace Ryujinx.Cpu.LightningJit
                 if (dualMapped == "1") //(OperatingSystem.IsIOSVersionAtLeast(19) || OperatingSystem.IsIOSVersionAtLeast(26))
                 {
                     Console.WriteLine($"Dual Mapped JIT enabled.");
-                    _dualMappedCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
+                    if (_dualMappedCache == null) {
+                        _dualMappedCache = new(new JitMemoryAllocator(), CreateStackWalker());
+                    }
+                    _dualMappedCache.SetTranslator(this);
                     Functions = new TranslatorCache<TranslatedFunction>();
                     FunctionTable = new AddressTable<ulong>(for64Bits ? _levels64Bit : _levels32Bit);
                     Stubs = new TranslatorStubs(FunctionTable, _dualMappedCache);
                 }
                 else
                 {
+                    if (_dualMappedCache == null) {
+                        
+                    }
                     _noWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
                     Functions = new TranslatorCache<TranslatedFunction>();
                     FunctionTable = new AddressTable<ulong>(for64Bits ? _levels64Bit : _levels32Bit);
@@ -88,6 +100,29 @@ namespace Ryujinx.Cpu.LightningJit
             {
                 NativeSignalHandler.InitializeSignalHandler();
             }
+        }
+
+        public static bool InitializeDualMapped() {
+            if (IsNoWxPlatform)
+            {   
+                string dualMapped = Environment.GetEnvironmentVariable("DUAL_MAPPED_JIT");
+                if (dualMapped == "1") //(OperatingSystem.IsIOSVersionAtLeast(19) || OperatingSystem.IsIOSVersionAtLeast(26))
+                {
+                    Console.WriteLine($"Dual Mapped JIT enabled.");
+                    try {
+                        if (_dualMappedCache == null) {
+                            _dualMappedCache = new(new JitMemoryAllocator(), CreateStackWalker());
+                        }
+                    } catch {
+                        return false;
+                    }
+
+                    NativeSignalHandler.InitializeSignalHandler();
+                }
+
+            }
+
+            return true;
         }
 
         private static IStackWalker CreateStackWalker()

@@ -11,10 +11,10 @@ import UniformTypeIdentifiers
 struct UpdateManagerSheet: View {
     // MARK: - Properties
     @State private var updates: [UpdateItem] = []
-    @Binding var game: Game?
+    var game: Game?
     @State private var isSelectingGameUpdate = false
     @State private var jsonURL: URL? = nil
-    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.dismiss) var dismiss
     
     // MARK: - Models
     class UpdateItem: Identifiable, ObservableObject {
@@ -51,7 +51,7 @@ struct UpdateManagerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
+                        dismiss()
                     }
                 }
                 

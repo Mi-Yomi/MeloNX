@@ -8,7 +8,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-public struct Game: Identifiable, Equatable, Hashable {
+public struct Game: Codable, Identifiable, Equatable, Hashable, Sendable {
     public var id: URL { fileURL }
 
     var containerFolder: URL
@@ -19,7 +19,10 @@ public struct Game: Identifiable, Equatable, Hashable {
     var titleId: String
     var developer: String
     var version: String
-    var icon: UIImage?
+    var iconData: Data?
+    var icon: UIImage? {
+        UIImage(data: iconData ?? Data())
+    }
     
     
     static func convertGameInfoToGame(gameInfo: GameInfo, url: URL) -> Game {
@@ -55,7 +58,7 @@ public struct Game: Identifiable, Equatable, Hashable {
         if imageSize > 0, imageSize <= 1024 * 1024 {
             let imageData = Data(bytes: gameInfo.ImageData, count: imageSize)
             
-            gameTemp.icon = UIImage(data: imageData)
+            gameTemp.iconData = imageData
         } else {
             // print("Invalid image size.")
         }

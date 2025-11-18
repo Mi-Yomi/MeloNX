@@ -1,6 +1,6 @@
 namespace Ryujinx.Cpu.LightningJit.CodeGen.Arm64
 {
-    enum ArmCondition
+    public enum ArmCondition
     {
         Eq = 0,
         Ne = 1,
@@ -20,7 +20,7 @@ namespace Ryujinx.Cpu.LightningJit.CodeGen.Arm64
         Nv = 15,
     }
 
-    static class ArmConditionExtensions
+    public static class ArmConditionExtensions
     {
         public static ArmCondition Invert(this ArmCondition condition)
         {

@@ -705,7 +705,7 @@ namespace Ryujinx.Graphics.Vulkan
                 {
                     UpdateAndBind(cbs, program, PipelineBase.StorageSetIndex, pbp);
                 }
-                catch
+                catch 
                 {
                     UpdateAndBind(cbs, PipelineBase.TextureSetIndex, pbp);
                 }
@@ -736,7 +736,7 @@ namespace Ryujinx.Graphics.Vulkan
                 {
                     UpdateAndBind(cbs, program, PipelineBase.ImageSetIndex, pbp);
                 }
-                catch
+                catch 
                 {
                     UpdateAndBind(cbs, PipelineBase.ImageSetIndex, pbp);
                 }
@@ -878,8 +878,9 @@ namespace Ryujinx.Graphics.Vulkan
 
                             for (int i = 0; i < count; i++)
                             {
-                                ref var texture = ref textures[i];
-                                ref var refs = ref _textureRefs[binding + i];
+                                int index = binding + i;
+                                ref var texture = ref textures[index];
+                                ref var refs = ref _textureRefs[index];
 
                                 texture.ImageView = refs.ImageView?.Get(cbs).Value ?? default;
                                 texture.Sampler = refs.Sampler?.Get(cbs).Value ?? default;
@@ -895,7 +896,7 @@ namespace Ryujinx.Graphics.Vulkan
                                 }
                             }
 
-                            tu.Push<DescriptorImageInfo>(textures[..count]);
+                            tu.Push<DescriptorImageInfo>(textures.Slice(binding, count));
                         }
                         else
                         {
@@ -903,10 +904,11 @@ namespace Ryujinx.Graphics.Vulkan
 
                             for (int i = 0; i < count; i++)
                             {
-                                bufferTextures[i] = _bufferTextureRefs[binding + i]?.GetBufferView(cbs, false) ?? default;
+                                int index = binding + i;
+                                bufferTextures[index] = _bufferTextureRefs[index]?.GetBufferView(cbs, false) ?? default;
                             }
 
-                            tu.Push<BufferView>(bufferTextures[..count]);
+                            tu.Push<BufferView>(bufferTextures.Slice(binding, count));
                         }
                     }
                     else
@@ -931,10 +933,11 @@ namespace Ryujinx.Graphics.Vulkan
 
                             for (int i = 0; i < count; i++)
                             {
-                                images[i].ImageView = _imageRefs[binding + i].ImageView?.Get(cbs).Value ?? _dummyTexture.GetImageView().Get(cbs).Value;
+                                int index = binding + i;
+                                images[index].ImageView = _imageRefs[index].ImageView?.Get(cbs).Value ?? _dummyTexture.GetImageView().Get(cbs).Value;
                             }
 
-                            tu.Push<DescriptorImageInfo>(images[..count]);
+                            tu.Push<DescriptorImageInfo>(images.Slice(binding, count));
                         }
                         else
                         {
@@ -942,10 +945,11 @@ namespace Ryujinx.Graphics.Vulkan
 
                             for (int i = 0; i < count; i++)
                             {
-                                bufferImages[i] = _bufferImageRefs[binding + i]?.GetBufferView(cbs, true) ?? default;
+                                int index = binding + i;
+                                bufferImages[index] = _bufferImageRefs[index]?.GetBufferView(cbs, true) ?? default;
                             }
 
-                            tu.Push<BufferView>(bufferImages[..count]);
+                            tu.Push<BufferView>(bufferImages.Slice(binding, count));
                         }
                     }
                     else

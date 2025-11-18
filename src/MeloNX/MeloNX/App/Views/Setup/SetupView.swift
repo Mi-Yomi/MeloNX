@@ -16,7 +16,7 @@ struct SetupView: View {
     @State private var alertMessage = ""
     @State private var keysImported = false
     @State private var firmImported = false
-    @Binding var finished: Bool
+    @Binding var isInSetup: Bool
     
     let cool: LocalizedStringKey = "MeloNX has issues with Certificates and should not be used. Official Install Guides is [here](https://melonx.org)"
     
@@ -25,7 +25,7 @@ struct SetupView: View {
             ZStack {
                 if UIDevice.current.systemName.contains("iPadOS") {
                     iPadSetupView(
-                        finished: $finished,
+                        inSetup: $isInSetup,
                         isImportingKeys: $isImportingKeys,
                         isImportingFirmware: $isImportingFirmware,
                         keysImported: keysImported,
@@ -33,7 +33,7 @@ struct SetupView: View {
                     )
                 } else {
                     iPhoneSetupView(
-                        finished: $finished,
+                        inSetup: $isInSetup,
                         isImportingKeys: $isImportingKeys,
                         isImportingFirmware: $isImportingFirmware,
                         keysImported: keysImported,
@@ -49,7 +49,7 @@ struct SetupView: View {
             Alert(
                 title: Text("Skip Setup?"),
                 primaryButton: .destructive(Text("Skip")) {
-                    finished = true
+                    isInSetup = false
                 },
                 secondaryButton: .cancel()
             )
@@ -72,7 +72,7 @@ struct SetupView: View {
         }
         .onAppear {
             RyujinxBridge.initialize()
-            finished = false
+            isInSetup = true
             keysImported = Ryujinx.shared.checkIfKeysImported()
             
             let firmware = Ryujinx.shared.fetchFirmwareVersion()
@@ -80,8 +80,9 @@ struct SetupView: View {
         }
     }
     
+    @ViewBuilder
     private func iPadSetupView(
-        finished: Binding<Bool>,
+        inSetup: Binding<Bool>,
         isImportingKeys: Binding<Bool>,
         isImportingFirmware: Binding<Bool>,
         keysImported: Bool,
@@ -166,7 +167,7 @@ struct SetupView: View {
                             action: { isImportingFirmware.wrappedValue = true }
                         )
                         
-                        Button(action: { finished.wrappedValue = true }) {
+                        Button(action: { inSetup.wrappedValue = false }) {
                             HStack {
                                 Text("Finish Setup")
                                     .fontWeight(.semibold)
@@ -194,8 +195,9 @@ struct SetupView: View {
         }
     }
     
+    @ViewBuilder
     private func iPhoneSetupView(
-        finished: Binding<Bool>,
+        inSetup: Binding<Bool>,
         isImportingKeys: Binding<Bool>,
         isImportingFirmware: Binding<Bool>,
         keysImported: Bool,
@@ -276,7 +278,7 @@ struct SetupView: View {
                 
                 // Finish Button
                 VStack {
-                    Button(action: { finished.wrappedValue = true }) {
+                    Button(action: { inSetup.wrappedValue = false }) {
                         HStack {
                             Text("Finish Setup")
                                 .fontWeight(.semibold)

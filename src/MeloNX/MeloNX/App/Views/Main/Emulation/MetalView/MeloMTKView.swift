@@ -13,8 +13,6 @@ class MeloMTKView: MTKView {
     private var ignoredTouches: Set<UITouch> = []
     private var touchIndexMap: [UITouch: Int] = [:]
 
-    private let baseWidth: CGFloat = 1280
-    private let baseHeight: CGFloat = 720
     private var aspectRatio: AspectRatio = .fixed16x9
 
     func setAspectRatio(_ ratio: AspectRatio) {

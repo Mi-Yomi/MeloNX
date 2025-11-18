@@ -13,7 +13,7 @@ let withSecurityScope = URL.BookmarkResolutionOptions(rawValue: 1 << 10)
 class ROMFolderManager: ObservableObject {
     
     private let bookmarksKey = "ROMFolderManagerBookmarks"
-    @Published var bookmarks: [String: Data] = [:] {
+    @Published var bookmarks: [Data] = [] {
         didSet {
             saveBookmarks()
         }
@@ -31,7 +31,7 @@ class ROMFolderManager: ObservableObject {
             let bookmark = try url.bookmarkData(options: options,
                                                 includingResourceValuesForKeys: nil,
                                                 relativeTo: nil)
-            bookmarks[url.path] = bookmark
+            bookmarks.append(bookmark)
             saveBookmarks()
             return true
         } catch {
@@ -39,6 +39,47 @@ class ROMFolderManager: ObservableObject {
             return false
         }
     }
+    
+    func getUrl(from bookmark: Data) -> URL? {
+        var isStale = false
+        
+        do {
+            var url = try URL(
+                resolvingBookmarkData: bookmark,
+                options: withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            
+            if isStale {
+                print("stale")
+                
+                _ = url.startAccessingSecurityScopedResource()
+                defer { url.stopAccessingSecurityScopedResource() }
+                let options = URL.BookmarkCreationOptions(rawValue: 1 << 11)
+                let newBookmark = try url.bookmarkData(
+                    options: options,
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+                
+                if let index = bookmarks.firstIndex(where: { $0 == bookmark }) {
+                    bookmarks[index] = newBookmark
+                } else {
+                    bookmarks.append(newBookmark)
+                }
+                
+                print("Bookmark refreshed and saved.")
+            }
+            
+            return url
+            
+        } catch {
+            print("Error resolving bookmark:", error)
+            return nil
+        }
+    }
+
     
     
     func stopAccessingFolder(url: URL) {
@@ -50,8 +91,11 @@ class ROMFolderManager: ObservableObject {
     }
     
     func loadBookmarks() {
-        if let saved = UserDefaults.standard.dictionary(forKey: bookmarksKey) as? [String: Data] {
+        if let saved = UserDefaults.standard.array(forKey: bookmarksKey) as? [Data] {
             bookmarks = saved
+        } else if let saved = UserDefaults.standard.dictionary(forKey: bookmarksKey) as? [String: Data] {
+            bookmarks = Array(saved.values)
+            saveBookmarks()
         }
     }
 }

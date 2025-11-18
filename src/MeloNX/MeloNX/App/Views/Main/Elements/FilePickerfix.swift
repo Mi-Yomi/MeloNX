@@ -152,11 +152,11 @@ extension UIDocumentPickerViewController {
         if MeloNX.shouldAsCopy {
             let picker = self.hook_initForOpeningContentTypes(contentTypesNew, asCopy: true)
             if shouldMultiselect {
-                picker.hook_setAllowsMultipleSelection(true)
+                picker.allowsMultipleSelection = true
             }
             return picker
         } else {
-            return self.hook_initForOpeningContentTypes(contentTypesNew, asCopy: asCopy)
+            return self.hook_initForOpeningContentTypes(contentTypes, asCopy: asCopy)
         }
     }
 
@@ -164,20 +164,17 @@ extension UIDocumentPickerViewController {
         let asCopy = mode != .import
         return type(of: self).init(forOpeningContentTypes: contentTypes.compactMap { UTType($0) }, asCopy: asCopy)
     }
-
-    @objc func hook_setAllowsMultipleSelection(_ allows: Bool) {
-        if self.allowsMultipleSelection {
-            return
-        }
-        self.hook_setAllowsMultipleSelection(true)
-    }
 }
 
 
 extension UIDocumentBrowserViewController {
     @objc func hook_initForOpeningContentTypes(_ contentTypes: [UTType]) -> UIDocumentBrowserViewController {
-        let newTypes: [UTType] = [.item, .folder]
-        return self.hook_initForOpeningContentTypes(newTypes)
+        if MeloNX.shouldAsCopy {
+            let newTypes: [UTType] = [.item, .folder]
+            return self.hook_initForOpeningContentTypes(newTypes)
+        } else {
+            return self.hook_initForOpeningContentTypes(contentTypes)
+        }
     }
 }
 
@@ -238,10 +235,6 @@ extension NSURL {
             swizzleInstanceMethod(for: NSURL.self,
                                   original: #selector(NSURL.startAccessingSecurityScopedResource),
                                   swizzled: #selector(NSURL.hook_startAccessingSecurityScopedResource))
-
-            swizzleInstanceMethod(for: UIDocumentPickerViewController.self,
-                                  original: #selector(setter: UIDocumentPickerViewController.allowsMultipleSelection),
-                                  swizzled: #selector(UIDocumentPickerViewController.hook_setAllowsMultipleSelection(_:)))
 
             if let docConfigClass = NSClassFromString("DOCConfiguration") {
                 let originalSelector = NSSelectorFromString("setHostIdentifier:")

@@ -104,16 +104,23 @@ func pingSite(host: String = "http://[fd00::]:9172/hello", completion: @escaping
 }
 
 
-func presentAlert(title: String, message: String, completion: (() -> Void)? = nil) {
-    if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-       let lastWindow = windowScene.windows.last {
+func presentAlert(title: String, message: String, imageName: String? = nil, completion: (() -> Void)? = nil) {
+    guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+          let lastWindow = windowScene.windows.last,
+          let rootVC = lastWindow.rootViewController else { return }
+    
+    if let imageName = imageName, UIImage(named: imageName) != nil {
+        let customAlert = MacClassicAlertViewController(title: title, message: message, imageName: imageName, completion: completion)
+        Task { @MainActor in
+            rootVC.present(customAlert, animated: true)
+        }
+    } else {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in
             completion?()
         })
-        
-       Task { @MainActor in
-            lastWindow.rootViewController?.present(alert, animated: true)
+        Task { @MainActor in
+            rootVC.present(alert, animated: true)
         }
     }
 }
@@ -142,7 +149,7 @@ func showLaunchAppAlert(jsonData: Data, in viewController: UIViewController) {
             }
         } else {
             // print("Hopefully JIT is enabled now...")
-            Ryujinx.shared.ryuIsJITEnabled()
+            Ryujinx.shared.checkForJIT()
         }
         
     } catch {

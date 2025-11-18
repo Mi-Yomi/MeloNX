@@ -115,10 +115,29 @@ extension VirtualControllerButton: Identifiable {
 
 // MARK: - Main Controller View
 
+struct LayoutView: View {
+    @EnvironmentObject var gameHandler: LaunchGameHandler
+    @Environment(\.verticalSizeClass) var verticalSizeClass
+    
+    var body: some View {
+        Text("")
+            .onChange(of: verticalSizeClass) { _ in updateOrientation() }
+            .onAppear {
+                updateOrientation()
+            }
+    }
+    private func updateOrientation() {
+        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+           let window = windowScene.windows.first {
+            gameHandler.isPortrait = window.bounds.size.height > window.bounds.size.width
+        }
+    }
+}
+
 struct ControllerView: View {
     @AppStorage("On-ScreenControllerScale") private var controllerScale: Double = 1.0
-    @AppStorage("stick-button") private var stickButton = false
-    @State private var isPortrait = true
+    @AppStorage("stickButton") private var stickButton = false
+    @EnvironmentObject var gameHandler: LaunchGameHandler
     @State private var hideDpad = false
     @State private var hideABXY = false
     @Binding var isEditing: Bool
@@ -136,7 +155,7 @@ struct ControllerView: View {
         ZStack {
             Group {
                 let isPad = UIDevice.current.userInterfaceIdiom == .pad
-                if isPortrait && !isPad {
+                if gameHandler.isPortrait && !isPad {
                     portraitLayout
                 } else {
                     landscapeLayout
@@ -602,7 +621,7 @@ struct ControllerView: View {
     private func updateOrientation() {
         if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
            let window = windowScene.windows.first {
-            isPortrait = window.bounds.size.height > window.bounds.size.width
+            gameHandler.isPortrait = window.bounds.size.height > window.bounds.size.width
         }
     }
 }

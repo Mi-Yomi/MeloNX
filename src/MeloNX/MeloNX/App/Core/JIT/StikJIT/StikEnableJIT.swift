@@ -24,21 +24,7 @@ func stikJITorStikDebug() -> Int {
 }
 
 func checkforOld() -> Bool {
-    let teamid = SecTaskCopyTeamIdentifier(SecTaskCreateFromSelf(nil)!, nil)
-    
-    if checkifappinstalled(changeAppUI("Y29tLnN0b3NzeTExLlBvbWVsbw==") ?? "") {
-        return true
-    }
-    
-    if checkifappinstalled(changeAppUI("Y29tLnN0b3NzeTExLlBvbWVsbw==") ?? "" + ".\(String(teamid ?? ""))") {
-        return true
-    }
-    
-    if checkifappinstalled((Bundle.main.bundleIdentifier ?? "").replacingOccurrences(of: "MeloNX", with: changeAppUI("UG9tZWxv") ?? "")) {
-        return true
-    }
-    
-    return false
+    return true
 }
 
 
@@ -67,6 +53,14 @@ func checkifappinstalled(_ id: String) -> Bool {
 }
 
 func enableJITStik() {
+    if !ProcessInfo.processInfo.hasTXM {
+        let urlScheme = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier ?? "wow")"
+        if let launchURL = URL(string: urlScheme), !isJITEnabled() {
+            UIApplication.shared.open(launchURL, options: [:], completionHandler: nil)
+        }
+        return
+    }
+    
     if #available(iOS 19.0, *), !isInLiveContainer.0 {
         let scriptdata = script.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         let urlScheme = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier ?? "wow")&script-data=\(scriptdata)"

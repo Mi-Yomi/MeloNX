@@ -2,7 +2,7 @@ using System;
 
 namespace Ryujinx.Cpu.LightningJit.CodeGen
 {
-    enum OperandType
+    public enum OperandType
     {
         None,
         I32,

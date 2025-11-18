@@ -43,10 +43,10 @@ struct DownloadableContentContainer: Codable, Hashable, Identifiable {
 // MARK: - View
 struct DLCManagerSheet: View {
     // MARK: - Properties
-    @Binding var game: Game!
+    var game: Game!
     @State private var isSelectingGameDLC = false
     @State private var dlcs: [DownloadableContentContainer] = []
-    @Environment(\.presentationMode) var presentationMode
+    @Environment(\.dismiss) private var dismiss
     
     // MARK: - Body
     var body: some View {
@@ -66,7 +66,7 @@ struct DLCManagerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("Done") {
-                        presentationMode.wrappedValue.dismiss()
+                        dismiss()
                     }
                 }
                 

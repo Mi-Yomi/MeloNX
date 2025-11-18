@@ -68,7 +68,7 @@ Download and install MeloNX using your preferred Apple ID sideloader:
 
 
    
-### Free Developer Account
+### Free Developer Account (Entitlement)
 
 ***The Entitlement App is **NOT** needed for AltStore Classic***
   - You may skip Step 2 and Step 3
@@ -79,11 +79,44 @@ Download and install both apps using your preferred **APPLE ID** sideloader:
   - **Entitlement App**: [Download IPA](https://github.com/hugeBlack/GetMoreRam/releases/download/nightly/Entitlement.ipa)
 
 #### 2. Enable Memory Entitlement
+> If the Entitlement / GetMoreRam app isn't working correctly, the new Xcode Method is for you. 
   - Open the **Entitlement app** > **Settings**
-  - Sign in with your Apple ID
+  - Sign in with the same Apple ID you used to Sideload MeloNX.
   - Go to **App IDs** > tap **Refresh**
   - Select **MeloNX** (e.g., "com.stossy11.MeloNX.XXXXXX")
   - Tap **Add Increased Memory Limit**
+
+#### 3. Reinstall MeloNX
+  - Delete existing MeloNX installation
+  - Sideload MeloNX again
+  - Verify **Increased Memory Limit** is enabled in app
+
+#### 4. Setup Files
+  - Add Encryption Keys and Firmware using the file picker inside MeloNX
+    - If having Issues installing firmware:
+      - You can Install firmware and keys from **Ryujinx Desktop** (or forks).  
+      - Copy the **bis** and **system** folders  
+
+#### 5. Enable JIT
+  - Enable JIT using your preferred method. We recommend [StikDebug](https://apps.apple.com/us/app/stikdebug/id6744045754).
+
+### Free Developer Account (Xcode, UNTESTED)
+
+#### 1. Sideload Applications
+Download and install MeloNX using your preferred **APPLE ID** sideloader:
+  - **MeloNX**: [Download from Releases](https://git.ryujinx.app/melonx/emu/-/releases)
+
+#### 2. Enable Memory Entitlement
+  - Open [Xcode](https://apps.apple.com/us/app/xcode/id497799835?mt=12/). 
+  - Create a new Project (File > New > Project)
+  - Select iOS > App
+  - Set the name to whatever you want (anything can be random)
+  - Click the project (On the Left, The Blue Icon with the name of your project next to it)
+  - Click the Signing and Capabilities tab on the right.
+  - Under Team, Login to the same account you used for Sideloading MeloNX.
+  - Open SideStore on your device > My Apps tab > View App Ids
+  - In Xcode, Set Bundle Identifier to the text below MeloNX (e.g., "com.stossy11.MeloNX.XXXXXX")
+  - Top Left click "+ Capability" then type in "Increased Memory Limit" and add it 
 
 #### 3. Reinstall MeloNX
   - Delete existing MeloNX installation
@@ -114,11 +147,12 @@ As Said in FAQ:
 
 
 #### 2. Enable TrollStore JIT
+   - Make sure [URL Scheme is enabled inside of TrollStore](https://github.com/opa334/TrollStore#url-scheme)
    - Open **Settings** inside **MeloNX**
    - Under **Misc**, scroll down and enable the **"TrollStore" toggle**
    - Profit
 
-### Free Developer Account (Xcode)
+### Compile from Source (Xcode)
 
 **NOTE: These Xcode builds are nightly and may have unfinished features.**
 

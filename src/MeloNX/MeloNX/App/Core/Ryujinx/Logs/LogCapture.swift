@@ -79,7 +79,7 @@ final class LogCapture: ObservableObject {
         let lines = raw.split(separator: "\n")
         
         let filteredLines = lines.filter { line in
-            if UserDefaults.standard.bool(forKey: "Show-Full=Logs") {
+            if UserDefaults.standard.bool(forKey: "showFullLogs") {
                 return true
             }
             

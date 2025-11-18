@@ -319,12 +319,35 @@ namespace Ryujinx.Headless.SDL2
 
             return null;
         }
-        
 
-        [UnmanagedCallersOnly(EntryPoint = "add_gamepad_handle")]
-        public static void AddGamepadHandle(IntPtr handle, IntPtr idPtr)
+        [UnmanagedCallersOnly(EntryPoint = "attach_gamepad")]    
+        public static IntPtr AttachGamepad(IntPtr namePtr, IntPtr idPtr)
         {
-            SDL2GamepadDriver.AddGamepadHandle(handle, idPtr);
+           return NativeGamepadDriver.AttachGamepad(namePtr, idPtr);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "detach_gamepad")]    
+        public static void DetachGamepad(IntPtr idPtr)
+        {
+            NativeGamepadDriver.DetachGamepad(idPtr);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "set_gamepad_button_state")] 
+        public static void SetButtonState(IntPtr idPtr, int buttonId, byte pressed)
+        {
+            NativeGamepadDriver.SetButtonState(idPtr, buttonId, pressed);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "set_gamepad_stick_axis")] 
+        public static void SetStickAxis(IntPtr idPtr, int stickId, float x, float y)
+        {
+            NativeGamepadDriver.SetStickAxis(idPtr, stickId, x, y);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "set_gamepad_motion_axis")] 
+        static void SetMotionData(IntPtr idPtr, int motionType, float x, float y, float z)
+        {
+            NativeGamepadDriver.SetMotionData(idPtr, motionType, x, y, z);
         }
 
         [UnmanagedCallersOnly(EntryPoint = "get_current_fps")]
@@ -370,6 +393,13 @@ namespace Ryujinx.Headless.SDL2
             {
                 _accountManager = new AccountManager(_libHacHorizonManager.RyujinxClient);
             }
+
+            _inputManager = new InputManager(new SDL2KeyboardDriver(), new NativeGamepadDriver());
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "initialize-dualmapped")]
+        public static unsafe void InitializeDM() {
+            Ryujinx.Cpu.LightningJit.DualMappedTranslator.InitializeDualMapped();
         }
 
         static void Main(string[] args)
@@ -1265,8 +1295,6 @@ namespace Ryujinx.Headless.SDL2
             _accountManager = new AccountManager(_libHacHorizonManager.RyujinxClient, option.UserProfile);
 
             _userChannelPersistence = new UserChannelPersistence();
-
-            _inputManager = new InputManager(new SDL2KeyboardDriver(), new SDL2GamepadDriver());
 
             GraphicsConfig.EnableShaderCache = true;
 

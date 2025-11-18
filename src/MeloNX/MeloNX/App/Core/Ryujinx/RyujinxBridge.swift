@@ -11,6 +11,10 @@ final class RyujinxBridge {
     static func initialize() {
         SN_initialize()
     }
+    
+    static func initialize_dualmapped() {
+        SN_initialize_dualmapped()
+    }
 
     static func getGameInfo(arg0: Int32, arg1: NSString) -> GameInfo {
         let arg1Ptr = UnsafeMutablePointer<CChar>(mutating: arg1.utf8String)
@@ -92,15 +96,31 @@ final class RyujinxBridge {
     }
 
     static func openUser(userId: String) {
-        userId.withCString { SN_open_user(UnsafeMutablePointer(mutating: $0)) }
+        userId.withCString { SN_open_user($0) }
     }
 
     static func closeUser(userId: String) {
-        userId.withCString { SN_close_user(UnsafeMutablePointer(mutating: $0)) }
+        userId.withCString { SN_close_user($0) }
     }
     
-    static func addGamepadHandle(_ opaquePtr: OpaquePointer, _ id: String) {
-        id.withCString { SN_add_gamepad_handle(UnsafeMutableRawPointer(opaquePtr), UnsafeMutablePointer(mutating: $0)) }
+    static func attachGamepad(_ id: UnsafeMutableRawPointer?, _ name: String) {
+        _ = name.withCString { SN_attach_gamepad($0, id)  }
+    }
+    
+    static func detachGamepad(_ id: UnsafeMutableRawPointer?) {
+        SN_detach_gamepad(id)
+    }
+
+    static func setGamepadButtonState(_ id: UnsafeMutableRawPointer?, buttonId: Int, pressed: Bool) {
+        SN_set_gamepad_button_state(id, Int32(buttonId), pressed ? 1 : 0)
+    }
+
+    static func setGamepadStickAxis(_ id: UnsafeMutableRawPointer?, stickId: Int, x: Float, y: Float) {
+        SN_set_gamepad_stick_axis(id, Int32(stickId), x, y)
+    }
+    
+    static func setGamepadMotion(_ id: UnsafeMutableRawPointer?, motionType: Int, axis: SIMD3<Float>) {
+        SN_set_gamepad_motion_axis(id, Int32(motionType), axis.x, axis.y, axis.z)
     }
 
     static var avatars: AvatarArray {
@@ -121,6 +141,8 @@ fileprivate extension Array where Element == String {
     }
 }
 
+// SN stands for silgen name because functions with the same definition like initialize and RyujinxBridge.initialize it kept pointing it to itself.
+// could've just done MeloNX.initialize but meh
 @_silgen_name("get_game_info")
 func SN_get_game_info(_ arg0: Int32, _ arg1: UnsafeMutablePointer<CChar>!) -> GameInfo
 
@@ -144,6 +166,9 @@ func SN_stop_emulation()
 
 @_silgen_name("initialize")
 func SN_initialize()
+
+@_silgen_name("initialize-dualmapped")
+func SN_initialize_dualmapped()
 
 @_silgen_name("main_ryujinx_sdl")
 func SN_main_ryujinx_sdl(_ argc: Int32, _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>!) -> Int32
@@ -170,10 +195,10 @@ func SN_refresh_account_manager()
 func SN_create_account(_ name: UnsafeMutablePointer<CChar>!, _ image: UnsafeMutablePointer<CChar>!, _ imagelength: Int32)
 
 @_silgen_name("open_user")
-func SN_open_user(_ userid: UnsafeMutablePointer<CChar>!)
+func SN_open_user(_ userid: UnsafePointer<CChar>!)
 
 @_silgen_name("close_user")
-func SN_close_user(_ userid: UnsafeMutablePointer<CChar>!)
+func SN_close_user(_ userid: UnsafePointer<CChar>!)
 
 @_silgen_name("get_avatars")
 func SN_get_avatars() -> AvatarArray
@@ -181,5 +206,17 @@ func SN_get_avatars() -> AvatarArray
 @_silgen_name("set_view_size")
 func SN_set_view_size(_ width: Int32, _ height: Int32)
 
-@_silgen_name("add_gamepad_handle")
-func SN_add_gamepad_handle(_ inputPtr: UnsafeMutableRawPointer?, _ id: UnsafeMutablePointer<CChar>!)
+@_silgen_name("attach_gamepad")
+func SN_attach_gamepad(_ namePtr: UnsafePointer<CChar>?, _ idPtr: UnsafeMutableRawPointer?) -> UnsafeMutableRawPointer?
+
+@_silgen_name("detach_gamepad")
+func SN_detach_gamepad(_ idPtr: UnsafeMutableRawPointer?)
+
+@_silgen_name("set_gamepad_button_state")
+func SN_set_gamepad_button_state(_ idPtr: UnsafeMutableRawPointer?, _ buttonId: Int32, _ pressed: UInt8)
+
+@_silgen_name("set_gamepad_stick_axis")
+func SN_set_gamepad_stick_axis(_ idPtr: UnsafeMutableRawPointer?, _ stickId: Int32, _ x: Float, _ y: Float)
+
+@_silgen_name("set_gamepad_motion_axis")
+func SN_set_gamepad_motion_axis(_ idPtr: UnsafeMutableRawPointer?, _ motionType: Int32, _ x: Float, _ y: Float, _ z: Float)

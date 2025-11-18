@@ -91,7 +91,7 @@ namespace Ryujinx.Memory
             _usesSharedMemory = true;
             _isMirror = true;
         }
-
+        
         /// <summary>
         /// Creates a memory block that shares the backing storage with this block.
         /// The memory and page commitments will be shared, however memory protections are separate.

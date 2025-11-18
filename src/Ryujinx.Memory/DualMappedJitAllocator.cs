@@ -12,7 +12,6 @@ namespace Ryujinx.Memory
     /// 
     /// Specifically targets iOS 26, where the traditional method of reprotecting
     /// memory from writable to executable (RX) no longer works for JIT code.
-    /// 
     /// </summary>
     public class DualMappedJitAllocator : IDisposable
     {
@@ -79,7 +78,6 @@ namespace Ryujinx.Memory
             {
                 _mmapPtr = mmap(IntPtr.Zero, (UIntPtr)Size, PROT_READ | PROT_EXEC, MAP_ANON | MAP_PRIVATE, -1, 0);
 
-
                 if (_mmapPtr == MAP_FAILED)
                     throw new Exception("Failed to mmap memory");
             }
@@ -107,6 +105,9 @@ namespace Ryujinx.Memory
             {
                 munmap(_mmapPtr, (UIntPtr)Size);
                 _mmapPtr = IntPtr.Zero;
+
+                munmap(RwPtr, (UIntPtr)Size);
+                RwPtr = IntPtr.Zero;
             }
         }
 

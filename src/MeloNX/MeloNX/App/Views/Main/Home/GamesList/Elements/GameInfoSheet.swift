@@ -10,6 +10,7 @@ import SwiftUI
 struct GameInfoSheet: View {
     let game: Game
     
+    @State var time: String? = nil
     @Environment(\.presentationMode) var presentationMode
     
     var body: some View {
@@ -50,7 +51,7 @@ struct GameInfoSheet: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
-
+                
                 Section {
                     HStack {
                         Text("**Version**")
@@ -88,10 +89,18 @@ struct GameInfoSheet: View {
                         Text(trimGameURL(game.fileURL))
                             .foregroundColor(Color.secondary)
                     }
+                    
+                    if let time {
+                        HStack {
+                            Text("**Playtime**")
+                            Spacer()
+                            Text(time)
+                                .foregroundColor(Color.secondary)
+                        }
+                    }
                 } header: {
                     Text("Information")
                 }
-                // .headerProminence(.increased)
             }
             .navigationTitle(game.titleName)
             .navigationBarTitleDisplayMode(.inline)
@@ -101,6 +110,15 @@ struct GameInfoSheet: View {
                         presentationMode.wrappedValue.dismiss()
                     }
                 }
+            }
+            .onAppear() {
+                Task {
+                    // await GamePlaytimeManager.shared.loadPlaytime()
+                }
+
+                
+                
+                // time = GamePlaytimeManager.shared.getPlaytimeFor(game)?.interval.asString()
             }
         }
     }
@@ -128,5 +146,15 @@ struct GameInfoSheet: View {
     
     func getFileType(_ url: URL) -> String {
         url.pathExtension
+    }
+}
+
+extension TimeInterval {
+    func asString(style: DateComponentsFormatter.UnitsStyle = .abbreviated) -> String {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute, .second]
+        formatter.unitsStyle = style
+        formatter.zeroFormattingBehavior = .pad
+        return formatter.string(from: self) ?? "0s"
     }
 }

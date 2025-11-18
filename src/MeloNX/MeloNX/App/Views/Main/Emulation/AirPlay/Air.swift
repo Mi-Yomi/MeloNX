@@ -92,7 +92,7 @@ public class Air {
             
             if let hostingController = viewController as? UIHostingController<AnyView> {
                 let traitCollection = UITraitCollection(traitsFrom: [
-                    UITraitCollection(userInterfaceIdiom: .pad),
+                    UITraitCollection(userInterfaceIdiom: .tv),
                     airWindowScene.traitCollection
                 ])
                 viewController.setOverrideTraitCollection(traitCollection, forChild: viewController)

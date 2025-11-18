@@ -4,7 +4,7 @@ using System.Diagnostics;
 
 namespace Ryujinx.Cpu.LightningJit.CodeGen.Arm64
 {
-    struct Assembler
+    public struct Assembler
     {
         private const uint SfFlag = 1u << 31;
 

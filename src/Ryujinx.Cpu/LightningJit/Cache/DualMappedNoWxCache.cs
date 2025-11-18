@@ -88,7 +88,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         }
 
         private readonly IStackWalker _stackWalker;
-        private readonly Translator _translator;
+        private Translator _translator;
         private readonly List<MemoryCache> _sharedCaches;
         private readonly List<MemoryCache> _localCaches;
         private readonly Dictionary<ulong, PageAlignedRangeList> _pendingMaps;
@@ -120,14 +120,17 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         [ThreadStatic]
         private static Dictionary<ulong, ThreadLocalCacheEntry> _threadLocalCache;
 
-        public DualMappedNoWxCache(IJitMemoryAllocator allocator, IStackWalker stackWalker, Translator translator)
+        public DualMappedNoWxCache(IJitMemoryAllocator allocator, IStackWalker stackWalker)
         {
             _stackWalker = stackWalker;
-            _translator = translator;
             _sharedCaches = new List<MemoryCache> { new(SharedCacheSize) };
             _localCaches = new List<MemoryCache> { new(LocalCacheSize) };
             _pendingMaps = new Dictionary<ulong, PageAlignedRangeList>();
             _lock = new();
+        }
+
+        public void SetTranslator(Translator translator) {
+            _translator = translator;
         }
 
         private PageAlignedRangeList GetPendingMapForCache(int cacheIndex)

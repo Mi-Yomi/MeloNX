@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct AccountManagerView: View {
-    @ObservedObject var ryujinx = Ryujinx.shared
+    @EnvironmentObject var ryujinx: Ryujinx
     @State private var profiles: Profiles? = nil
     @State var test = false
     @State var editAccount = false

@@ -24,6 +24,8 @@ class RumbleController {
     
     // Interval before the haptic event duration runs out to restart
     private let restartGracePeriod: TimeInterval = 1.0
+    
+    private var durationTimer: Timer?
 
     init (engine: CHHapticEngine?, rumbleMultiplier: Float) {
         self.engine = engine
@@ -111,15 +113,18 @@ class RumbleController {
     
     // MARK: - Public Rumble Control
 
-    public func rumble(lowFreq: Float, highFreq: Float) {
+    public func rumble(lowFreq: Float, highFreq: Float, durationMs: UInt32? = nil) {
+        durationTimer?.invalidate()
+        durationTimer = nil
+        
         DispatchQueue.global(qos: .background).async { [self] in
             // Normalize SDL values (0-65535) to CoreHaptics range (0.0-1.0)
-            let normalizedLow = min(1.0, max(0.0, lowFreq / 65535.0))
-            let normalizedHigh = min(1.0, max(0.0, highFreq / 65535.0))
+            // let normalizedLow = min(1.0, max(0.0, lowFreq / 65535.0))
+            // let normalizedHigh = min(1.0, max(0.0, highFreq / 65535.0))
             
             // Create dynamic parameters to control intensity
-            let lowIntensityParameter = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: normalizedLow, relativeTime: 0)
-            let highIntensityParameter = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: normalizedHigh, relativeTime: 0)
+            let lowIntensityParameter = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: lowFreq, relativeTime: 0)
+            let highIntensityParameter = CHHapticDynamicParameter(parameterID: .hapticIntensityControl, value: highFreq, relativeTime: 0)
             
             // Send parameters to the players
             do {
@@ -127,6 +132,16 @@ class RumbleController {
                 try highHapticPlayer?.sendParameters([highIntensityParameter], atTime: 0)
             } catch {
                 // print("Error sending haptic parameters: \(error.localizedDescription)")
+            }
+            
+            if let durationMs = durationMs, durationMs > 0 {
+                let durationSeconds = TimeInterval(durationMs) / 1000.0
+                
+                DispatchQueue.main.async { [weak self] in
+                    self?.durationTimer = Timer.scheduledTimer(withTimeInterval: durationSeconds, repeats: false) { [weak self] _ in
+                        self?.rumble(lowFreq: 0, highFreq: 0)
+                    }
+                }
             }
         }
     }

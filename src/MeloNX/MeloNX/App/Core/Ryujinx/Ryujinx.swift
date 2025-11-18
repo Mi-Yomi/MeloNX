@@ -65,6 +65,10 @@ class Ryujinx : ObservableObject {
     var thread: pthread_t? = nil
     
     static let shared = Ryujinx()
+    
+    init() {
+        checkForJIT()
+    }
 
     func addGames() {
         self.games = loadGames()
@@ -104,10 +108,9 @@ class Ryujinx : ObservableObject {
     }
     
     public class Arguments : Observable, Codable, Equatable {
-        var gamepath: String
-        var inputids: [String]
-        var inputDSUServers: [String]
-        var resscale: Float = 1.0
+        @IgnoreCoding var gamepath: String = ""
+        @IgnoreCoding var inputids: [String] = []
+        var resscale: Double = 1.0
         var debuglogs: Bool = false
         var tracelogs: Bool = false
         var nintendoinput: Bool = true
@@ -121,7 +124,7 @@ class Ryujinx : ObservableObject {
         var disableDockedMode: Bool = false
         var enableTextureRecompression: Bool = true
         var additionalArgs: [String] = []
-        var maxAnisotropy: Float = 1.0
+        var maxAnisotropy: Double = 1.0
         var macroHLE: Bool = true
         var ignoreMissingServices: Bool = false
         var expandRam: Bool = false
@@ -130,66 +133,7 @@ class Ryujinx : ObservableObject {
         var disablevsync: Bool = false
         var language: SystemLanguage = .americanEnglish
         var regioncode: SystemRegionCode = .usa
-        var handHeldController: Bool = true
-        
-        
-        init(gamepath: String = "",
-             inputids: [String] = [],
-             inputDSUServers: [String] = [],
-             debuglogs: Bool = false,
-             tracelogs: Bool = false,
-             listinputids: Bool = false,
-             aspectRatio: AspectRatio = .fixed16x9,
-             memoryManagerMode: String = "HostMappedUnsafe",
-             disableShaderCache: Bool = false,
-             disableDockedMode: Bool = false,
-             nintendoinput: Bool = true,
-             enableInternet: Bool = false,
-             ldn_mitm: Bool = false,
-             enableTextureRecompression: Bool = true,
-             additionalArgs: [String] = [],
-             resscale: Float = 1.00,
-             maxAnisotropy: Float = 0,
-             macroHLE: Bool = false,
-             ignoreMissingServices: Bool = false,
-             hypervisor: Bool = false,
-             expandRam: Bool = false,
-             dfsIntegrityChecks: Bool = false,
-             disablePTC: Bool = false,
-             disablevsync: Bool = false,
-             language: SystemLanguage = .americanEnglish,
-             regioncode: SystemRegionCode = .usa,
-             handHeldController: Bool = false
-        ) {
-            self.gamepath = gamepath
-            self.inputids = inputids
-            self.inputDSUServers = inputDSUServers
-            self.debuglogs = debuglogs
-            self.tracelogs = tracelogs
-            self.listinputids = listinputids
-            self.aspectRatio = aspectRatio
-            self.disableShaderCache = disableShaderCache
-            self.disableDockedMode = disableDockedMode
-            self.enableTextureRecompression = enableTextureRecompression
-            self.additionalArgs = additionalArgs
-            self.memoryManagerMode = memoryManagerMode
-            self.resscale = resscale
-            self.nintendoinput = nintendoinput
-            self.enableInternet = enableInternet
-            self.ldn_mitm = ldn_mitm
-            self.maxAnisotropy = maxAnisotropy
-            self.macroHLE = macroHLE
-            self.expandRam = expandRam
-            self.ignoreMissingServices = ignoreMissingServices
-            self.hypervisor = hypervisor
-            self.dfsIntegrityChecks = dfsIntegrityChecks
-            self.disablePTC = disablePTC
-            self.disablevsync = disablevsync
-            self.language = language
-            self.regioncode = regioncode
-            self.handHeldController = handHeldController
-        }
-        
+
         
         static func == (lhs: Arguments, rhs: Arguments) -> Bool {
             return lhs.resscale == rhs.resscale &&
@@ -213,8 +157,7 @@ class Ryujinx : ObservableObject {
                    lhs.disablePTC == rhs.disablePTC &&
                    lhs.disablevsync == rhs.disablevsync &&
                    lhs.language == rhs.language &&
-                   lhs.regioncode == rhs.regioncode &&
-                   lhs.handHeldController == rhs.handHeldController
+                   lhs.regioncode == rhs.regioncode 
         }
     }
 
@@ -228,31 +171,6 @@ class Ryujinx : ObservableObject {
         self.config = config
         
         self.isRunning = true
-        
-        if UserDefaults.standard.bool(forKey: "lockInApp") {
-            let cool = Thread {
-                while true {
-                    if UserDefaults.standard.bool(forKey: "lockInApp") {
-                        if let workspaceClass = NSClassFromString("LSApplicationWorkspace") as? NSObject.Type,
-                           let workspace = workspaceClass.perform(NSSelectorFromString("defaultWorkspace"))?.takeUnretainedValue() {
-                            
-                            let selector = NSSelectorFromString("openApplicationWithBundleID:")
-                            
-                            if workspace.responds(to: selector) {
-                                workspace.perform(selector, with: Bundle.main.bundleIdentifier ?? "")
-                            } else {
-                                print("Selector not found or not responding.")
-                            }
-                        } else {
-                            print("Could not get LSApplicationWorkspace class.")
-                        }
-                    }
-                }
-            }
-            
-            cool.qualityOfService = .userInteractive
-            cool.start()
-        }
         
         
         runloop { [self] in
@@ -297,7 +215,7 @@ class Ryujinx : ObservableObject {
                         self.saveArrayAsTextFile(strings: result, filePath: path)
                         
                         
-                        presentAlert(title: "MeloNX Crashed!", message: parsedLogs.exceptionType + ": " + parsedLogs.message) {
+                        presentAlert(title: "MeloNX Crashed!", message: parsedLogs.exceptionType + ": " + parsedLogs.message, imageName: "sad_mac") {
                             UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                                 exit(0)
@@ -306,7 +224,7 @@ class Ryujinx : ObservableObject {
                     }
                 } else {
                     Task { @MainActor in
-                        presentAlert(title: "MeloNX Crashed!", message:  "Unknown Error") {
+                        presentAlert(title: "MeloNX Crashed!", message:  "Unknown Error", imageName: "sad_mac") {
                             UIApplication.shared.perform(#selector(NSXPCConnection.suspend))
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                                 exit(0)
@@ -434,7 +352,7 @@ class Ryujinx : ObservableObject {
         let romfoldermanager = ROMFolderManager.shared
         romfoldermanager.loadBookmarks()
 
-        for bookmarkData in romfoldermanager.bookmarks.values {
+        for bookmarkData in romfoldermanager.bookmarks {
             var isStale = false
             do {
                 let url = try URL(resolvingBookmarkData: bookmarkData,
@@ -479,7 +397,6 @@ class Ryujinx : ObservableObject {
                     do {
                         let handle = try FileHandle(forReadingFrom: fileURL)
                         let fileExtension = (fileURL.pathExtension as NSString)
-
                         let gameInfo = RyujinxBridge.getGameInfo(arg0: handle.fileDescriptor, arg1: fileExtension)
 
                         let game = Game.convertGameInfoToGame(gameInfo: gameInfo, url: fileURL)
@@ -516,7 +433,7 @@ class Ryujinx : ObservableObject {
             args.append(contentsOf: ["--exclusive-fullscreen-height", "\(Int(UIScreen.main.bounds.height))"])
         } else {
             let windowSize = UIApplication.shared.windows.first?.bounds.size ?? UIScreen.main.bounds.size
-            let target = targetSize(for: windowSize)
+            let target = targetSize(for: windowSize, ryujinx: self)
             args.append(contentsOf: ["--exclusive-fullscreen-width", "\(Int(target.width))"])
             args.append(contentsOf: ["--exclusive-fullscreen-height", "\(Int(target.height))"])
         }
@@ -654,16 +571,6 @@ class Ryujinx : ObservableObject {
             }
         }
         
-        // Append the input dsu servers (limit to 8 (used to be 4) just in case)
-        if !config.inputDSUServers.isEmpty {
-            config.inputDSUServers.prefix(8).enumerated().forEach { index, inputDSUServer in
-                if index == 0 {
-                    args.append(contentsOf: ["--input-dsu-server-handheld", inputDSUServer])
-                }
-                args.append(contentsOf: ["--input-dsu-server-\(index + 1)", inputDSUServer])
-            }
-        }
-        
         args.append(contentsOf: config.additionalArgs)
 
         return args
@@ -763,7 +670,7 @@ class Ryujinx : ObservableObject {
         return false
     }
     
-    func ryuIsJITEnabled() {
+    func checkForJIT() {
         jitenabled = isJITEnabled()
     }
 }

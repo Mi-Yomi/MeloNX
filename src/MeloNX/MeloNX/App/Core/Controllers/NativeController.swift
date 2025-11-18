@@ -25,6 +25,8 @@ class NativeController: BaseController {
         guard let gamepad = nativeController?.extendedGamepad
         else { return }
         
+        nativeController?.handlerQueue = inputQueue
+        
         setupButtonChangeListener(gamepad.buttonA, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .B : .A)
         setupButtonChangeListener(gamepad.buttonB, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .A : .B)
         setupButtonChangeListener(gamepad.buttonX, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .Y : .X)
@@ -51,7 +53,7 @@ class NativeController: BaseController {
 
         setupHaptics()
         
-        reRegisterMotion()
+        setupMotion()
     }
     
     func setupButtonChangeListener(_ button: GCControllerButtonInput, for key: VirtualControllerButton) {
@@ -62,25 +64,18 @@ class NativeController: BaseController {
 
     func setupStickChangeListener(_ button: GCControllerDirectionPad, for key: ThumbstickType) {
         button.valueChangedHandler = { [unowned self] _, xValue, yValue in
-            let scaledX = Sint16(xValue * 32767.0)
-            let scaledY = -Sint16(yValue * 32767.0)
-
             switch key {
             case .left:
-                updateAxisValue(value: scaledX, forAxis: SDL_CONTROLLER_AXIS_LEFTX)
-                updateAxisValue(value: scaledY, forAxis: SDL_CONTROLLER_AXIS_LEFTY)
+                updateAxisValue(x: xValue, y: yValue, forAxis: 1)
             case .right:
-                updateAxisValue(value: scaledX, forAxis: SDL_CONTROLLER_AXIS_RIGHTX)
-                updateAxisValue(value: scaledY, forAxis: SDL_CONTROLLER_AXIS_RIGHTY)
+                updateAxisValue(x: xValue, y: yValue, forAxis: 2)
             }
         }
     }
 
     func setupTriggerChangeListener(_ button: GCControllerButtonInput, for key: ThumbstickType) {
-        button.valueChangedHandler = { [unowned self] _, value, pressed in
-            let axis: SDL_GameControllerAxis = (key == .left) ? SDL_CONTROLLER_AXIS_TRIGGERLEFT : SDL_CONTROLLER_AXIS_TRIGGERRIGHT
-            let scaledValue = Sint16(value * 32767.0)
-            updateAxisValue(value: scaledValue, forAxis: axis)
+        button.valueChangedHandler = { [unowned self] _, _, pressed in
+            setButtonState(pressed ? 1 : 0, for: key == .left ? .leftTrigger : .rightTrigger)
         }
     }
 }

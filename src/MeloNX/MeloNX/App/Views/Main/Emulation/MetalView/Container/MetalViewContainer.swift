@@ -8,112 +8,67 @@
 import SwiftUI
 
 struct MetalViewContainer: View {
-    @ObservedObject var ryujinx = Ryujinx.shared
-    @AppStorage("OldView") var oldView = true
-    @Environment(\.colorScheme) var colorScheme
-    static var height = 0
-    @AppStorage("performacehud") var performacehud: Bool = false
-    @AppStorage("On-ScreenControllerOpacity") var controllerOpacity: Double = 1.0
+    @EnvironmentObject var ryujinx: Ryujinx
+    @EnvironmentObject var gameHandler: LaunchGameHandler
     
+    @State private var targetSize1: CGSize = .zero
+    @State private var isPortrait: Bool = false
     
     var body: some View {
         GeometryReader { geo in
-            let containerSize = geo.size
-            if oldView {
-                oldViewLayout(containerSize: containerSize)
-                    .allowsHitTesting(true)
-            } else {
-                newViewLayout(containerSize: containerSize)
-                    .allowsHitTesting(true)
-            }
-        }
-        .allowsHitTesting(true)
-    }
-    
-    @ViewBuilder
-    private func oldViewLayout(containerSize: CGSize) -> some View {
-        let windowSize = UIApplication.shared.windows.first?.bounds.size ?? UIScreen.main.bounds.size
-        let targetSize = targetSize(for: windowSize)
-        let isLandscape = windowSize.width > windowSize.height
-        
-        VStack(spacing: 0) {
-            if isLandscape {
-                Spacer(minLength: 0)
-            }
-            
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
+            ZStack {
+                Color.clear
                 
-                MetalView()
-                    .allowsHitTesting(true)
-                    .frame(width: targetSize.width, height: targetSize.height)
-                    .ignoresSafeArea(.container, edges: isLandscape ? .all : .horizontal)
-                
-                Spacer(minLength: 0)
-            }
-            
-            Spacer(minLength: 0)
-        }
-    }
-    
-    @ViewBuilder
-    private func newViewLayout(containerSize: CGSize) -> some View {
-        let isLandscape = containerSize.width > containerSize.height
-        let targetSize = targetSize(for: containerSize)
-        let corner: CGFloat = 13.0
-        let borderWidth: CGFloat = 2.0
-        
-        let isPhone = UIDevice.current.userInterfaceIdiom == .phone
-        let scale: CGFloat = isPhone ? (isLandscape ? 1.0 : 0.97) : (isLandscape ? 0.97 : 1.0)
-        
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            
-            HStack(spacing: 0) {
-                if isPhone && isLandscape {
-                    Spacer()
-                }
-                
-                ZStack {
-                    RoundedRectangle(cornerRadius: corner, style: .continuous)
-                        .strokeBorder(
-                            colorScheme == .light ? Color.gray : Color(UIColor.darkGray),
-                            lineWidth: borderWidth
-                        )
-                        .background(
-                            RoundedRectangle(cornerRadius: corner, style: .continuous)
-                                .fill(Color.clear)
-                        )
-                    
-                    // Metal view with proper insets
+                VStack {
                     MetalView()
+                        .frame(width: targetSize1.width,
+                               height: targetSize1.height)
                         .allowsHitTesting(true)
-                        .frame(
-                            width: targetSize.width - borderWidth * 2,
-                            height: targetSize.height - borderWidth * 2
-                        )
-                        .background(Color.black.opacity(0.8))
-                        .clipShape(RoundedRectangle(cornerRadius: corner - 1, style: .continuous))
-                        .shadow(color: .black.opacity(0.3), radius: 15)
-                }
-                .frame(width: targetSize.width, height: targetSize.height)
-                .scaleEffect(scale)
-                .ignoresSafeArea(.container, edges: isLandscape ? .all : .horizontal)
-                
-                if isPhone && isLandscape {
-                    Spacer()
+                        .ignoresSafeArea(.container,
+                                         edges: !isPortrait ? .all : .horizontal)
+                    
+                    if isPortrait {
+                        Spacer()
+                    }
                 }
             }
-            
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isPortrait ? .top : .center)
+            .onAppear {
+                getSize()
+            }
+            .onChange(of: geo.size) { newSize in
+                getSize()
+            }
+            .onChange(of: ryujinx.aspectRatio) { _ in
+                getSize()
+            }
         }
     }
     
+    func getSize() {
+        targetSize1 = targetSize(ryujinx: ryujinx)
+                                 
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow }) else { return }
+        
+        isPortrait = window.frame.width < window.frame.height
+    }
 }
 
 
-func targetSize(for containerSize: CGSize, ratio: AspectRatio = Ryujinx.shared.aspectRatio) -> CGSize {
+
+func targetSize(for containerSize: CGSize? = nil, ryujinx: Ryujinx) -> CGSize {
     var targetAspect: CGFloat
+    
+    guard let window = UIApplication.shared.connectedScenes
+        .compactMap({ $0 as? UIWindowScene })
+        .flatMap({ $0.windows })
+        .first(where: { $0.isKeyWindow }) else { return containerSize ?? CGSize.zero }
+    
+    let containerSize = containerSize ?? window.frame.size
+    let ratio = ryujinx.aspectRatio
     
     switch ratio {
     case .fixed4x3:

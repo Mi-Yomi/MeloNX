@@ -127,7 +127,7 @@ struct PerGameSettingsView: View {
     @State private var showAppIconSwitcher = false
     @State private var searchText = ""
     @StateObject var ryujinx = Ryujinx.shared
-    @Environment(\.dismissPopover) var dismiss
+    @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) var colorScheme
     @Environment(\.verticalSizeClass) var verticalSizeClass: UserInterfaceSizeClass?
     @Environment(\.horizontalSizeClass) var horizontalSizeClass: UserInterfaceSizeClass?

@@ -9,6 +9,8 @@ import SwiftUI
 
 // Emulation View
 struct EmulationView: View {
+    @EnvironmentObject var gameHandler: LaunchGameHandler
+    
     @AppStorage("performacehud") var performacehud: Bool = false
     @AppStorage("isVirtualController") var isVCA: Bool = true
     @AppStorage("showScreenShotButton") var ssb: Bool = false
@@ -19,7 +21,6 @@ struct EmulationView: View {
     @AppStorage("OldView") var oldView = true
     @State var isPresentedThree: Bool = false
     @State var isAirplaying = Air.shared.connected
-    @Binding var startgame: Game?
     
     @Environment(\.scenePhase) var scenePhase
     @State private var isInBackground = false
@@ -27,17 +28,15 @@ struct EmulationView: View {
     @State var pauseEmu = true
     @AppStorage("location-enabled") var locationenabled: Bool = false
     @FocusState private var isFocused: Bool
-    @ObservedObject var ryujinx = Ryujinx.shared
+    @EnvironmentObject var ryujinx: Ryujinx
     @State var rotationlock = false
     
     var body: some View {
         ZStack {
-            if oldView {
-                Color.black
-                    .ignoresSafeArea()
-                    .edgesIgnoringSafeArea(.all)
-                    .allowsHitTesting(false)
-            }
+            Color.black
+                .ignoresSafeArea()
+                .edgesIgnoringSafeArea(.all)
+                .allowsHitTesting(false)
             
             if isAirplaying {
                 TouchView()
@@ -82,10 +81,12 @@ struct EmulationView: View {
             
             // Above Emulation View
             if isVCA {
-                ControllerView(isEditing: .constant(false), gameId: startgame?.titleId) // Virtual Controller
-                    .contentShape(Rectangle())
+                ControllerView(isEditing: .constant(false), gameId: gameHandler.currentGame?.titleId) // Virtual Controller
                     .opacity(controllerOpacity)
                     .allowsHitTesting(true)
+            } else {
+                LayoutView()
+                    .allowsHitTesting(false)
             }
             
             
@@ -115,6 +116,8 @@ struct EmulationView: View {
                             Button {
                                 // ryujijnx.config?.aspectRatio
                                 ryujinx.aspectRatio = nextAspectRatio(current: ryujinx.aspectRatio)
+                                
+    
                             } label: {
                                 Label {
                                     Text(ryujinx.aspectRatio.displayName)
@@ -169,8 +172,7 @@ struct EmulationView: View {
             
             if showlogsgame, !Ryujinx.shared.showLoading {
                 VStack {
-                    LogFileView(isfps: false)
-                        .allowsHitTesting(false)
+                    LogView(isfps: false)
                     
                     Spacer()
                 }
@@ -182,11 +184,10 @@ struct EmulationView: View {
                 isFocused = true
             }
             
-            LocationManager.sharedInstance.startUpdatingLocation()
+            // LocationManager.sharedInstance.startUpdatingLocation()
             Air.shared.connectionCallbacks.append { cool in
                Task { @MainActor in
                     isAirplaying = cool
-                    // print(cool)
                 }
             }
             
@@ -222,9 +223,12 @@ struct EmulationView: View {
     }
     
     func stop() {
-        startgame = nil
-        RyujinxBridge.stopEmulation()
-        try? ryujinx.stop()
+        gameHandler.showApp = true
+        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { _ in
+            gameHandler.currentGame = nil
+            RyujinxBridge.stopEmulation()
+            try? ryujinx.stop()
+        }
     }
     
     func nextAspectRatio(current: AspectRatio) -> AspectRatio {

@@ -1,14 +1,13 @@
 //
-//  LogEntry.swift
+//  LogsView.swift
 //  MeloNX
 //
-//  Created by Stossy11 on 09/02/2025.
+//  Created by Stossy11 on 10/11/2025.
 //
 
 import SwiftUI
-import Combine
 
-struct LogFileView: View {
+struct LogView: View {
     @StateObject var logsModel = LogCapture.shared
     @State var logs: [String] = []
     @State private var showingLogs = false
@@ -42,5 +41,6 @@ struct LogFileView: View {
         showingLogs = false
     }
 }
+
 
 

@@ -2,7 +2,7 @@ using System;
 
 namespace Ryujinx.Cpu.LightningJit.CodeGen
 {
-    readonly struct Register : IEquatable<Register>
+    public readonly struct Register : IEquatable<Register>
     {
         public int Index { get; }
 
