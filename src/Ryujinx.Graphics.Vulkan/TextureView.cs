@@ -810,7 +810,7 @@ namespace Ryujinx.Graphics.Vulkan
                 CopyFromOrToBuffer(cbs.CommandBuffer, buffer, image, bufferDataLength, false, layer, level, layers, levels, singleSlice);
             }
         }
-
+        
         private int GetBufferDataLength(int length)
         {
             if (NeedsD24S8Conversion())

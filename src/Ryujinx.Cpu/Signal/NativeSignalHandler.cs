@@ -121,6 +121,31 @@ namespace Ryujinx.Cpu.Signal
             }
         }
 
+        /// <summary>
+        /// Installs a custom Unix signal handler for the specified signal.
+        /// </summary>
+        /// <param name="signal">The signal number (e.g., SIGINT = 2, SIGTERM = 15, SIGUSR1 = 10)</param>
+        /// <param name="handlerPtr">Pointer to the signal handler function</param>
+        /// <returns>The previous signal handler, or IntPtr.Zero on failure</returns>
+        public static IntPtr InstallUnixSignalHandler(int signal, IntPtr handlerPtr)
+        {
+            if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS() && !OperatingSystem.IsIOS())
+            {
+                throw new PlatformNotSupportedException("InstallUnixSignalHandler is only supported on Unix-like systems.");
+            }
+
+            if (handlerPtr == IntPtr.Zero)
+            {
+                throw new ArgumentNullException(nameof(handlerPtr));
+            }
+
+            lock (_lock)
+            {
+                var old = UnixSignalHandlerRegistration.RegisterSignalHandler(signal, handlerPtr);
+                return old.sa_handler;
+            }
+        }
+
         private static IntPtr MapCode(ReadOnlySpan<byte> code)
         {
             ulong codeSizeAligned = BitUtils.AlignUp((ulong)code.Length, MemoryBlock.GetPageSize());

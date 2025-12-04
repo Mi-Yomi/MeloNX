@@ -171,58 +171,56 @@ namespace Ryujinx.Headless.SDL2
         private void InitializeWindow()
         {
             if (this is Vulkan.MoltenVKWindow) {
-                string message = $"Not using SDL Windows, Skipping...";
-
-                Logger.Info?.Print(LogClass.Application, message);
-
                 Width = ExclusiveFullscreenWidth;
                 Height = ExclusiveFullscreenHeight;
 
                 MouseDriver.SetClientSize(Width, Height);
-            } else {
-                var activeProcess = Device.Processes.ActiveApplication;
-                var nacp = activeProcess.ApplicationControlProperties;
-                int desiredLanguage = (int)Device.System.State.DesiredTitleLanguage;
+                return;
+            } 
 
-                string titleNameSection = string.IsNullOrWhiteSpace(nacp.Title[desiredLanguage].NameString.ToString()) ? string.Empty : $" - {nacp.Title[desiredLanguage].NameString.ToString()}";
-                string titleVersionSection = string.IsNullOrWhiteSpace(nacp.DisplayVersionString.ToString()) ? string.Empty : $" v{nacp.DisplayVersionString.ToString()}";
-                string titleIdSection = string.IsNullOrWhiteSpace(activeProcess.ProgramIdText) ? string.Empty : $" ({activeProcess.ProgramIdText.ToUpper()})";
-                string titleArchSection = activeProcess.Is64Bit ? " (64-bit)" : " (32-bit)";
+            var activeProcess = Device.Processes.ActiveApplication;
+            var nacp = activeProcess.ApplicationControlProperties;
+            int desiredLanguage = (int)Device.System.State.DesiredTitleLanguage;
 
-                Width = DefaultWidth;
-                Height = DefaultHeight;
+            string titleNameSection = string.IsNullOrWhiteSpace(nacp.Title[desiredLanguage].NameString.ToString()) ? string.Empty : $" - {nacp.Title[desiredLanguage].NameString.ToString()}";
+            string titleVersionSection = string.IsNullOrWhiteSpace(nacp.DisplayVersionString.ToString()) ? string.Empty : $" v{nacp.DisplayVersionString.ToString()}";
+            string titleIdSection = string.IsNullOrWhiteSpace(activeProcess.ProgramIdText) ? string.Empty : $" ({activeProcess.ProgramIdText.ToUpper()})";
+            string titleArchSection = activeProcess.Is64Bit ? " (64-bit)" : " (32-bit)";
 
-                if (IsExclusiveFullscreen)
-                {
-                    Width = ExclusiveFullscreenWidth;
-                    Height = ExclusiveFullscreenHeight;
+            Width = DefaultWidth;
+            Height = DefaultHeight;
 
-                    DefaultFlags = SDL_WindowFlags.SDL_WINDOW_ALLOW_HIGHDPI;
-                    FullscreenFlag = SDL_WindowFlags.SDL_WINDOW_FULLSCREEN;
-                }
-                else if (IsFullscreen)
-                {
-                    DefaultFlags = SDL_WindowFlags.SDL_WINDOW_ALLOW_HIGHDPI;
-                    FullscreenFlag = SDL_WindowFlags.SDL_WINDOW_FULLSCREEN_DESKTOP;
-                }
+            if (IsExclusiveFullscreen)
+            {
+                Width = ExclusiveFullscreenWidth;
+                Height = ExclusiveFullscreenHeight;
 
-                // WindowHandle = SDL_GetWindowFromID(1);
-                WindowHandle = SDL_CreateWindow($"Ryujinx {Program.Version}{titleNameSection}{titleVersionSection}{titleIdSection}{titleArchSection}", 0, 0, Width, Height, DefaultFlags | FullscreenFlag | GetWindowFlags());
-
-                if (WindowHandle == IntPtr.Zero)
-                {
-                    string errorMessage = $"SDL_CreateWindow failed with error \"{SDL_GetError()}\"";
-
-                    Logger.Error?.Print(LogClass.Application, errorMessage);
-
-                    throw new Exception(errorMessage);
-                }
-
-                SetWindowIcon();
-
-                _windowId = SDL_GetWindowID(WindowHandle);
-                SDL2Driver.Instance.RegisterWindow(_windowId, HandleWindowEvent);
+                DefaultFlags = SDL_WindowFlags.SDL_WINDOW_ALLOW_HIGHDPI;
+                FullscreenFlag = SDL_WindowFlags.SDL_WINDOW_FULLSCREEN;
             }
+            else if (IsFullscreen)
+            {
+                DefaultFlags = SDL_WindowFlags.SDL_WINDOW_ALLOW_HIGHDPI;
+                FullscreenFlag = SDL_WindowFlags.SDL_WINDOW_FULLSCREEN_DESKTOP;
+            }
+
+            // WindowHandle = SDL_GetWindowFromID(1);
+            WindowHandle = SDL_CreateWindow($"Ryujinx {Program.Version}{titleNameSection}{titleVersionSection}{titleIdSection}{titleArchSection}", 0, 0, Width, Height, DefaultFlags | FullscreenFlag | GetWindowFlags());
+
+            if (WindowHandle == IntPtr.Zero)
+            {
+                string errorMessage = $"SDL_CreateWindow failed with error \"{SDL_GetError()}\"";
+
+                Logger.Error?.Print(LogClass.Application, errorMessage);
+
+                throw new Exception(errorMessage);
+            }
+
+            SetWindowIcon();
+
+            _windowId = SDL_GetWindowID(WindowHandle);
+            SDL2Driver.Instance.RegisterWindow(_windowId, HandleWindowEvent);
+            
         }
 
         private void HandleWindowEvent(SDL_Event evnt)
@@ -407,7 +405,7 @@ namespace Ryujinx.Headless.SDL2
                 ProcessMainThreadQueue();
 
                 // Polling becomes expensive if it's not slept
-                Thread.Sleep(1);
+                // Thread.Sleep(1);
             }
 
             _exitEvent.Set();
@@ -451,7 +449,7 @@ namespace Ryujinx.Headless.SDL2
 
             MouseDriver.SetClientSize(Width, Height);
 
-            hasTouch = TouchScreenManager.Update(true, (_inputManager.MouseDriver as iOSTouchDriver).IsButtonPressed(MouseButton.Button1), (float)Width / Height);
+            hasTouch = TouchScreenManager.UpdateMultiTouch(_inputManager.MouseDriver.GetGamepad("") as ITouchScreen, true); // TouchScreenManager.Update(true, (_inputManager.MouseDriver as iOSTouchDriver).IsButtonPressed(MouseButton.Button1), (float)Width / Height);
 
             if (!hasTouch)
             {
@@ -579,7 +577,7 @@ namespace Ryujinx.Headless.SDL2
                 TouchScreenManager?.Dispose();
                 NpadManager.Dispose();
 
-                if (!(this is Ryujinx.Headless.SDL2.Vulkan.MoltenVKWindow))
+                if (this is not Vulkan.MoltenVKWindow)
                 {
                     SDL2Driver.Instance.UnregisterWindow(_windowId);
 

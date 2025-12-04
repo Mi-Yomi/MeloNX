@@ -44,7 +44,6 @@ struct DownloadableContentContainer: Codable, Hashable, Identifiable {
 struct DLCManagerSheet: View {
     // MARK: - Properties
     var game: Game!
-    @State private var isSelectingGameDLC = false
     @State private var dlcs: [DownloadableContentContainer] = []
     @Environment(\.dismiss) private var dismiss
     
@@ -72,7 +71,7 @@ struct DLCManagerSheet: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        isSelectingGameDLC = true
+                        FileImporterManager.shared.importFiles(types: [.item], completion: handleFileImport)
                     } label: {
                         Label("Add DLC", systemImage: "plus")
                     }
@@ -82,12 +81,6 @@ struct DLCManagerSheet: View {
                 loadData()
             }
         }
-        .fileImporter(
-            isPresented: $isSelectingGameDLC,
-            allowedContentTypes: [.item],
-            allowsMultipleSelection: true,
-            onCompletion: handleFileImport
-        )
     }
     
     // MARK: - Views
@@ -230,11 +223,8 @@ struct DLCManagerSheet: View {
     }
     
     private func importDLC(from url: URL) {
-        guard url.startAccessingSecurityScopedResource() else {
-            print("Failed to access security-scoped resource")
-            return
-        }
-        defer { url.stopAccessingSecurityScopedResource() }
+        let cool = url.startAccessingSecurityScopedResource()
+        defer { if cool { url.stopAccessingSecurityScopedResource() } }
         
         do {
             let fileManager = FileManager.default

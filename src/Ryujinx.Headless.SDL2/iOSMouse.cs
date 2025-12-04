@@ -6,7 +6,7 @@ using System.Numerics;
 
 namespace Ryujinx.Headless.SDL2
 {
-    class iOSMouse : IMouse
+    class iOSMouse : ITouchScreen
     {
         private iOSTouchDriver _driver;
 
@@ -20,14 +20,14 @@ namespace Ryujinx.Headless.SDL2
 
         public bool[] Buttons => _driver.PressedButtons;
 
-        Size IMouse.ClientSize => _driver.GetClientSize();
+        Size ITouchScreen.ClientSize => _driver.GetClientSize();
 
         public iOSMouse(iOSTouchDriver driver)
         {
             _driver = driver;
         }
 
-        public Vector2 GetPosition()
+        public Vector2[] GetPositions()
         {
             return _driver.CurrentPosition;
         }
@@ -59,7 +59,7 @@ namespace Ryujinx.Headless.SDL2
 
         public bool IsButtonPressed(MouseButton button)
         {
-            return _driver.IsButtonPressed(button);
+            return _driver.IsAnyPressed(button);
         }
 
         public bool IsPressed(GamepadButtonInputId inputId)

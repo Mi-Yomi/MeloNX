@@ -114,6 +114,23 @@ namespace Ryujinx.Cpu.LightningJit
             _dispatchLoop = new(GenerateDispatchLoop, isThreadSafe: true);
         }
 
+                /// <summary>
+        /// Initializes a new instance of the <see cref="TranslatorStubs"/> class with the specified
+        /// <see cref="Translator"/> instance.
+        /// </summary>
+        /// <param name="functionTable">Function table used to store pointers to the functions that the guest code will call</param>
+        public TranslatorStubs(AddressTable<ulong> functionTable)
+        {
+            ArgumentNullException.ThrowIfNull(functionTable);
+
+            _functionTable = functionTable;
+            _getFunctionAddressRef = NativeInterface.GetFunctionAddress;
+            _getFunctionAddress = Marshal.GetFunctionPointerForDelegate(_getFunctionAddressRef);
+            _slowDispatchStub = new(GenerateSlowDispatchStub, isThreadSafe: true);
+            _dispatchStub = new(GenerateDispatchStub, isThreadSafe: true);
+            _dispatchLoop = new(GenerateDispatchLoop, isThreadSafe: true);
+        }
+
         /// <summary>
         /// Releases all resources used by the <see cref="TranslatorStubs"/> instance.
         /// </summary>
@@ -389,7 +406,19 @@ namespace Ryujinx.Cpu.LightningJit
             }
             else
             {
-                return JitCache.Map(code);
+                IntPtr ptr = Marshal.AllocHGlobal(code.Length);
+
+                // Copy code into unmanaged memory
+                unsafe
+                {
+                    fixed (byte* pCode = code)
+                    {
+                        Buffer.MemoryCopy(pCode, (void*)ptr, code.Length, code.Length);
+                    }
+                }
+
+                // return JitCache.Map(code);
+                return ptr;
             }
         }
 

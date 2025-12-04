@@ -1,7 +1,6 @@
 using CommandLine;
 using LibHac.Tools.FsSystem;
 using Ryujinx.Audio.Backends.SDL2;
-using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Configuration.Hid;
 using Ryujinx.Common.Configuration.Hid.Controller;
@@ -30,21 +29,17 @@ using Ryujinx.Input;
 using Ryujinx.Input.HLE;
 using Ryujinx.Input.SDL2;
 using Ryujinx.SDL2.Common;
-using Ryujinx.UI.Common.Configuration;
 using Ryujinx.UI.Common.Configuration.System;
-using Ryujinx.UI.Common;
 using Silk.NET.Vulkan;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Threading;
 using ConfigGamepadInputId = Ryujinx.Common.Configuration.Hid.Controller.GamepadInputId;
 using ConfigStickInputId = Ryujinx.Common.Configuration.Hid.Controller.StickInputId;
 using Key = Ryujinx.Common.Configuration.Hid.Key;
-using System.Linq;
 using Ryujinx.HLE.HOS.SystemState;
 using LibHac.Common.Keys;
 using LibHac.Common;
@@ -55,18 +50,16 @@ using LibHac.Fs.Fsa;
 using LibHac.FsSystem;
 using LibHac.Fs;
 using Path = System.IO.Path;
-using LibHac;
 using Ryujinx.Common.Configuration.Multiplayer;
 using Ryujinx.HLE.Loaders.Npdm;
 using System.Globalization;
 using System.Text;
-using Ryujinx.HLE.UI;
-using ARMeilleure.Translation;
 using LibHac.Ncm;
 using Microsoft.Win32.SafeHandles;
 using System.Text.RegularExpressions;
-using SDL2;
-using Ryujinx.Common.Collections;
+using System.Runtime;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace Ryujinx.Headless.SDL2
 {
@@ -134,7 +127,10 @@ namespace Ryujinx.Headless.SDL2
 
         public static IntPtr GetNativeMetalLayer()
         {
-            return nativeMetalLayer;
+            lock (metalLayerLock)
+            {
+                return nativeMetalLayer;
+            }
         }
 
 
@@ -148,6 +144,7 @@ namespace Ryujinx.Headless.SDL2
             {
                 image = new byte[imageLength];
                 Marshal.Copy(imagePtr, image, 0, imageLength);
+                Marshal.FreeHGlobal(imagePtr);
             }
 
             _accountManager.AddUser(name, image);
@@ -178,6 +175,22 @@ namespace Ryujinx.Headless.SDL2
 
             HLE.HOS.Services.Account.Acc.UserId userIdObj = new HLE.HOS.Services.Account.Acc.UserId(name);
             _accountManager.OpenUser(userIdObj);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "free_avatars")]
+        public static unsafe void FreeAvatars(AvatarArray avatarArray)
+        {
+            if (avatarArray.Avatars != null)
+            {
+                for (int i = 0; i < avatarArray.Count; i++)
+                {
+                    if (avatarArray.Avatars[i].ImageData != null)
+                        Marshal.FreeHGlobal((IntPtr)avatarArray.Avatars[i].ImageData);
+                    if (avatarArray.Avatars[i].FileName != null)
+                        Marshal.FreeHGlobal((IntPtr)avatarArray.Avatars[i].FileName);
+                }
+                Marshal.FreeHGlobal((IntPtr)avatarArray.Avatars);
+            }
         }
 
 
@@ -229,7 +242,6 @@ namespace Ryujinx.Headless.SDL2
             _accountManager.Refresh();
         }
         
-
         [UnmanagedCallersOnly(EntryPoint = "get_dlc_nca_list")]
         public static unsafe DlcNcaList GetDlcNcaList(IntPtr titleIdPtr, IntPtr pathPtr) 
         {
@@ -248,8 +260,6 @@ namespace Ryujinx.Headless.SDL2
             bool containsDlc = false;
 
             _virtualFileSystem.ImportTickets(pfs);
-
-            // TreeIter? parentIter = null;
 
             List<DlcNcaListItem> listItems = new();
             foreach (DirectoryEntryEx fileEntry in pfs.EnumerateEntries("/", "*.nca"))
@@ -276,9 +286,6 @@ namespace Ryujinx.Headless.SDL2
                     Logger.Warning?.Print(LogClass.Application, $"TitleId: {nca.Header.TitleId}");
                     Logger.Warning?.Print(LogClass.Application, $"fileEntry.FullPath: {fileEntry.FullPath}");
                     
-                    // parentIter ??= ((TreeStore)_dlcTreeView.Model).AppendValues(true, "", containerPath);
-                    // ((TreeStore)_dlcTreeView.Model).AppendValues(parentIter.Value, true, nca.Header.TitleId.ToString("X16"), fileEntry.FullPath);
-
                     DlcNcaListItem item = new();
                     CopyStringToFixedArray(fileEntry.FullPath, item.Path, 256);
                     item.TitleId = nca.Header.TitleId;
@@ -290,6 +297,7 @@ namespace Ryujinx.Headless.SDL2
 
             if (!containsDlc)
             {
+                Console.WriteLine("The specified file does not contain DLC for the selected title!");
                 return new DlcNcaList { success = false };
                 // GtkDialog.CreateErrorDialog("The specified file does not contain DLC for the selected title!");
             }
@@ -395,12 +403,12 @@ namespace Ryujinx.Headless.SDL2
             }
 
             _inputManager = new InputManager(new SDL2KeyboardDriver(), new NativeGamepadDriver());
+
+            GCSettings.LatencyMode = GCLatencyMode.Batch;
         }
 
         [UnmanagedCallersOnly(EntryPoint = "initialize-dualmapped")]
-        public static unsafe void InitializeDM() {
-            Ryujinx.Cpu.LightningJit.DualMappedTranslator.InitializeDualMapped();
-        }
+        public static unsafe bool InitializeDM() => Cpu.LightningJit.DualMappedTranslator.InitializeDualMapped();
 
         static void Main(string[] args)
         {
@@ -443,35 +451,36 @@ namespace Ryujinx.Headless.SDL2
             .WithParsed(Load)
             .WithNotParsed(errors => errors.Output());
         }
-
+    
         [UnmanagedCallersOnly(EntryPoint = "install_firmware")]
-        public static void InstallFirmwareNative(IntPtr inputPtr)
+        public static IntPtr InstallFirmwareNative(IntPtr inputPtr)
         {
+            // ✖ is to tell if its an error or not because i'm too lazy to make a bool 
             try
             {
                 if (inputPtr == IntPtr.Zero)
                 {
-                    Console.Error.WriteLine("Error: inputPtr is null.");
-                    return;
+                    return Marshal.StringToHGlobalAnsi("Error: inputPtr is null. ✖");
                 }
 
                 string inputString = Marshal.PtrToStringAnsi(inputPtr);
 
                 if (string.IsNullOrEmpty(inputString))
                 {
-                    Console.Error.WriteLine("Error: inputString is null or empty.");
-                    return;
+                    return Marshal.StringToHGlobalAnsi("Error: inputString is null or empty. ✖");
                 }
+                
+                string firmwareVersion = InstallFirmware(inputString);
 
-                InstallFirmware(inputString);
+                return Marshal.StringToHGlobalAnsi(firmwareVersion);
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine($"Error in InstallFirmwareNative: {ex.Message}");
+                return Marshal.StringToHGlobalAnsi($"Error: {ex.Message} ✖");
             }
         }
 
-        public static void InstallFirmware(string filePath)
+        public static string InstallFirmware(string filePath)
         {
             if (string.IsNullOrEmpty(filePath))
             {
@@ -483,7 +492,15 @@ namespace Ryujinx.Headless.SDL2
                 throw new InvalidOperationException("_contentManager is not initialized.");
             }
 
-            _contentManager.InstallFirmware(filePath);
+            SystemVersion systemVersion = _contentManager.VerifyFirmwarePackage(filePath);
+            if (systemVersion is null)
+            {
+                throw new InvalidOperationException("The provided file is not a valid firmware package.");
+            }
+
+            Task.Run(() => _contentManager.InstallFirmware(filePath));
+
+            return systemVersion.VersionString;
         }
 
 
@@ -494,35 +511,39 @@ namespace Ryujinx.Headless.SDL2
             return Marshal.StringToHGlobalAnsi(result);
         }
 
+        [UnmanagedCallersOnly(EntryPoint = "free_firmware_version")]
+        public static void FreeFirmwareVersion(IntPtr versionPtr)
+        {
+            if (versionPtr != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(versionPtr);
+            }
+        }
+
         public static string GetInstalledFirmwareVersion()
         {
-            var version = _contentManager.GetCurrentFirmwareVersion();
-
-            if (version != null)
+            try
             {
-                return version.VersionString;
-            }
+                var version = _contentManager.GetCurrentFirmwareVersion();
 
-            return String.Empty;
+                if (version != null)
+                {
+                    return version.VersionString;
+                }
+
+                return String.Empty;
+            } catch
+            {
+                return String.Empty;
+            }
         }
 
         [UnmanagedCallersOnly(EntryPoint = "pause_emulation")]
         public static void PauseEmulation(bool shouldPause)
         {
-            if (_window != null && _window.Device != null)
+            if (_emulationContext != null && _emulationContext.System != null)
             {
-                if (!shouldPause) 
-                {
-                    _window.Device.SetVolume(1);
-                    _window._isPaused = false;
-                    _window._pauseEvent.Set();
-                } 
-                else
-                {
-                    _window.Device.SetVolume(0);
-                    _window._isPaused = true;
-                    _window._pauseEvent.Reset();
-                }
+                _emulationContext.System.TogglePauseEmulation(shouldPause);
             }
         }
 
@@ -546,16 +567,17 @@ namespace Ryujinx.Headless.SDL2
             var stream = OpenFile(descriptor);
 
             var gameInfo = GetGameInfo(stream, extension);
+
             if (gameInfo == null) {
                 return new GameInfoNative(0, "", "", "", "", new byte[0]);
             }
 
             return new GameInfoNative(
                 (ulong)gameInfo.FileSize, 
-                gameInfo.TitleName, 
-                gameInfo.TitleId, 
-                gameInfo.Developer, 
-                gameInfo.Version, 
+                gameInfo.TitleName + "\0", 
+                gameInfo.TitleId + "\0", 
+                gameInfo.Developer + "\0", 
+                gameInfo.Version + "\0", 
                 gameInfo.Icon
             );
         }
@@ -1006,6 +1028,7 @@ namespace Ryujinx.Headless.SDL2
 
             return gameInfo;
         }
+        
 
         private static InputConfig HandlePlayerConfiguration(string inputProfileName, string inputId, string inputDSUServer, PlayerIndex index, Options option)
         {
@@ -1441,7 +1464,7 @@ namespace Ryujinx.Headless.SDL2
             GraphicsConfig.EnableMacroHLE = !option.DisableMacroHLE;
 
             DriverUtilities.InitDriverConfig(option.BackendThreading == BackendThreading.Off);
-
+            _virtualFileSystem.ReloadKeySet();
             while (true)
             {
                 LoadApplication(option);
@@ -1839,6 +1862,7 @@ namespace Ryujinx.Headless.SDL2
             public bool success;
             public uint size;
             public unsafe DlcNcaListItem* items;
+
         }
 
         public unsafe struct GameInfoNative
@@ -1887,6 +1911,20 @@ namespace Ryujinx.Headless.SDL2
                     ImageData = null;
                 }
             }
+        }
+        
+        [UnmanagedCallersOnly(EntryPoint = "free_game_info")]
+        public static unsafe void FreeGameInfo(GameInfoNative* gameInfoPtr)
+        {
+            if (gameInfoPtr == null)
+                return;
+                
+            if (gameInfoPtr->ImageData != null)
+            {
+                Marshal.FreeHGlobal((IntPtr)gameInfoPtr->ImageData);
+                gameInfoPtr->ImageData = null;
+            }
+            gameInfoPtr->ImageSize = 0;
         }
 
         private static unsafe void CopyStringToFixedArray(string source, byte* destination, int length)

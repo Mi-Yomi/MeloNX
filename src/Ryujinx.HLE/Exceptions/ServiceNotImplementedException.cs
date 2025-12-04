@@ -3,10 +3,11 @@ using Ryujinx.HLE.HOS;
 using Ryujinx.HLE.HOS.Ipc;
 using Ryujinx.HLE.HOS.Services;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Serialization;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace Ryujinx.HLE.Exceptions
@@ -17,22 +18,22 @@ namespace Ryujinx.HLE.Exceptions
         public IpcService Service { get; }
         public ServiceCtx Context { get; }
         public IpcMessage Request { get; }
+        private string MethodName { get; }
 
-        public ServiceNotImplementedException(IpcService service, ServiceCtx context)
-            : this(service, context, "The service call is not implemented.") { }
-
-        public ServiceNotImplementedException(IpcService service, ServiceCtx context, string message) : base(message)
+        public ServiceNotImplementedException(IpcService service, ServiceCtx context, string message = "The service call is not implemented.", [CallerMemberName] string methodName = null) : base(message)
         {
             Service = service;
             Context = context;
             Request = context.Request;
+            MethodName = methodName;
         }
 
-        public ServiceNotImplementedException(IpcService service, ServiceCtx context, string message, Exception inner) : base(message, inner)
+        public ServiceNotImplementedException(IpcService service, ServiceCtx context, string message, Exception inner, [CallerMemberName] string methodName = null) : base(message, inner)
         {
             Service = service;
             Context = context;
             Request = context.Request;
+            MethodName = methodName;
         }
 
         public override string Message
@@ -47,25 +48,12 @@ namespace Ryujinx.HLE.Exceptions
         {
             StringBuilder sb = new();
 
-            // Print the IPC command details (service name, command ID, and handler)
-            (Type callingType, MethodBase callingMethod) = WalkStackTrace(new StackTrace(this));
+            int commandId = Request.Type > IpcMessageType.TipcCloseSession
+                ? Service.TipcCommandIdByMethodName(MethodName)
+                : Service.CmifCommandIdByMethodName(MethodName);
 
-            if (callingType != null && callingMethod != null)
-            {
-                // If the type is past 0xF, we are using TIPC
-                var ipcCommands = Request.Type > IpcMessageType.TipcCloseSession ? Service.TipcCommands : Service.CmifCommands;
-
-                // Find the handler for the method called
-                var ipcHandler = ipcCommands.FirstOrDefault(x => x.Value == callingMethod);
-                var ipcCommandId = ipcHandler.Key;
-                var ipcMethod = ipcHandler.Value;
-
-                if (ipcMethod != null)
-                {
-                    sb.AppendLine($"Service Command: {Service.GetType().FullName}: {ipcCommandId} ({ipcMethod.Name})");
-                    sb.AppendLine();
-                }
-            }
+            sb.AppendLine($"Service Command: {Service.GetType().FullName}: {commandId} ({MethodName})");
+            sb.AppendLine();
 
             sb.AppendLine("Guest Stack Trace:");
             sb.AppendLine(Context.Thread.GetGuestStackTrace());
@@ -83,7 +71,7 @@ namespace Ryujinx.HLE.Exceptions
                 {
                     sb.AppendLine("\tPtrBuff:");
 
-                    foreach (var buff in Request.PtrBuff)
+                    foreach (IpcPtrBuffDesc buff in Request.PtrBuff)
                     {
                         sb.AppendLine($"\t[{buff.Index}] Position: 0x{buff.Position:x16} Size: 0x{buff.Size:x16}");
                     }
@@ -93,7 +81,7 @@ namespace Ryujinx.HLE.Exceptions
                 {
                     sb.AppendLine("\tSendBuff:");
 
-                    foreach (var buff in Request.SendBuff)
+                    foreach (IpcBuffDesc buff in Request.SendBuff)
                     {
                         sb.AppendLine($"\tPosition: 0x{buff.Position:x16} Size: 0x{buff.Size:x16} Flags: {buff.Flags}");
                     }
@@ -103,7 +91,7 @@ namespace Ryujinx.HLE.Exceptions
                 {
                     sb.AppendLine("\tReceiveBuff:");
 
-                    foreach (var buff in Request.ReceiveBuff)
+                    foreach (IpcBuffDesc buff in Request.ReceiveBuff)
                     {
                         sb.AppendLine($"\tPosition: 0x{buff.Position:x16} Size: 0x{buff.Size:x16} Flags: {buff.Flags}");
                     }
@@ -113,7 +101,7 @@ namespace Ryujinx.HLE.Exceptions
                 {
                     sb.AppendLine("\tExchangeBuff:");
 
-                    foreach (var buff in Request.ExchangeBuff)
+                    foreach (IpcBuffDesc buff in Request.ExchangeBuff)
                     {
                         sb.AppendLine($"\tPosition: 0x{buff.Position:x16} Size: 0x{buff.Size:x16} Flags: {buff.Flags}");
                     }
@@ -123,7 +111,7 @@ namespace Ryujinx.HLE.Exceptions
                 {
                     sb.AppendLine("\tRecvListBuff:");
 
-                    foreach (var buff in Request.RecvListBuff)
+                    foreach (IpcRecvListBuffDesc buff in Request.RecvListBuff)
                     {
                         sb.AppendLine($"\tPosition: 0x{buff.Position:x16} Size: 0x{buff.Size:x16}");
                     }
@@ -136,27 +124,6 @@ namespace Ryujinx.HLE.Exceptions
             sb.Append(HexUtils.HexTable(Request.RawData));
 
             return sb.ToString();
-        }
-
-        private static (Type, MethodBase) WalkStackTrace(StackTrace trace)
-        {
-            int i = 0;
-
-            StackFrame frame;
-
-            // Find the IIpcService method that threw this exception
-            while ((frame = trace.GetFrame(i++)) != null)
-            {
-                var method = frame.GetMethod();
-                var declType = method.DeclaringType;
-
-                if (typeof(IpcService).IsAssignableFrom(declType))
-                {
-                    return (declType, method);
-                }
-            }
-
-            return (null, null);
         }
     }
 }

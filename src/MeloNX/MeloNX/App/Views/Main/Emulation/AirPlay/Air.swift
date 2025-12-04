@@ -90,7 +90,7 @@ public class Air {
             self.airWindow?.rootViewController = viewController
             self.airWindow?.windowScene = airWindowScene
             
-            if let hostingController = viewController as? UIHostingController<AnyView> {
+            if let _ = viewController as? UIHostingController<AnyView> {
                 let traitCollection = UITraitCollection(traitsFrom: [
                     UITraitCollection(userInterfaceIdiom: .tv),
                     airWindowScene.traitCollection

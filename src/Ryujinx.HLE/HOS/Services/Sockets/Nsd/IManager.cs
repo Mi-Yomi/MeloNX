@@ -11,7 +11,7 @@ namespace Ryujinx.HLE.HOS.Services.Sockets.Nsd
 {
     [Service("nsd:a")] // Max sessions: 5
     [Service("nsd:u")] // Max sessions: 20
-    class IManager : IpcService
+    partial class IManager : IpcService
     {
         public static readonly NsdSettings NsdSettings;
 #pragma warning disable IDE0052 // Remove unread private member

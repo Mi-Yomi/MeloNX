@@ -14,6 +14,7 @@ struct ContentView: View {
     @Namespace var gameAnimation
     @State private var selectedTab: Tab = .games
     @State var showing = true
+    @State var viewShown = false
     
     @ViewBuilder
     var tabView: some View {
@@ -43,6 +44,9 @@ struct ContentView: View {
                     SettingsViewNew().allBody
                 }
             }
+            .onOpenURL { url in
+                handleDeepLink(url)
+            }
             .onAppear() {
                 controllerManager.initAll()
                 enableJIT()
@@ -57,6 +61,10 @@ struct ContentView: View {
                 
                 Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
                     showing = false
+                }
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    viewShown = true
                 }
             }
             .environmentObject(gameHandler)
@@ -127,6 +135,32 @@ struct ContentView: View {
                 enableJITStik()
             } else {
                 // nothing
+            }
+        }
+    }
+    
+    private func handleDeepLink(_ url: URL) {
+        Task {
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: true),
+               components.host == "game" {
+                
+                while (!viewShown) {
+                    try? await Task.sleep(nanoseconds: 100)
+                }
+                
+                if let text = components.queryItems?.first(where: { $0.name == "id" })?.value {
+                    gameHandler.currentGame = ryujinx.games.first(where: { $0.titleId == text })
+                    if gameHandler.currentGame == nil {
+                        gameHandler.currentGame = ryujinx.games.first(where: { $0.titleName == text })
+                    }
+                    
+                } else if let text = components.queryItems?.first(where: { $0.name == "name" })?.value {
+                    gameHandler.currentGame = ryujinx.games.first(where: { $0.titleName == text })
+                    
+                    if gameHandler.currentGame == nil {
+                        gameHandler.currentGame = ryujinx.games.first(where: { $0.titleId == text })
+                    }
+                }
             }
         }
     }

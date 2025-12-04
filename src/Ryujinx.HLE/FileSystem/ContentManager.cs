@@ -428,6 +428,7 @@ namespace Ryujinx.HLE.FileSystem
 
         public void InstallFirmware(string firmwareSource)
         {
+            _virtualFileSystem.ReloadKeySet();
             ContentPath.TryGetContentPath(StorageId.BuiltInSystem, out var contentPathString);
             ContentPath.TryGetRealPath(contentPathString, out var contentDirectory);
             string registeredDirectory = Path.Combine(contentDirectory, "registered");

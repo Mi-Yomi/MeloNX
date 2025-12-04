@@ -16,8 +16,10 @@ func isJITEnabled() -> Bool {
         return allocateTest()
     }
     
+    LaunchGameHandler.succeededJIT = RyujinxBridge.initialize_dualmapped()
+    
     if #available(iOS 19, *) {
-        return checkDebugged()
+        return checkDebugged() && LaunchGameHandler.succeededJIT
     } else {
         return checkDebugged() && allocateTest()
     }

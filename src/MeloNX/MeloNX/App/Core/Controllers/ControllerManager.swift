@@ -8,10 +8,12 @@
 import Foundation
 import Combine
 import GameController
+import SwiftUI
 
 class ControllerManager: ObservableObject {
     static var shared = ControllerManager()
     let virtualController = BaseController(nativeController: nil)
+    @AppStorage("isVirtualController") var isVCA: Bool = true
     
     private let controllerQueue = DispatchQueue(label: "com.stossy11.melonx.controllermanager", attributes: .concurrent)
     
@@ -144,6 +146,12 @@ class ControllerManager: ObservableObject {
                        let name = cool.vendorName,
                        let controller = self.firstControllerForName(name) as? NativeController {
                         controller.setupNewNativeController(cool)
+                    } else if  let cool = notification.object as? GCController, self.selectedControllers.count == 1, let controller = self.controllerForString(self.selectedControllers.first ?? ""), controller.virtual {
+                        let newController = NativeController(nativeController: cool, id: controller.nativePointer)
+                        self.allControllers.removeAll(where: { $0 == controller })
+                        self.allControllers.append(newController)
+                        
+                        self.isVCA = false
                     }
                 } else {
                     self.refreshControllersList()

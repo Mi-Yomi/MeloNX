@@ -8,6 +8,7 @@ using System.Drawing;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Linq;
 
 namespace Ryujinx.Headless.SDL2
 {
@@ -21,7 +22,7 @@ namespace Ryujinx.Headless.SDL2
         private long _lastCursorMoveTime;
 
         public bool[] PressedButtons { get; }
-        public Vector2 CurrentPosition { get; private set; }
+        public Vector2[] CurrentPosition => _activeTouches.Values.ToArray();
         public Vector2 Scroll { get; private set; }
         public Size ClientSize;
 
@@ -65,12 +66,6 @@ namespace Ryujinx.Headless.SDL2
                 var touch = _activeTouches.Values.GetEnumerator();
                 touch.MoveNext(); 
                 Vector2 position = touch.Current;
-
-                if (CurrentPosition != position)
-                {
-                    CurrentPosition = position;
-                    _lastCursorMoveTime = Stopwatch.GetTimestamp();
-                }
             }
 
             CheckIdle();
@@ -109,7 +104,7 @@ namespace Ryujinx.Headless.SDL2
             ClientSize = new Size(width, height);
         }
 
-        public bool IsButtonPressed(MouseButton button)
+        public bool IsAnyPressed(MouseButton button)
         {
             if (_activeTouches.Count > 0)
             {

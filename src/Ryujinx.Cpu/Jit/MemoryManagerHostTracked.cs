@@ -433,7 +433,7 @@ namespace Ryujinx.Cpu.Jit
             return Math.Min(contiguousSize, size);
         }
 
-        private (MemoryBlock, ulong, ulong) GetMemoryOffsetAndSize(ulong va, ulong size)
+        public (MemoryBlock, ulong, ulong) GetMemoryOffsetAndSize(ulong va, ulong size)
         {
             Ryujinx.Cpu.Jit.HostTracked.PrivateRange privateRange = _addressSpace.GetFirstPrivateAllocation(va, size, out ulong nextVa);
 

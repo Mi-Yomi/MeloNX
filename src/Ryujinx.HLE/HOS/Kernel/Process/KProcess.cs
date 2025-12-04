@@ -186,7 +186,8 @@ namespace Ryujinx.HLE.HOS.Kernel.Process
             KResourceLimit resourceLimit,
             MemoryRegion memRegion,
             IProcessContextFactory contextFactory,
-            ThreadStart customThreadStart = null)
+            ThreadStart customThreadStart = null,
+            ulong entrypointOffset = 0UL)
         {
             ResourceLimit = resourceLimit;
             _memRegion = memRegion;
@@ -294,6 +295,8 @@ namespace Ryujinx.HLE.HOS.Kernel.Process
             {
                 CleanUpForError();
             }
+
+            _entrypoint += entrypointOffset;
 
             return result;
         }

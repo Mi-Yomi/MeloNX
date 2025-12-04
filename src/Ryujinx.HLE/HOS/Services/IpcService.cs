@@ -3,6 +3,7 @@ using Ryujinx.HLE.Exceptions;
 using Ryujinx.HLE.HOS.Ipc;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -11,9 +12,6 @@ namespace Ryujinx.HLE.HOS.Services
 {
     abstract class IpcService
     {
-        public IReadOnlyDictionary<int, MethodInfo> CmifCommands { get; }
-        public IReadOnlyDictionary<int, MethodInfo> TipcCommands { get; }
-
         public ServerBase Server { get; private set; }
 
         private IpcService _parent;
@@ -23,20 +21,6 @@ namespace Ryujinx.HLE.HOS.Services
 
         public IpcService(ServerBase server = null)
         {
-            CmifCommands = typeof(IpcService).Assembly.GetTypes()
-                .Where(type => type == GetType())
-                .SelectMany(type => type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public))
-                .SelectMany(methodInfo => methodInfo.GetCustomAttributes(typeof(CommandCmifAttribute))
-                .Select(command => (((CommandCmifAttribute)command).Id, methodInfo)))
-                .ToDictionary(command => command.Id, command => command.methodInfo);
-
-            TipcCommands = typeof(IpcService).Assembly.GetTypes()
-                .Where(type => type == GetType())
-                .SelectMany(type => type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public))
-                .SelectMany(methodInfo => methodInfo.GetCustomAttributes(typeof(CommandTipcAttribute))
-                .Select(command => (((CommandTipcAttribute)command).Id, methodInfo)))
-                .ToDictionary(command => command.Id, command => command.methodInfo);
-
             Server = server;
 
             _parent = this;
@@ -60,6 +44,49 @@ namespace Ryujinx.HLE.HOS.Services
         {
             _isDomain = false;
         }
+
+        protected virtual ResultCode InvokeCmifMethod(int id, ServiceCtx context)
+        {
+            if (!context.Device.Configuration.IgnoreMissingServices)
+            {
+                string dbgMessage = $"{this.GetType().FullName}: {id}";
+
+                throw new ServiceNotImplementedException(this, context, dbgMessage);
+            }
+
+            string serviceName = (this is not DummyService dummyService)
+                ? this.GetType().FullName
+                : dummyService.ServiceName;
+
+            Logger.Warning?.Print(LogClass.KernelIpc, $"Missing service {serviceName}: {id} ignored");
+
+            return ResultCode.Success;
+        }
+
+        public virtual int CmifCommandIdByMethodName(string name) => -1;
+        
+        protected virtual ResultCode InvokeTipcMethod(int id, ServiceCtx context)
+        {
+            if (!context.Device.Configuration.IgnoreMissingServices)
+            {
+                string dbgMessage = $"{this.GetType().FullName}: {id}";
+
+                throw new ServiceNotImplementedException(this, context, dbgMessage);
+            }
+
+            string serviceName = (this is not DummyService dummyService)
+                ? this.GetType().FullName
+                : dummyService.ServiceName;
+
+            Logger.Warning?.Print(LogClass.KernelIpc, $"Missing service {serviceName}: {id} ignored");
+
+            return ResultCode.Success;
+        }
+
+        public virtual int TipcCommandIdByMethodName(string name) => -1;
+
+        protected void LogInvoke(string name)
+            => Logger.Trace?.Print(LogClass.KernelIpc, $"{this.GetType().Name}: {name}");
 
         public void CallCmifMethod(ServiceCtx context)
         {
@@ -111,98 +138,39 @@ namespace Ryujinx.HLE.HOS.Services
 #pragma warning restore IDE0059
             int commandId = (int)context.RequestData.ReadInt64();
 
-            bool serviceExists = service.CmifCommands.TryGetValue(commandId, out MethodInfo processRequest);
+            context.ResponseData.BaseStream.Seek(_isDomain ? 0x20 : 0x10, SeekOrigin.Begin);
 
-            if (context.Device.Configuration.IgnoreMissingServices || serviceExists)
+            ResultCode result = service.InvokeCmifMethod(commandId, context);
+
+            if (_isDomain)
             {
-                ResultCode result = ResultCode.Success;
-
-                context.ResponseData.BaseStream.Seek(_isDomain ? 0x20 : 0x10, SeekOrigin.Begin);
-
-                if (serviceExists)
+                foreach (int id in context.Response.ObjectIds)
                 {
-                    Logger.Trace?.Print(LogClass.KernelIpc, $"{service.GetType().Name}: {processRequest.Name}");
-                    
-                        
-                    result = (ResultCode)processRequest.Invoke(service, new object[] { context });
-                }
-                else
-                {
-                    string dbgMessage = $"{service.GetType().FullName}: {commandId}";
-
-                    string serviceName = (service is not DummyService dummyService) ? service.GetType().FullName : dummyService.ServiceName;
-
-                    var service2 = new ServiceNotImplementedException(service, context, dbgMessage);
-
-                    Logger.Warning?.Print(LogClass.KernelIpc, $"Missing service {serviceName}: {commandId} ignored, service call details: {Environment.NewLine}{service2.Message}");
+                    context.ResponseData.Write(id);
                 }
 
-                if (_isDomain)
-                {
-                    foreach (int id in context.Response.ObjectIds)
-                    {
-                        context.ResponseData.Write(id);
-                    }
+                context.ResponseData.BaseStream.Seek(0, SeekOrigin.Begin);
 
-                    context.ResponseData.BaseStream.Seek(0, SeekOrigin.Begin);
-
-                    context.ResponseData.Write(context.Response.ObjectIds.Count);
-                }
-
-                context.ResponseData.BaseStream.Seek(_isDomain ? 0x10 : 0, SeekOrigin.Begin);
-
-                context.ResponseData.Write(IpcMagic.Sfco);
-                context.ResponseData.Write((long)result);
+                context.ResponseData.Write(context.Response.ObjectIds.Count);
             }
-            else
-            {
-                string dbgMessage = $"{service.GetType().FullName}: {commandId}";
-                var service2 = new ServiceNotImplementedException(service, context, dbgMessage);
 
-                Logger.Warning?.Print(LogClass.KernelIpc, $"Missing service {dbgMessage} ignored, service call details: {Environment.NewLine}{service2.Message}");
+            context.ResponseData.BaseStream.Seek(_isDomain ? 0x10 : 0, SeekOrigin.Begin);
 
-                throw service2;
-            }
+            context.ResponseData.Write(IpcMagic.Sfco);
+            context.ResponseData.Write((long)result);
         }
 
         public void CallTipcMethod(ServiceCtx context)
         {
             int commandId = (int)context.Request.Type - 0x10;
 
-            bool serviceExists = TipcCommands.TryGetValue(commandId, out MethodInfo processRequest);
+            context.ResponseData.BaseStream.Seek(0x4, SeekOrigin.Begin);
 
-            if (context.Device.Configuration.IgnoreMissingServices || serviceExists)
-            {
-                ResultCode result = ResultCode.Success;
+            ResultCode result = InvokeTipcMethod(commandId, context);
 
-                context.ResponseData.BaseStream.Seek(0x4, SeekOrigin.Begin);
+            context.ResponseData.BaseStream.Seek(0, SeekOrigin.Begin);
 
-                if (serviceExists)
-                {
-                    Logger.Debug?.Print(LogClass.KernelIpc, $"{GetType().Name}: {processRequest.Name}");
-
-                    result = (ResultCode)processRequest.Invoke(this, new object[] { context });
-                }
-                else
-                {
-                    string serviceName;
-
-
-                    serviceName = (this is not DummyService dummyService) ? GetType().FullName : dummyService.ServiceName;
-
-                    Logger.Warning?.Print(LogClass.KernelIpc, $"Missing service {serviceName}: {commandId} ignored");
-                }
-
-                context.ResponseData.BaseStream.Seek(0, SeekOrigin.Begin);
-
-                context.ResponseData.Write((uint)result);
-            }
-            else
-            {
-                string dbgMessage = $"{GetType().FullName}: {commandId}";
-
-                throw new ServiceNotImplementedException(this, context, dbgMessage);
-            }
+            context.ResponseData.Write((uint)result);
         }
 
         protected void MakeObject(ServiceCtx context, IpcService obj)

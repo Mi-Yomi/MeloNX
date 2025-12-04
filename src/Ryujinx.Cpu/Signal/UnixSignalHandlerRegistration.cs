@@ -75,9 +75,64 @@ namespace Ryujinx.Cpu.Signal
             return old;
         }
 
+        /// <summary>
+        /// Registers a signal handler for the specified signal number.
+        /// </summary>
+        /// <param name="signal">The signal number to register the handler for</param>
+        /// <param name="action">Pointer to the signal handler function</param>
+        /// <returns>The previous SigAction for the specified signal</returns>
+        public static SigAction RegisterSignalHandler(int signal, IntPtr action)
+        {
+            SigAction sig = new()
+            {
+                sa_handler = action,
+                sa_flags = SA_SIGINFO,
+            };
+
+            sigemptyset(ref sig.sa_mask);
+
+            int result = sigaction(signal, ref sig, out SigAction old);
+
+            if (result != 0)
+            {
+                throw new InvalidOperationException($"Could not register signal handler for signal {signal}. Error: {result}");
+            }
+
+            return old;
+        }
+
+        /// <summary>
+        /// Gets the current signal handler for the specified signal number.
+        /// </summary>
+        /// <param name="signal">The signal number to query</param>
+        /// <returns>The current SigAction for the specified signal</returns>
+        public static SigAction GetSignalHandler(int signal)
+        {
+            int result = sigaction(signal, IntPtr.Zero, out SigAction old);
+
+            if (result != 0)
+            {
+                throw new InvalidOperationException($"Could not get signal handler for signal {signal}. Error: {result}");
+            }
+
+            return old;
+        }
+
+        /// <summary>
+        /// Restores a previously saved signal handler for the specified signal.
+        /// </summary>
+        /// <param name="signal">The signal number to restore the handler for</param>
+        /// <param name="oldAction">The SigAction to restore</param>
+        /// <returns>True if successful, false otherwise</returns>
+        public static bool RestoreSignalHandler(int signal, SigAction oldAction)
+        {
+            return sigaction(signal, ref oldAction, out SigAction _) == 0;
+        }
+
         public static bool RestoreExceptionHandler(SigAction oldAction)
         {
-            return sigaction(SIGSEGV, ref oldAction, out SigAction _) == 0 && (!OperatingSystem.IsMacOS() || OperatingSystem.IsIOS() || sigaction(SIGBUS, ref oldAction, out SigAction _) == 0);
+            return sigaction(SIGSEGV, ref oldAction, out SigAction _) == 0 && 
+                   (!OperatingSystem.IsMacOS() || OperatingSystem.IsIOS() || sigaction(SIGBUS, ref oldAction, out SigAction _) == 0);
         }
     }
 }

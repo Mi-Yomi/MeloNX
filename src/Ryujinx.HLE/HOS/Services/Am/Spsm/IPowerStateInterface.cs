@@ -1,7 +1,7 @@
 namespace Ryujinx.HLE.HOS.Services.Am.Spsm
 {
     [Service("spsm")]
-    class IPowerStateInterface : IpcService
+    partial class IPowerStateInterface : IpcService
     {
         public IPowerStateInterface(ServiceCtx context) { }
     }

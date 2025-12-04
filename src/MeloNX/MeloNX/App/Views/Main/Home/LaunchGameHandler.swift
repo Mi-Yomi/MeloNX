@@ -14,6 +14,7 @@ class LaunchGameHandler: ObservableObject {
     @Published var profileSelected = false
     @Published var showApp: Bool = true
     @Published var isPortrait: Bool = true
+    static var succeededJIT: Bool = true
     @ObservedObject private var ryujinx = Ryujinx.shared
     @ObservedObject private var nativeSettings = NativeSettingsManager.shared
     @ObservedObject private var settingsManager = SettingsManager.shared
@@ -91,6 +92,8 @@ class LaunchGameHandler: ObservableObject {
         
         config.inputids.isEmpty ? config.inputids.append("0") : ()
         
+        // LogCapture.shared.startCapturing()
+        
         do {
             try ryujinx.start(with: config)
         } catch {
@@ -113,7 +116,7 @@ class LaunchGameHandler: ObservableObject {
         
         if cool {
             setenv("DUAL_MAPPED_JIT", "1", 1)
-            RyujinxBridge.initialize_dualmapped()
+            Self.succeededJIT = RyujinxBridge.initialize_dualmapped()
         } else {
             setenv("DUAL_MAPPED_JIT", "0", 1)
         }

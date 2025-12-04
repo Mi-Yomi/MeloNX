@@ -11,13 +11,18 @@ import UIKit
 import GameController
 
 class NativeController: BaseController {
-    override init(nativeController: GCController?) {
-        super.init(nativeController: nativeController)
+    override init(nativeController: GCController?, id: UnsafeMutableRawPointer? = nil) {
+        super.init(nativeController: nativeController, id: id)
         setupNativeController()
     }
     
-    func setupNewNativeController(_ newNativeController: GCController?) {
+    func setupNewNativeController(_ newNativeController: GCController?, id id2: UnsafeMutableRawPointer? = nil) {
         self.nativeController = newNativeController
+        
+        if id2 != nativePointer, let id2 {
+            nativePointer = id2
+        }
+        
         setupNativeController()
     }
     

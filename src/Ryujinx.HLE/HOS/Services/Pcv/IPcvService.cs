@@ -1,7 +1,7 @@
 namespace Ryujinx.HLE.HOS.Services.Pcv
 {
     [Service("pcv")]
-    class IPcvService : IpcService
+    partial class IPcvService : IpcService
     {
         public IPcvService(ServiceCtx context) { }
     }

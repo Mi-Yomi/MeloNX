@@ -12,7 +12,6 @@ struct UpdateManagerSheet: View {
     // MARK: - Properties
     @State private var updates: [UpdateItem] = []
     var game: Game?
-    @State private var isSelectingGameUpdate = false
     @State private var jsonURL: URL? = nil
     @Environment(\.dismiss) var dismiss
     
@@ -57,7 +56,7 @@ struct UpdateManagerSheet: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
-                        isSelectingGameUpdate = true
+                        FileImporterManager.shared.importFiles(types: [.item], allowMultiple: false, completion: handleFileImport)
                     } label: {
                         Label("Add Update", systemImage: "plus")
                     }
@@ -67,7 +66,6 @@ struct UpdateManagerSheet: View {
                 loadData()
             }
         }
-        .fileImporter(isPresented: $isSelectingGameUpdate, allowedContentTypes: [.item], onCompletion: handleFileImport)
     }
     
     // MARK: - Views
@@ -230,10 +228,11 @@ struct UpdateManagerSheet: View {
         }
     }
     
-    private func handleFileImport(result: Result<URL, Error>) {
+    private func handleFileImport(result: Result<[URL], Error>) {
         switch result {
-        case .success(let selectedURL):
+        case .success(let url):
             guard let game = game,
+                  let selectedURL = url.first,
                   selectedURL.startAccessingSecurityScopedResource() else {
                 print("Failed to access security-scoped resource")
                 return

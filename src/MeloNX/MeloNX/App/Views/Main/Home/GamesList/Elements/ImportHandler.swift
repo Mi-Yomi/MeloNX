@@ -79,14 +79,28 @@ class ImportHandler {
                 let fun = url.startAccessingSecurityScopedResource()
                 let path = url.path
                     
-                Ryujinx.shared.installFirmware(firmwarePath: path)
-                    
+                let (string, isErr) = RyujinxBridge.installFirmware(at: path)
+                
+                if isErr {
+                    showAlert(title: "Installing Firmware Failed", message: string, actions:
+                                [
+                                    (title: "Cancel", style: .cancel, handler: nil)
+                                ]
+                    )
+                } else {
+                    Ryujinx.shared.firmwareversion = string
+                }
+                
                 if fun {
                     url.stopAccessingSecurityScopedResource()
                 }
             }
         case .failure(let error):
-            print(error)
+            showAlert(title: "Installing Firmware Failed", message: error.localizedDescription, actions:
+                        [
+                            (title: "Cancel", style: .cancel, handler: nil)
+                        ]
+            )
         }
     }
     

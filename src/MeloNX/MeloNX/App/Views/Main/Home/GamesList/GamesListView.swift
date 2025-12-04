@@ -50,11 +50,11 @@ extension UTType {
 struct GamesListView: View {
     @EnvironmentObject var gameHandler: LaunchGameHandler
     @StateObject var perGameSettings = PerGameSettingsManager.shared
+    @StateObject var nativeSettings = NativeSettingsManager.shared
     @State var gameRequirements: [GameRequirements] = []
     @EnvironmentObject var ryujinx: Ryujinx
     @Environment(\.gameNamespace) var namespace
     @State var showingAccounts = false
-    @AppStorage("enableGridLayout") private var gridLayout: Bool = false
     @AppStorage("legacyUI") private var legacyUI: Bool = false
     @State var activeSheet: ActiveSheet?
     @State var controllerEditor: Game?
@@ -78,11 +78,18 @@ struct GamesListView: View {
     var body: some View {
         iOSNav {
             ScrollView {
-                if gridLayout {
-                    let columns = [
-                        GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)
-                    ]
-                    LazyVGrid(columns: columns, spacing: 16) {
+                if nativeSettings.cardLayout(CardType.card).value != .list {
+                    var columns: [GridItem] {
+                        switch nativeSettings.cardLayout(CardType.card).value {
+                        case .card, .compactCard: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)]
+                        case .compactCardNoBackground: [GridItem(.adaptive(minimum: 150, maximum: 180), spacing: 16)]
+                        case .compactCardSmall: [GridItem(.adaptive(minimum: 105, maximum: 120), spacing: 16)]
+                        default: [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 16)]
+                        }
+                    }
+                    
+                    
+                    LazyVGrid(columns: columns, spacing: columns.first?.spacing ?? 16) {
                         ForEach(ryujinx.games) { game in
                             GameCardView(
                                 game: game,

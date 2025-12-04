@@ -116,7 +116,7 @@ namespace Ryujinx.Memory
         /// </summary>
         public void Detach()
         {
-            if (_dualMappedAllocator != null && _dualMappedAllocator.hasTXM)
+            if (_dualMappedAllocator != null && DualMappedJitAllocator.hasTXM)
             {
                 DualMappedJitAllocator.BreakJITDetach();
             }

@@ -4,7 +4,7 @@ using System;
 
 namespace Ryujinx.HLE.HOS.Services.Am.AppletAE.AllSystemAppletProxiesService.LibraryAppletProxy
 {
-    class ILibraryAppletSelfAccessor : IpcService
+    partial class ILibraryAppletSelfAccessor : IpcService
     {
         [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
         public static extern void TriggerCallback(string cIdentifier);

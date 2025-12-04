@@ -61,7 +61,7 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
             _layers = new Dictionary<long, Layer>();
             RenderLayerId = 0;
 
-            _composerThread = new Thread(HandleComposition)
+            _composerThread = new Thread(HandleComposition, 4096 * 2)
             {
                 Name = "SurfaceFlinger.Composer",
                 Priority = ThreadPriority.AboveNormal

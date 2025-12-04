@@ -23,7 +23,6 @@ class BaseController: Equatable, Identifiable {
     
     
     // Motion
-    let mm = CMMotionManager()
     var orientation: UIDeviceOrientation =
         UIDevice.current.orientation == .unknown ? .landscapeLeft : UIDevice.current.orientation
     let motionOperation = OperationQueue()
@@ -36,14 +35,14 @@ class BaseController: Equatable, Identifiable {
 
     // queue for controller input :3
     var inputQueue: DispatchQueue
-    // var motionQueue: DispatchQueue
+    var motionQueue: DispatchQueue
     
-    private var usesDeviceHandlers: Bool { virtual ? true : (name.lowercased() == "Joy-Con (l/R)".lowercased() ||
+    var usesDeviceHandlers: Bool { virtual ? true : (name.lowercased() == "Joy-Con (l/R)".lowercased() ||
                                                       name.lowercased().hasSuffix("backbone") ||
                                                       name.lowercased() == "backbone one") }
 
     
-    init(nativeController: GCController?) {
+    init(nativeController: GCController?, id: UnsafeMutableRawPointer? = nil) {
         self.nativeController = nativeController
         self.virtual = nativeController == nil
         self.type = virtual ? .joyconPair : .proController
@@ -57,22 +56,29 @@ class BaseController: Equatable, Identifiable {
         let motionLabel = queueLabel + ".motion"
         
         self.inputQueue = DispatchQueue(label: queueLabel, qos: .userInteractive)
-        // self.motionQueue = DispatchQueue(label: motionLabel, qos: .background)
+        self.motionQueue = DispatchQueue(label: motionLabel, qos: .background)
         
-        self.nativePointer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        if let providedId = id {
+            self.nativePointer = providedId
+        } else {
+            self.nativePointer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+        }
         
         self.id = setupHandheldController() ?? identifier
     }
 
     
-    private func setupHandheldController() -> String? {
-        if !id.isEmpty {
+    private func setupHandheldController(_ id2: UnsafeMutableRawPointer? = nil) -> String? {
+        if id2 != nativePointer, let id2 {
+            nativePointer = id2
+        }
+        
+        
+        if !id.isEmpty, id == generateGamepadId() {
             return id
         }
         
         let id = getGamePadId()
-        
-        print("id :3 \(id)")
         
         RegisterCallbackWithData("rumble-\(id ?? UUID().uuidString)") { data in 
             if let rumbleData = RumbleData(data: data ?? Data()) {
@@ -134,8 +140,6 @@ class BaseController: Equatable, Identifiable {
     }
     
     func generateGamepadId() -> String? {
-        self.nativePointer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
-        
         let pointerInt64 = Int64(bitPattern: UInt64(UInt(bitPattern: self.nativePointer)))
         
         let hexString = String(pointerInt64, radix: 16, uppercase: true)

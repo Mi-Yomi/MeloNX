@@ -4,6 +4,7 @@ using Ryujinx.Cpu;
 using Ryujinx.Cpu.AppleHv;
 using Ryujinx.Cpu.Jit;
 using Ryujinx.Cpu.LightningJit;
+using Ryujinx.Cpu.Nce;
 using Ryujinx.Graphics.Gpu;
 using Ryujinx.HLE.HOS.Kernel;
 using Ryujinx.HLE.HOS.Kernel.Process;
@@ -43,6 +44,17 @@ namespace Ryujinx.HLE.HOS
             _codeSize = codeSize;
         }
 
+        public static NceCpuCodePatch CreateCodePatchForNce(KernelContext context, bool for64Bit, ReadOnlySpan<byte> textSection)
+        {
+            return null;
+            if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64 && for64Bit)
+            {
+                return NcePatcher.CreatePatch(textSection);
+            }
+
+            return null;
+        }
+
         public IProcessContext Create(KernelContext context, ulong pid, ulong addressSpaceSize, InvalidAccessHandler invalidAccessHandler, bool for64Bit)
         {
             IArmProcessContext processContext;
@@ -67,7 +79,7 @@ namespace Ryujinx.HLE.HOS
                 }
 
                 ICpuEngine cpuEngine = OperatingSystem.IsIOS() //isArm64Host && (mode == MemoryManagerMode.HostMapped || mode == MemoryManagerMode.HostMappedUnsafe)
-                    ? new LightningJitEngine(_tickSource)
+                    ? new LightningJitEngine(_tickSource) // new NceEngine(_tickSource)
                     : isArm64Host && (mode == MemoryManagerMode.HostMapped || mode == MemoryManagerMode.HostMappedUnsafe) ? new LightningJitEngine(_tickSource) : new JitEngine(_tickSource);
 
                 AddressSpace addressSpace = null;

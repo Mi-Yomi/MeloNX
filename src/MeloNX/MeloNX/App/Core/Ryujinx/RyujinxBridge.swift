@@ -12,7 +12,7 @@ final class RyujinxBridge {
         SN_initialize()
     }
     
-    static func initialize_dualmapped() {
+    static func initialize_dualmapped() -> Bool {
         SN_initialize_dualmapped()
     }
 
@@ -29,12 +29,19 @@ final class RyujinxBridge {
         }
     }
 
-    static func installFirmware(at path: String) {
-        path.withCString { SN_install_firmware($0) }
+    static func installFirmware(at path: String) -> (string: String, isError: Bool) {
+        guard let firmware = (path.withCString { SN_install_firmware($0) }) else { return ("Failed to get error.", true) }
+        var string = String(cString: firmware)
+        let isErr = string.hasSuffix("✖")
+        string.removeLast()
+        defer { SN_free_firmware_version(firmware) }
+        return (string, isErr)
     }
 
     static var installedFirmwareVersion: String {
-        String(cString: SN_installed_firmware_version())
+        guard let firmware = SN_installed_firmware_version() else { return "" }
+        defer { SN_free_firmware_version(firmware) }
+        return String(cString: firmware)
     }
 
     static func pauseEmulation(_ shouldPause: Bool) {
@@ -141,6 +148,8 @@ fileprivate extension Array where Element == String {
     }
 }
 
+
+
 // SN stands for silgen name because functions with the same definition like initialize and RyujinxBridge.initialize it kept pointing it to itself.
 // could've just done MeloNX.initialize but meh
 @_silgen_name("get_game_info")
@@ -150,7 +159,7 @@ func SN_get_game_info(_ arg0: Int32, _ arg1: UnsafeMutablePointer<CChar>!) -> Ga
 func SN_get_dlc_nca_list(_ titleIdPtr: UnsafePointer<CChar>!, _ pathPtr: UnsafePointer<CChar>!) -> DlcNcaList
 
 @_silgen_name("install_firmware")
-func SN_install_firmware(_ inputPtr: UnsafePointer<CChar>!)
+func SN_install_firmware(_ inputPtr: UnsafePointer<CChar>!) -> UnsafeMutablePointer<CChar>!
 
 @_silgen_name("installed_firmware_version")
 func SN_installed_firmware_version() -> UnsafeMutablePointer<CChar>!
@@ -168,7 +177,7 @@ func SN_stop_emulation()
 func SN_initialize()
 
 @_silgen_name("initialize-dualmapped")
-func SN_initialize_dualmapped()
+func SN_initialize_dualmapped() -> Bool
 
 @_silgen_name("main_ryujinx_sdl")
 func SN_main_ryujinx_sdl(_ argc: Int32, _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>!) -> Int32
@@ -220,3 +229,9 @@ func SN_set_gamepad_stick_axis(_ idPtr: UnsafeMutableRawPointer?, _ stickId: Int
 
 @_silgen_name("set_gamepad_motion_axis")
 func SN_set_gamepad_motion_axis(_ idPtr: UnsafeMutableRawPointer?, _ motionType: Int32, _ x: Float, _ y: Float, _ z: Float)
+
+@_silgen_name("free_game_info")
+func SN_free_game_info(_ gameInfo: GameInfo)
+
+@_silgen_name("free_firmware_version")
+func SN_free_firmware_version(_ gameInfo: UnsafeMutablePointer<CChar>!)

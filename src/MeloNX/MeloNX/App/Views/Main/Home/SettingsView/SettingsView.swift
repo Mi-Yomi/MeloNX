@@ -516,10 +516,10 @@ struct SettingsViewNew: View {
                     .if(!isRegularLayout) { view in
                         view.frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 4)
-                            .pickerStyle(.inline)
+                            .pickerStyle(.menu)
                     }
                     .if(isRegularLayout) { view in
-                        view.pickerStyle(.menu)
+                        view.pickerStyle(.segmented)
                     }
                     .onAppear() {
                         oldView = true
@@ -1019,8 +1019,30 @@ struct SettingsViewNew: View {
                 
                 SettingsToggle(isOn: nativeSettingsManager.disableTouch.projectedValue, icon: "rectangle.and.hand.point.up.left.filled", label: "Disable Touch")
                 Divider()
-                SettingsToggle(isOn: nativeSettingsManager.enableGridLayout(true).projectedValue, icon: "rectangle.portrait", label: "Games List Grid")
+                
+                VStack(alignment: .leading, spacing: 12) {
+                    labelWithIcon("Library View", iconName: "list.bullet")
+                        .font(.headline)
+                    
+                    Picker(selection: nativeSettingsManager.cardLayout(CardType.card).projectedValue) {
+                        ForEach(CardType.allCases, id: \.self) { type in
+                            Text(type.displayName).tag(type)
+                        }
+                    } label: {
+                        EmptyView()
+                    }
+                    .if(!isRegularLayout) { view in
+                        view.frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 4)
+                            .pickerStyle(.menu)
+                    }
+                    .if(isRegularLayout) { view in
+                        view.pickerStyle(.segmented)
+                    }
+                }
+                
                 Divider()
+                
                 SettingsToggle(isOn: nativeSettingsManager.showProfileonGame.projectedValue, icon: "person.3", label: "Select Profile on Game Launch")
                 Divider()
                 

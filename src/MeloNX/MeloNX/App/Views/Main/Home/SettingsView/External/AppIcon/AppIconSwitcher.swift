@@ -16,11 +16,7 @@ struct AppIcon: Identifiable, Equatable {
 
 struct AppIconSwitcherView: View {
     @Environment(\.dismiss) private var dismiss
-    @State var appIcons: [AppIcon] = [
-        AppIcon(iconNames: ["Default": UIImage.appIcon(), "Dark Mode": "DarkMode", "Round": "RoundAppIcon"], creator: "CycloKid"),
-        AppIcon(iconNames: ["Pixel Default": "PixelAppIcon", "Pixel Round": "PixelRoundAppIcon"], creator: "Nobody"),
-        AppIcon(iconNames: ["\"UwU\"": "uwuAppIcon"], creator: "𝒰𝓃𝓀𝓃𝑜𝓌𝓃")
-    ]
+    @State var appIcons: [AppIcon] = []
     
     @State var columns: [GridItem] = [
         GridItem(.flexible(), spacing: 20),
@@ -143,19 +139,24 @@ struct AppIconSwitcherView: View {
     }
     
     private func setupColumns() {
-        if #available(iOS 18.5, *) {
-            //
+        if #available(iOS 19, *) {
+            appIcons = [
+                AppIcon(iconNames: ["Default": UIImage.appIcon(), "Round": "RoundAppIcon"], creator: "CycloKid (Liquid Glass by Transistor)"),
+                AppIcon(iconNames: ["Pixel Default": "PixelAppIcon", "Pixel Round": "PixelRoundAppIcon"], creator: "Nobody (Liquid Glass by Transistor)"),
+                AppIcon(iconNames: ["\"UwU\"": "uwuAppIcon"], creator: "𝒰𝓃𝓀𝓃𝑜𝓌𝓃 (Liquid Glass by Transistor)"),
+            ]
         } else {
-            if checkforOld() {
-                if let value = appIcons[0].iconNames.removeValue(forKey: "Round") {
-                    appIcons[0].iconNames["PomeloNX"] = value
-                }
-                
-                if let value = appIcons[1].iconNames.removeValue(forKey: "Pixel Round") {
-                    appIcons[1].iconNames["Pixel PomeloNX"] = value
-                }
-            }
+            appIcons = [
+                AppIcon(iconNames: ["Default": UIImage.appIcon(), "Dark Mode": "DarkMode", "Round": "RoundAppIcon"], creator: "CycloKid"),
+                AppIcon(iconNames: ["Pixel Default": "PixelAppIcon", "Pixel Round": "PixelRoundAppIcon"], creator: "Nobody"),
+                AppIcon(iconNames: ["\"UwU\"": "uwuAppIcon"], creator: "𝒰𝓃𝓀𝓃𝑜𝓌𝓃"),
+            ]
         }
+        
+        appIcons.append(contentsOf: [
+            AppIcon(iconNames: [(isAvailable(iOS: 19) ? "Clear" : "Clear (Liquid Glass)"): "Clear", "Mel-o-Lantern": "Mel-o-Lantern", "MeloNXmas": "MeloNXmas", "MeluckyNX \n (Saint Patrick's Day)": "MeluckyNX"], creator: "Transistor"),
+            AppIcon(iconNames: ["MellowSkyNX": "MellowSkyNX"], creator: "Sky (@dootskyre)")
+        ])
     }
     
     private func getCurrentIconName() {
@@ -196,6 +197,12 @@ struct AppIconSwitcherView: View {
             }
         }
     }
+    
+    func isAvailable(iOS version: Int) -> Bool {
+        let current = ProcessInfo.processInfo.operatingSystemVersion
+        return current.majorVersion >= version
+    }
+
 }
 
 struct AppIconView: View {
@@ -204,11 +211,21 @@ struct AppIconView: View {
     var body: some View {
         VStack(spacing: 7) {
             ZStack {
-                Image(uiImage: UIImage(named: app.0)!)
-                    .resizable()
-                    .cornerRadius(15)
-                    .frame(width: 62, height: 62)
-                    .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                if let iconImage = UIImage(named: app.0) {
+                    Image(uiImage: iconImage)
+                        .resizable()
+                        .cornerRadius(15)
+                        .frame(width: 62, height: 62)
+                        .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
+                } else {
+                    RoundedRectangle(cornerRadius: 15)
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: 62, height: 62)
+                        .overlay(
+                            Image(systemName: "app.dashed")
+                                .foregroundColor(.gray)
+                        )
+                }
             }
             
             Text(app.1)
@@ -216,12 +233,11 @@ struct AppIconView: View {
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .shadow(color: .black.opacity(0.2), radius: 2, x: 0, y: 1)
-                .frame(width: 100)
-                .lineLimit(1)
+                .frame(width: app.1.contains("\n") ? 150 : 100)
+                .lineLimit(app.1.contains("\n") ? 2 : 1)
         }
     }
 }
-
 extension UIImage {
     static func appIcon() -> String {
         if let icons = Bundle.main.infoDictionary?["CFBundleIcons"] as? [String: Any],

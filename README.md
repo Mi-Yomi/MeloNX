@@ -19,7 +19,6 @@
 
 MeloNX works on iPhone 11 (XS/XR may work but can have issues) and later and iPad 8th Gen and later. Check out the Compatibility on the <a href="https://melonx.org/compatibility/" target="_blank">website</a>.
 
-
 # Usage
 
 ## Paid Certificates are **NOT** supported and we will not give any help when using them.
@@ -36,7 +35,7 @@ MeloNX works on iPhone 11 (XS/XR may work but can have issues) and later and iPa
 ## Discord Server
 
 We have a discord server!
-  - https://discord.gg/melonx
+  - https://discord.gg/HjCDPTpC3W
 
 ## How to install
 
@@ -66,9 +65,41 @@ Download and install MeloNX using your preferred Apple ID sideloader:
 #### 5. Enable JIT
   - Enable JIT using your preferred method. We recommend [StikDebug](https://apps.apple.com/us/app/stikdebug/id6744045754).
 
+### Free Developer Account (PlumeImpactor)
+
+>  [SideStore](https://sidestore.io/) is recommended for an on-device Sideloader, and should be installed before performing this install.
+
+#### 1. Sideload Application
+Download and install MeloNX using [PlumeImpactor](https://github.com/khcrysalis/PlumeImpactor/releases) on a computer.
+  - [Download **MeloNX** From Releases](https://git.ryujinx.app/melonx/emu/-/releases)
+  - Open PlumeImpactor > Click Settings > Click Login
+  - Login with the same Apple ID you are using for SideStore (or AltStore). 
+  - Import the MeloNX .ipa you downloaded earlier.
+  - Plug in your iDevice.
+  - Select your iDevice from the dropdown at the top of the window.
+  - Click Install.
+
+#### 2. Load Into SideStore
+To have MeloNX show inside SideStore (or AltStore), You must re-install it:
+  - Open **SideStore** on your iDevice
+  - Select the **My Apps** tab > Tap the **+** button.
+  - Select the **MeloNX** .ipa (You may need to download it again.)
+  - Wait for it to Sideload, then it should show up Inside **SideStore**.
+  - Now You can Refresh **MeloNX** and Update it without needing a computer.
+
+#### 4. Setup Files
+  - Add Encryption Keys and Firmware using the file picker inside MeloNX
+    - If having Issues installing firmware:
+      - You can Install firmware and keys from **Ryujinx Desktop** (or forks).  
+      - Copy the **bis** and **system** folders  
+
+#### 5. Enable JIT
+  - Enable JIT using your preferred method. We recommend [StikDebug](https://apps.apple.com/us/app/stikdebug/id6744045754).
 
    
-### Free Developer Account (Entitlement)
+### Free Developer Account (On-Device)
+
+>  [SideStore](https://sidestore.io/) is recommended to Sideload MeloNX.
 
 ***The Entitlement App is **NOT** needed for AltStore Classic***
   - You may skip Step 2 and Step 3
@@ -100,57 +131,6 @@ Download and install both apps using your preferred **APPLE ID** sideloader:
 #### 5. Enable JIT
   - Enable JIT using your preferred method. We recommend [StikDebug](https://apps.apple.com/us/app/stikdebug/id6744045754).
 
-### Free Developer Account (Xcode, UNTESTED)
-
-#### 1. Sideload Applications
-Download and install MeloNX using your preferred **APPLE ID** sideloader:
-  - **MeloNX**: [Download from Releases](https://git.ryujinx.app/melonx/emu/-/releases)
-
-#### 2. Enable Memory Entitlement
-  - Open [Xcode](https://apps.apple.com/us/app/xcode/id497799835?mt=12/). 
-  - Create a new Project (File > New > Project)
-  - Select iOS > App
-  - Set the name to whatever you want (anything can be random)
-  - Click the project (On the Left, The Blue Icon with the name of your project next to it)
-  - Click the Signing and Capabilities tab on the right.
-  - Under Team, Login to the same account you used for Sideloading MeloNX.
-  - Open SideStore on your device > My Apps tab > View App Ids
-  - In Xcode, Set Bundle Identifier to the text below MeloNX (e.g., "com.stossy11.MeloNX.XXXXXX")
-  - Top Left click "+ Capability" then type in "Increased Memory Limit" and add it 
-
-#### 3. Reinstall MeloNX
-  - Delete existing MeloNX installation
-  - Sideload MeloNX again
-  - Verify **Increased Memory Limit** is enabled in app
-
-#### 4. Setup Files
-  - Add Encryption Keys and Firmware using the file picker inside MeloNX
-    - If having Issues installing firmware:
-      - You can Install firmware and keys from **Ryujinx Desktop** (or forks).  
-      - Copy the **bis** and **system** folders  
-
-#### 5. Enable JIT
-  - Enable JIT using your preferred method. We recommend [StikDebug](https://apps.apple.com/us/app/stikdebug/id6744045754).
-
-### TrollStore
-As Said in FAQ:
-> MeloNX is made for iOS 17+, on iOS 15 - 16 MeloNX can be installed but may have issues or not work at all.
-
-#### 1. Install MeloNX 
-  - Use TrollStore to install MeloNX.
-
-#### 2. Setup Files
-  - Add Encryption Keys and Firmware using the file picker inside MeloNX
-    - If having Issues installing firmware:
-      - You can Install firmware and keys from **Ryujinx Desktop** (or forks).  
-      - Copy the **bis** and **system** folders  
-
-
-#### 2. Enable TrollStore JIT
-   - Make sure [URL Scheme is enabled inside of TrollStore](https://github.com/opa334/TrollStore#url-scheme)
-   - Open **Settings** inside **MeloNX**
-   - Under **Misc**, scroll down and enable the **"TrollStore" toggle**
-   - Profit
 
 ### Compile from Source (Xcode)
 
@@ -200,6 +180,21 @@ If having Issues installing firmware (Make sure your keys are installed first)
 - **Configuration**
 
   The emulator has settings for enabling or disabling some logging, remapping controllers, and more.
+
+# Notice
+
+This project does not distribute, include, or endorse any copyrighted or pirated content. The software is provided for legitimate and lawful use.
+
+Users are solely responsible for ensuring that any copyrighted material they use with this software (including, but not limited to, ROMs, cryptographic keys, and firmware) is obtained legally and in accordance with applicable law. The developers disclaim all responsibility for any misuse of the software or for any legal consequences resulting from the use of illegally obtained content.
+
+Any third-party distribution of this emulator bundled with copyrighted content (including, but not limited to, ROMs, cryptographic keys, and firmware) is done without permission and is not associated with orendorsed by this project.
+
+Nintendo Switch is a trademark of Nintendo Co., Ltd.
+Nintendo is a trademark of Nintendo Co., Ltd.
+Pokémon is a trademark of Nintendo/Creatures Inc./Game Freak Inc.
+Animal Crossing is a trademark of Nintendo Co., Ltd.
+
+This project is an independent, third-party work and is not affiliated with, endorsed by, or associated with Nintendo Co., Ltd., any of its subsidiaries, or any other console manufacturer or game and/or game publisher.
 
 # License
 

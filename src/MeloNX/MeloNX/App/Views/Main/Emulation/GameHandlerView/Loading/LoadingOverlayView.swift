@@ -108,6 +108,10 @@ struct LoadingOverlayView: View {
                 return
             }
             
+            if !NativeSettingsManager.shared.showlogsgame.value {
+                // LogCapture.shared.stopCapturing()
+            }
+            
             Task { @MainActor in
                 if current < total - 1 {
                     self.isShaderOrPTC = true

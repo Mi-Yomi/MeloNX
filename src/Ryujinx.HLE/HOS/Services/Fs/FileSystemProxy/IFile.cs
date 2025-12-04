@@ -6,7 +6,7 @@ using Ryujinx.Common;
 
 namespace Ryujinx.HLE.HOS.Services.Fs.FileSystemProxy
 {
-    class IFile : DisposableIpcService
+    partial class IFile : DisposableIpcService
     {
         private SharedRef<LibHac.FsSrv.Sf.IFile> _baseFile;
 

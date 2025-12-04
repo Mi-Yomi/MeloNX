@@ -19,7 +19,7 @@ using System.Runtime.InteropServices;
 
 namespace Ryujinx.HLE.HOS.Services.Ldn.UserServiceCreator
 {
-    class IUserLocalCommunicationService : IpcService, IDisposable
+    partial class IUserLocalCommunicationService : IpcService, IDisposable
     {
         public INetworkClient NetworkClient { get; private set; }
 

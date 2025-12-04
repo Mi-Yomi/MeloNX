@@ -40,7 +40,6 @@ extension Bundle {
             method_exchangeImplementations(originalMethod, swizzledMethod)
             return true
         } else if FileManager.default.fileExists(atPath: Bundle.main.bundleURL.appendingPathComponent("LCAppInfo.plist").path) {
-            print(FileManager.default.fileExists(atPath: Bundle.main.bundleURL.appendingPathComponent("LCAppInfo.plist").path))
             shouldAsCopy = true
             isInLiveContainer = (true, nil, false)
             method_exchangeImplementations(originalMethod, swizzledMethod)
@@ -141,24 +140,23 @@ func swizzleClassMethod(for cls: AnyClass, original: Selector, swizzled: Selecto
 
 
 extension UIDocumentPickerViewController {
-    @objc func hook_initForOpeningContentTypes(_ contentTypes: [UTType], asCopy: Bool) -> UIDocumentPickerViewController {
-        var shouldMultiselect = false
-        if MeloNX.shouldAsCopy, contentTypes.count == 1, contentTypes[0] == .folder {
-            shouldMultiselect = true
+    @objc(hook_initForOpeningContentTypes:asCopy:)
+    func hook_initForOpeningContentTypes(_ contentTypes: [UTType], asCopy: Bool) -> UIDocumentPickerViewController {
+
+        let containsFolder = contentTypes.contains(.folder)
+        let shouldMultiselect = MeloNX.shouldAsCopy && !containsFolder
+
+        let safeAsCopy = containsFolder ? false : asCopy
+
+        let picker = self.hook_initForOpeningContentTypes(contentTypes, asCopy: safeAsCopy)
+
+        if shouldMultiselect {
+            picker.allowsMultipleSelection = true
         }
 
-        let contentTypesNew: [UTType] = [.item, .folder]
-
-        if MeloNX.shouldAsCopy {
-            let picker = self.hook_initForOpeningContentTypes(contentTypesNew, asCopy: true)
-            if shouldMultiselect {
-                picker.allowsMultipleSelection = true
-            }
-            return picker
-        } else {
-            return self.hook_initForOpeningContentTypes(contentTypes, asCopy: asCopy)
-        }
+        return picker
     }
+
 
     @objc func hook_initWithDocumentTypes(_ contentTypes: [String], inMode mode: UIDocumentPickerMode) -> UIDocumentPickerViewController {
         let asCopy = mode != .import
@@ -168,7 +166,8 @@ extension UIDocumentPickerViewController {
 
 
 extension UIDocumentBrowserViewController {
-    @objc func hook_initForOpeningContentTypes(_ contentTypes: [UTType]) -> UIDocumentBrowserViewController {
+    @objc(hook_initForOpeningContentTypes:)
+    func hook_initForOpeningContentTypes(_ contentTypes: [UTType]) -> UIDocumentBrowserViewController {
         if MeloNX.shouldAsCopy {
             let newTypes: [UTType] = [.item, .folder]
             return self.hook_initForOpeningContentTypes(newTypes)

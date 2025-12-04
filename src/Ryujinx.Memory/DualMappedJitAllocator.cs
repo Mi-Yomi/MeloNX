@@ -29,7 +29,7 @@ namespace Ryujinx.Memory
         [DllImport("BreakpointJIT.framework/BreakpointJIT", EntryPoint = "BreakJITDetach")]
         public static extern unsafe void BreakJITDetach();
 
-        public readonly bool hasTXM = Environment.GetEnvironmentVariable("HAS_TXM") == "1"; 
+        static public bool hasTXM => Environment.GetEnvironmentVariable("HAS_TXM") == "1"; 
 
 
         private IntPtr _mmapPtr;

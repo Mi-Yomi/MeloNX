@@ -19,7 +19,7 @@
           "fill-specializations" : [
             {
               "value" : {
-                "solid" : "display-p3:0.09186,0.23901,0.30664,1.00000"
+                "solid" : "display-p3:0.25760,0.47615,1.00000,0.42567"
               }
             },
             {
@@ -42,9 +42,14 @@
         {
           "fill-specializations" : [
             {
+              "value" : {
+                "solid" : "display-p3:1.00000,0.31035,0.24037,0.37789"
+              }
+            },
+            {
               "appearance" : "tinted",
               "value" : {
-                "automatic-gradient" : "extended-gray:0.00000,1.00000"
+                "automatic-gradient" : "display-p3:0.00000,0.00000,0.00000,1.00000"
               }
             }
           ],
@@ -70,10 +75,21 @@
         "kind" : "layer-color",
         "opacity" : 0.2
       },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
-      }
+      "translucency-specializations" : [
+        {
+          "value" : {
+            "enabled" : true,
+            "value" : 1
+          }
+        },
+        {
+          "appearance" : "tinted",
+          "value" : {
+            "enabled" : true,
+            "value" : 0.5
+          }
+        }
+      ]
     },
     {
       "hidden" : false,
@@ -82,10 +98,7 @@
           "fill-specializations" : [
             {
               "value" : {
-                "linear-gradient" : [
-                  "display-p3:0.09961,0.25830,0.45166,1.00000",
-                  "display-p3:0.35738,0.75653,0.86881,1.00000"
-                ]
+                "solid" : "display-p3:0.90186,0.90186,0.90186,0.21905"
               }
             },
             {
@@ -109,10 +122,7 @@
           "fill-specializations" : [
             {
               "value" : {
-                "linear-gradient" : [
-                  "display-p3:0.44287,0.14197,0.10931,1.00000",
-                  "display-p3:0.81152,0.24365,0.17712,1.00000"
-                ]
+                "solid" : "display-p3:0.90186,0.90186,0.90186,0.23561"
               }
             },
             {
@@ -143,10 +153,17 @@
       },
       "shadow" : {
         "kind" : "layer-color",
-        "opacity" : 0.2
+        "opacity" : 1
       },
       "translucency-specializations" : [
         {
+          "value" : {
+            "enabled" : true,
+            "value" : 1
+          }
+        },
+        {
+          "appearance" : "dark",
           "value" : {
             "enabled" : true,
             "value" : 0.5
@@ -168,7 +185,13 @@
           "fill-specializations" : [
             {
               "value" : {
-                "solid" : "display-p3:0.24255,0.24548,0.36670,1.00000"
+                "solid" : "display-p3:0.10520,0.19445,0.40838,0.46267"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "display-p3:0.25760,0.47615,1.00000,0.46267"
               }
             },
             {
@@ -192,7 +215,7 @@
           "fill-specializations" : [
             {
               "value" : {
-                "solid" : "display-p3:0.14026,0.30103,0.09711,1.00000"
+                "solid" : "display-p3:0.77197,0.24097,0.19299,0.73616"
               }
             },
             {
@@ -221,16 +244,34 @@
           0
         ]
       },
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
-      },
+      "shadow-specializations" : [
+        {
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.4
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "neutral",
+            "opacity" : 0.5
+          }
+        }
+      ],
       "specular" : false,
       "translucency-specializations" : [
         {
           "value" : {
             "enabled" : true,
-            "value" : 0.8
+            "value" : 1
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "enabled" : true,
+            "value" : 0.5
           }
         },
         {
@@ -243,23 +284,34 @@
       ]
     },
     {
-      "hidden" : false,
+      "hidden-specializations" : [
+        {
+          "value" : true
+        },
+        {
+          "appearance" : "light",
+          "value" : false
+        }
+      ],
       "layers" : [
         {
           "glass" : false,
-          "hidden-specializations" : [
-            {
-              "value" : true
-            },
-            {
-              "appearance" : "light",
-              "value" : false
-            }
-          ],
-          "image-name" : "Melo Gradient.svg",
-          "name" : "Melo Gradient",
+          "image-name" : "Melo Gradient 2.svg",
+          "name" : "Melo Gradient 2",
           "position" : {
             "scale" : 2.51,
+            "translation-in-points" : [
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "position-specializations" : [
+        {
+          "idiom" : "watchOS",
+          "value" : {
+            "scale" : 1.07,
             "translation-in-points" : [
               0,
               0

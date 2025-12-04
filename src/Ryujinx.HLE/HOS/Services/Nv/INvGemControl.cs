@@ -1,7 +1,7 @@
 namespace Ryujinx.HLE.HOS.Services.Nv
 {
     [Service("nvgem:c")]
-    class INvGemControl : IpcService
+    partial class INvGemControl : IpcService
     {
         public INvGemControl(ServiceCtx context) { }
     }

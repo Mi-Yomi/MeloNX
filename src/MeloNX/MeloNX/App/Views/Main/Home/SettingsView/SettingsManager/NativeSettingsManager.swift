@@ -30,7 +30,6 @@ class NativeSettingsManager: ObservableObject {
         return Setting<T>.getOrCreateSetting(named: member, default: nil, self: self)
     }
     
-    
     func setting<T: Any>(forKey key: String, default defaultValue: T) -> Setting<T> {
         Setting<T>.getOrCreateSetting(named: key, default: defaultValue, self: self)
     }
@@ -63,14 +62,24 @@ class Setting<T: Any>: Hashable, DynamicProperty {
         self.parent = parent
         
         if UserDefaults.standard.object(forKey: name) == nil {
-            UserDefaults.standard.set(defaultAny, forKey: name)
+            self.setInitialValue(defaultAny)
+        }
+    }
+    
+    private func setInitialValue(_ value: T?) {
+        guard let value = value else { return }
+        
+        if isPropertyListCompatible(value) {
+            UserDefaults.standard.set(value, forKey: name)
+        } else if let encoded = encodeToData(value) {
+            UserDefaults.standard.set(encoded, forKey: name)
         }
     }
     
     func binding(default defaultValue: T) -> Binding<T> {
         Binding(
             get: {
-                (UserDefaults.standard.object(forKey: self.name) as? T) ?? defaultValue
+                self.getValue() ?? defaultValue
             },
             set: { newValue in
                 self.set(newValue)
@@ -79,13 +88,100 @@ class Setting<T: Any>: Hashable, DynamicProperty {
     }
     
     var value: T {
-        get { UserDefaults.standard.object(forKey: self.name) as! T }
+        get { getValue() ?? (uddefault as! T) }
         set { self.set(newValue) }
+    }
+    
+    private func getValue() -> T? {
+        if let directValue = UserDefaults.standard.object(forKey: name) as? T {
+            return directValue
+        }
+        
+        if let data = UserDefaults.standard.data(forKey: name),
+           let decoded = decodeFromData(data, as: T.self) {
+            return decoded
+        }
+        
+        return nil
     }
 
     private func set(_ value: Any?) {
-        UserDefaults.standard.set(value, forKey: name)
+        guard let value = value else {
+            UserDefaults.standard.removeObject(forKey: name)
+            parent?.objectWillChange.send()
+            return
+        }
+        
+        if isPropertyListCompatible(value) {
+            UserDefaults.standard.set(value, forKey: name)
+        } else if let encoded = encodeToData(value) {
+            UserDefaults.standard.set(encoded, forKey: name)
+        } else {
+            print("Warning: Unable to store value for key '\(name)' - not PropertyList compatible and encoding failed")
+        }
+        
         parent?.objectWillChange.send()
+    }
+    
+    private func isPropertyListCompatible(_ value: Any) -> Bool {
+        if value is String || value is Int || value is Float ||
+           value is Double || value is Bool || value is Date ||
+           value is Data || value is NSNumber {
+            return true
+        }
+        
+        if let array = value as? [Any] {
+            return array.allSatisfy { isPropertyListCompatible($0) }
+        }
+        
+        if let dict = value as? [String: Any] {
+            return dict.values.allSatisfy { isPropertyListCompatible($0) }
+        }
+        
+        if value is URL {
+            return true
+        }
+        
+        return false
+    }
+    
+    private func encodeToData<U>(_ value: U) -> Data? {
+        if let nsCodingValue = value as? NSCoding {
+            return try? NSKeyedArchiver.archivedData(withRootObject: nsCodingValue, requiringSecureCoding: false)
+        }
+        
+        if let codableValue = value as? Encodable {
+            let encoder = PropertyListEncoder()
+            encoder.outputFormat = .binary
+            return try? encoder.encode(codableValue)
+        }
+        
+        if let codableValue = value as? Encodable {
+            return try? JSONEncoder().encode(codableValue)
+        }
+        
+        return nil
+    }
+    
+    private func decodeFromData<U>(_ data: Data, as type: U.Type) -> U? {
+        if let decoded = try? NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(data) as? U {
+            return decoded
+        }
+        
+        if let decodableType = type as? Decodable.Type {
+            let decoder = PropertyListDecoder()
+            if let decoded = try? decoder.decode(decodableType, from: data) as? U {
+                return decoded
+            }
+        }
+        
+        if let decodableType = type as? Decodable.Type {
+            if let decoded = try? JSONDecoder().decode(decodableType, from: data) as? U {
+                return decoded
+            }
+        }
+        
+        return nil
     }
     
     static func getOrCreateSetting(named name: String, default defaultValue: T?, self: NativeSettingsManager?) -> Setting<T> {

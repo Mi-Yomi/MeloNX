@@ -248,7 +248,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
                 lock (_lock)
                 {
-                    if (!HasInAnyPendingMap(guestAddress) && !_translator.Functions.ContainsKey(guestAddress))
+                    if (!HasInAnyPendingMap(guestAddress) && !Translator.Functions.ContainsKey(guestAddress))
                     {
                         int combinedOffset = AllocateInSharedCache(code.Length);
                         var (cacheIndex, funcOffset) = SplitCacheOffset(combinedOffset);
@@ -508,7 +508,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
         private void RegisterFunction(ulong address, TranslatedFunction func)
         {
-            TranslatedFunction oldFunc = _translator.Functions.GetOrAdd(address, func.GuestSize, func);
+            TranslatedFunction oldFunc = Translator.Functions.GetOrAdd(address, func.GuestSize, func);
 
             Debug.Assert(oldFunc == func);
 

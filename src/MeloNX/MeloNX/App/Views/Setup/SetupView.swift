@@ -49,7 +49,9 @@ struct SetupView: View {
             Alert(
                 title: Text("Skip Setup?"),
                 primaryButton: .destructive(Text("Skip")) {
-                    isInSetup = false
+                    Task { @MainActor in
+                        isInSetup = false
+                    }
                 },
                 secondaryButton: .cancel()
             )
@@ -145,6 +147,16 @@ struct SetupView: View {
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding()
+                                .onTapGesture {
+                                    let documentsUrl = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                    var sharedurl = documentsUrl.absoluteString.replacingOccurrences(of: "file://", with: "shareddocuments://")
+                                    if ProcessInfo.processInfo.isiOSAppOnMac {
+                                        sharedurl = documentsUrl.absoluteString
+                                    }
+                                    if UIApplication.shared.canOpenURL(URL(string: sharedurl)!) {
+                                        UIApplication.shared.open(URL(string: sharedurl)!, options: [:])
+                                    }
+                                }
                         }
                         .frame(maxWidth: 400)
                     }
@@ -238,6 +250,16 @@ struct SetupView: View {
                             )
                             .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
                             .padding(.top, 40)
+                            .onTapGesture {
+                                let documentsUrl = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                var sharedurl = documentsUrl.absoluteString.replacingOccurrences(of: "file://", with: "shareddocuments://")
+                                if ProcessInfo.processInfo.isiOSAppOnMac {
+                                    sharedurl = documentsUrl.absoluteString
+                                }
+                                if UIApplication.shared.canOpenURL(URL(string: sharedurl)!) {
+                                    UIApplication.shared.open(URL(string: sharedurl)!, options: [:])
+                                }
+                            }
                         
                         Text("Welcome to MeloNX")
                             .font(.largeTitle)
@@ -395,10 +417,17 @@ struct SetupView: View {
                 fileURL.stopAccessingSecurityScopedResource()
             }
             
-            Ryujinx.shared.installFirmware(firmwarePath: fileURL.path)
             
-            let firmware = Ryujinx.shared.fetchFirmwareVersion()
-            firmImported = (firmware == "" ? "0" : firmware) != "0"
+            let (string, isErr) = RyujinxBridge.installFirmware(at: fileURL.path)
+            
+            if isErr {
+                alertMessage = string
+                showAlert = true
+            } else {
+                Ryujinx.shared.firmwareversion = string
+            }
+                
+            firmImported = (Ryujinx.shared.firmwareversion == "" ? "0" : Ryujinx.shared.firmwareversion) != "0"
             alertMessage = "Firmware installed successfully"
             showAlert = true
             

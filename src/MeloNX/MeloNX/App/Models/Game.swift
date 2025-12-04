@@ -26,55 +26,48 @@ public struct Game: Codable, Identifiable, Equatable, Hashable, Sendable {
     
     
     static func convertGameInfoToGame(gameInfo: GameInfo, url: URL) -> Game {
-        var gameInfo = gameInfo
         var gameTemp = Game(containerFolder: url.deletingLastPathComponent(), fileType: .item, fileURL: url, titleName: "", titleId: "", developer: "", version: "")
+    
+        setName(gameInfo, game: &gameTemp)
+        gameTemp.iconData = createImage(from: gameInfo)
         
-        gameTemp.titleName = withUnsafePointer(to: &gameInfo.TitleName) {
-            $0.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout.size(ofValue: $0)) {
-                String(cString: $0)
-            }
-        }
+        SN_free_game_info(gameInfo)
         
-        gameTemp.developer = withUnsafePointer(to: &gameInfo.Developer) {
-            $0.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout.size(ofValue: $0)) {
-                String(cString: $0)
-            }
-        }
-        
-        gameTemp.titleId = withUnsafePointer(to: &gameInfo.TitleId) {
-            $0.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout.size(ofValue: $0)) {
-                String(cString: $0)
-            }
-        }
-        
-        
-        gameTemp.version = withUnsafePointer(to: &gameInfo.Version) {
-            $0.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout.size(ofValue: $0)) {
-                String(cString: $0)
-            }
-        }
-        
-        let imageSize = Int(gameInfo.ImageSize)
-        if imageSize > 0, imageSize <= 1024 * 1024 {
-            let imageData = Data(bytes: gameInfo.ImageData, count: imageSize)
-            
-            gameTemp.iconData = imageData
-        } else {
-            // print("Invalid image size.")
-        }
         return gameTemp
     }
     
-    func createImage(from gameInfo: GameInfo) -> UIImage? {
-        let gameInfoValue = gameInfo
-
-        let imageSize = Int(gameInfoValue.ImageSize)
-        guard imageSize > 0, imageSize <= 1024 * 1024 else {
-            // print("Invalid image size.")
-            return nil
+    static func setName(_ gameInfo: GameInfo, game gameTemp: inout Game) {
+        gameTemp.titleName = withUnsafePointer(to: gameInfo.TitleName) {
+            $0.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout.size(ofValue: $0)) {
+                String(cString: $0)
+            }
         }
-
-        let imageData = Data(bytes: gameInfoValue.ImageData, count: imageSize)
-        return UIImage(data: imageData)
+        
+        gameTemp.developer = withUnsafePointer(to: gameInfo.Developer) {
+            $0.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout.size(ofValue: $0)) {
+                String(cString: $0)
+            }
+        }
+        
+        gameTemp.titleId = withUnsafePointer(to: gameInfo.TitleId) {
+            $0.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout.size(ofValue: $0)) {
+                String(cString: $0)
+            }
+        }
+        
+        
+        gameTemp.version = withUnsafePointer(to: gameInfo.Version) {
+            $0.withMemoryRebound(to: UInt8.self, capacity: MemoryLayout.size(ofValue: $0)) {
+                String(cString: $0)
+            }
+        }
+    }
+    
+   static func createImage(from gameInfo: GameInfo) -> Data? {
+       let imageSize = Int(gameInfo.ImageSize)
+       if imageSize > 0, imageSize <= 1024 * 1024 {
+           return Data(bytes: gameInfo.ImageData, count: imageSize)
+       }
+       return nil
     }
 }

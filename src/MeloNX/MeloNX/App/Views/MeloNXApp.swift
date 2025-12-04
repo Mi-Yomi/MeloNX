@@ -30,7 +30,7 @@ struct MeloNXApp: App {
         EnvironmentVariable(string: "MVK_DEBUG", value: "0"),
         EnvironmentVariable(string: "MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS", value: "0"),
         EnvironmentVariable(string: "MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE", value: "512"),
-        EnvironmentVariable(string: "MVK_CONFIG_SHADER_COMPRESSION_ALGORITHM", value: "4"),
+        // EnvironmentVariable(string: "MVK_CONFIG_SHADER_COMPRESSION_ALGORITHM", value: "4"),
         EnvironmentVariable(string: "DOTNET_DefaultStackSize", value: "200000") // probably doesn't work on NativeAOT
     ]
     
@@ -40,6 +40,32 @@ struct MeloNXApp: App {
         SDL_SetMainReady()
         SDL_iPhoneSetEventPump(SDL_TRUE)
         SDL_Init(SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO | SDL_INIT_VIDEO)
+        setupEnvironment()
+    }
+    
+    var body: some Scene {
+        WindowGroup {
+            Group {
+                if !inSetup {
+                    ContentView()
+                        .onAppear() {
+                            if !Ryujinx.shared.checkIfKeysImported() {
+                                inSetup = true
+                            }
+                            let firmware = Ryujinx.shared.fetchFirmwareVersion()
+                            
+                            if (firmware == "" ? "0" : firmware) == "0" {
+                                inSetup = true
+                            }
+                        }
+                } else {
+                    SetupView(isInSetup: $inSetup)
+                }
+            }
+        }
+    }
+    
+    func setupEnvironment() {
         environment.forEach { env in
             env.set()
         }
@@ -63,31 +89,9 @@ struct MeloNXApp: App {
         
         if cool {
             EnvironmentVariable(string: "DUAL_MAPPED_JIT", value: "1").set()
-            RyujinxBridge.initialize_dualmapped()
+            LaunchGameHandler.succeededJIT = RyujinxBridge.initialize_dualmapped()
         } else {
             EnvironmentVariable(string: "DUAL_MAPPED_JIT", value: "0").set()
-        }
-    }
-    
-    var body: some Scene {
-        WindowGroup {
-            Group {
-                if !inSetup {
-                    ContentView()
-                        .onAppear() {
-                            if !Ryujinx.shared.checkIfKeysImported() {
-                                inSetup = true
-                            }
-                            let firmware = Ryujinx.shared.fetchFirmwareVersion()
-                            
-                            if (firmware == "" ? "0" : firmware) == "0" {
-                                inSetup = true
-                            }
-                        }
-                } else {
-                    SetupView(isInSetup: $inSetup)
-                }
-            }
         }
     }
 }

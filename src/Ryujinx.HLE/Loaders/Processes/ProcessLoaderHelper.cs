@@ -20,10 +20,12 @@ using Ryujinx.HLE.Loaders.Executables;
 using Ryujinx.HLE.Loaders.Processes.Extensions;
 using Ryujinx.Horizon.Common;
 using Ryujinx.Horizon.Sdk.Arp;
+using Ryujinx.Memory;
 using System;
 using System.Linq;
 using System.Runtime.InteropServices;
 using ApplicationId = LibHac.Ncm.ApplicationId;
+using Ryujinx.Cpu.Nce;
 
 namespace Ryujinx.HLE.Loaders.Processes
 {
@@ -259,6 +261,7 @@ namespace Ryujinx.HLE.Loaders.Processes
             }).ToUpper());
 
             ulong[] nsoBase = new ulong[executables.Length];
+            NceCpuCodePatch[] nsoPatch = new NceCpuCodePatch[executables.Length];
 
             for (int index = 0; index < executables.Length; index++)
             {
@@ -281,8 +284,18 @@ namespace Ryujinx.HLE.Loaders.Processes
                 }
 
                 nsoSize = BitUtils.AlignUp<uint>(nsoSize, KPageTableBase.PageSize);
+                bool for64Bit2 = ((ProcessCreationFlags)meta.Flags).HasFlag(ProcessCreationFlags.Is64Bit);
+                
+                NceCpuCodePatch codePatch = ArmProcessContextFactory.CreateCodePatchForNce(context, for64Bit2, nso.Text);
+                nsoPatch[index] = codePatch;
+
+                if (codePatch != null)
+                {
+                    codeSize += (uint)codePatch.Size;
+                }
 
                 nsoBase[index] = codeStart + codeSize;
+
 
                 codeSize += nsoSize;
 
@@ -382,7 +395,9 @@ namespace Ryujinx.HLE.Loaders.Processes
                 MemoryMarshal.Cast<byte, uint>(npdm.KernelCapabilityData),
                 resourceLimit,
                 memoryRegion,
-                processContextFactory);
+                processContextFactory,
+                null,
+                nsoPatch[0]?.Size ?? 0UL);
 
             if (result != Result.Success)
             {
@@ -390,12 +405,13 @@ namespace Ryujinx.HLE.Loaders.Processes
 
                 return ProcessResult.Failed;
             }
-
+            bool for64Bit = ((ProcessCreationFlags)meta.Flags).HasFlag(ProcessCreationFlags.Is64Bit);
+                
             for (int index = 0; index < executables.Length; index++)
             {
-                Logger.Info?.Print(LogClass.Loader, $"Loading image {index} at 0x{nsoBase[index]:x16}...");
+                Logger.Info?.Print(LogClass.Loader, $"Loading image {index} at 0x{nsoBase[index]:x16}, with patch: {nsoPatch[index]?.Size ?? 0} ...");
 
-                result = LoadIntoMemory(process, executables[index], nsoBase[index]);
+                result = LoadIntoMemory(process, executables[index], nsoBase[index], for64Bit, nsoPatch[index]);
                 if (result != Result.Success)
                 {
                     Logger.Error?.Print(LogClass.Loader, $"Process initialization returned error \"{result}\".");
@@ -453,7 +469,7 @@ namespace Ryujinx.HLE.Loaders.Processes
             return processResult;
         }
 
-        public static Result LoadIntoMemory(KProcess process, IExecutable image, ulong baseAddress)
+        public static Result LoadIntoMemory(KProcess process, IExecutable image, ulong baseAddress, bool is64bit = true, NceCpuCodePatch codePatch = null)
         {
             ulong textStart = baseAddress + image.TextOffset;
             ulong roStart = baseAddress + image.RoOffset;
@@ -471,7 +487,12 @@ namespace Ryujinx.HLE.Loaders.Processes
             process.CpuMemory.Write(roStart, image.Ro);
             process.CpuMemory.Write(dataStart, image.Data);
 
-            process.CpuMemory.Fill(bssStart, image.BssSize, 0);
+            if (codePatch != null && is64bit)
+            {
+                codePatch.Write(process.CpuMemory, baseAddress - codePatch.Size, textStart);
+            }
+
+            // process.CpuMemory.Fill(bssStart, image.BssSize, 0);
 
             Result SetProcessMemoryPermission(ulong address, ulong size, KMemoryPermission permission)
             {
@@ -484,7 +505,14 @@ namespace Ryujinx.HLE.Loaders.Processes
 
                 return process.MemoryManager.SetProcessMemoryPermission(address, size, permission);
             }
-
+            // reminder
+            if (process.CpuMemory is Ryujinx.Cpu.Jit.MemoryManagerHostTracked hostTrackedMemoryManager && codePatch != null && is64bit)
+            {
+                (MemoryBlock memory, ulong rangeOffset, ulong copySize)  memoryInfo = hostTrackedMemoryManager.GetMemoryOffsetAndSize(textStart, (ulong)image.Text.Length);
+                
+                memoryInfo.memory.Reprotect(memoryInfo.copySize, 0, MemoryPermission.ReadAndExecute);
+            }
+            
             Result result = SetProcessMemoryPermission(textStart, (ulong)image.Text.Length, KMemoryPermission.ReadAndExecute);
             if (result != Result.Success)
             {

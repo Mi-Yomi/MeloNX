@@ -593,19 +593,6 @@ class Ryujinx : ObservableObject {
         return firmwareVersionPointer.isEmpty ? "0" : firmwareVersionPointer
     }
     
-    func installFirmware(firmwarePath: String) {
-        guard let cString = firmwarePath.cString(using: .utf8) else {
-            // print("Invalid firmware path")
-            return
-        }
-
-        RyujinxBridge.installFirmware(at: firmwarePath)
-        
-        let version = fetchFirmwareVersion()
-        if !version.isEmpty {
-            self.firmwareversion = version
-        }
-    }
 
     func getDlcNcaList(titleId: String, path: String) -> [DownloadableContentNca] {
 

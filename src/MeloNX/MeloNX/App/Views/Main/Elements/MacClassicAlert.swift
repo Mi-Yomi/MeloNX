@@ -37,7 +37,7 @@ final class MacClassicAlertViewController: UIViewController {
         
         
         let effect: UIVisualEffect
-        if #available(iOS 26, *) {
+        if #available(iOS 19, *) {
             effect = UIGlassEffect(style: .regular)
         } else {
             effect = UIBlurEffect(style: .systemMaterial)

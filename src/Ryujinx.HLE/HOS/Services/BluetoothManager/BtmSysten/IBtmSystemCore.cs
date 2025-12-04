@@ -5,7 +5,7 @@ using Ryujinx.Horizon.Common;
 
 namespace Ryujinx.HLE.HOS.Services.BluetoothManager.BtmSystem
 {
-    class IBtmSystemCore : IpcService
+    partial class IBtmSystemCore : IpcService
     {
         public KEvent _radioEvent;
         public int    _radioEventhandle;
