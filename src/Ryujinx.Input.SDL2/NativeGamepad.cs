@@ -32,7 +32,11 @@ namespace Ryujinx.Input.SDL2
             [13] = GamepadButtonInputId.DpadLeft,
             [14] = GamepadButtonInputId.DpadRight,
             [15] = GamepadButtonInputId.LeftTrigger,
-            [16] = GamepadButtonInputId.RightTrigger
+            [16] = GamepadButtonInputId.RightTrigger,
+            [17] = GamepadButtonInputId.SingleLeftTrigger0,
+            [18] = GamepadButtonInputId.SingleRightTrigger0,
+            [19] = GamepadButtonInputId.SingleLeftTrigger1,
+            [20] = GamepadButtonInputId.SingleRightTrigger1
         };
 
 

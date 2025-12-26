@@ -25,6 +25,11 @@ enum VirtualControllerButton: Int, Codable {
     case dPadRight
     case leftTrigger
     case rightTrigger
+    // joycon special buttons
+    case singleLeftTrigger0
+    case singleRightTrigger0
+    case singleLeftTrigger1
+    case singleRightTrigger1
     
     var isTrigger: Bool {
         switch self {
