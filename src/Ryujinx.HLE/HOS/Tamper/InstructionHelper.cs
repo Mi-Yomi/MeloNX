@@ -15,7 +15,7 @@ namespace Ryujinx.HLE.HOS.Tamper
             context.CurrentOperations.Add(operation);
         }
 
-        public static void Emit(Type instruction, byte width, CompilationContext context, params Object[] operands)
+        public static void Emit(Type instruction, byte width, CompilationContext context, params object[] operands)
         {
             Emit((IOperation)Create(instruction, width, operands), context);
         }
@@ -44,147 +44,11 @@ namespace Ryujinx.HLE.HOS.Tamper
             };
         }
 
-        public static Object Create(Type instruction, byte width, params Object[] operands)
+        public static object Create(Type instruction, byte width, params object[] operands)
         {
-            // Use explicit factory methods to avoid reflection and support Native AOT compilation
-            if (instruction == typeof(OpMov<>))
-            {
-                return CreateOpMov(width, operands);
-            }
-            else if (instruction == typeof(CondGT<>))
-            {
-                return CreateCondGT(width, operands);
-            }
-            else if (instruction == typeof(CondGE<>))
-            {
-                return CreateCondGE(width, operands);
-            }
-            else if (instruction == typeof(CondLT<>))
-            {
-                return CreateCondLT(width, operands);
-            }
-            else if (instruction == typeof(CondLE<>))
-            {
-                return CreateCondLE(width, operands);
-            }
-            else if (instruction == typeof(CondEQ<>))
-            {
-                return CreateCondEQ(width, operands);
-            }
-            else if (instruction == typeof(CondNE<>))
-            {
-                return CreateCondNE(width, operands);
-            }
-            else
-            {
-                throw new TamperCompilationException($"Unsupported instruction type {instruction.Name} in Atmosphere cheat");
-            }
+            return TamperOperationFactory.Create(instruction, width, operands);
         }
 
-        private static IOperation CreateOpMov(byte width, params Object[] operands)
-        {
-            IOperand destination = (IOperand)operands[0];
-            IOperand source = (IOperand)operands[1];
-            
-            return width switch
-            {
-                1 => new OpMov<byte>(destination, source),
-                2 => new OpMov<ushort>(destination, source),
-                4 => new OpMov<uint>(destination, source),
-                8 => new OpMov<ulong>(destination, source),
-                _ => throw new TamperCompilationException($"Invalid instruction width {width} in Atmosphere cheat"),
-            };
-        }
-
-        private static ICondition CreateCondGT(byte width, params Object[] operands)
-        {
-            IOperand lhs = (IOperand)operands[0];
-            IOperand rhs = (IOperand)operands[1];
-            
-            return width switch
-            {
-                1 => new CondGT<byte>(lhs, rhs),
-                2 => new CondGT<ushort>(lhs, rhs),
-                4 => new CondGT<uint>(lhs, rhs),
-                8 => new CondGT<ulong>(lhs, rhs),
-                _ => throw new TamperCompilationException($"Invalid instruction width {width} in Atmosphere cheat"),
-            };
-        }
-
-        private static ICondition CreateCondGE(byte width, params Object[] operands)
-        {
-            IOperand lhs = (IOperand)operands[0];
-            IOperand rhs = (IOperand)operands[1];
-            
-            return width switch
-            {
-                1 => new CondGE<byte>(lhs, rhs),
-                2 => new CondGE<ushort>(lhs, rhs),
-                4 => new CondGE<uint>(lhs, rhs),
-                8 => new CondGE<ulong>(lhs, rhs),
-                _ => throw new TamperCompilationException($"Invalid instruction width {width} in Atmosphere cheat"),
-            };
-        }
-
-        private static ICondition CreateCondLT(byte width, params Object[] operands)
-        {
-            IOperand lhs = (IOperand)operands[0];
-            IOperand rhs = (IOperand)operands[1];
-            
-            return width switch
-            {
-                1 => new CondLT<byte>(lhs, rhs),
-                2 => new CondLT<ushort>(lhs, rhs),
-                4 => new CondLT<uint>(lhs, rhs),
-                8 => new CondLT<ulong>(lhs, rhs),
-                _ => throw new TamperCompilationException($"Invalid instruction width {width} in Atmosphere cheat"),
-            };
-        }
-
-        private static ICondition CreateCondLE(byte width, params Object[] operands)
-        {
-            IOperand lhs = (IOperand)operands[0];
-            IOperand rhs = (IOperand)operands[1];
-            
-            return width switch
-            {
-                1 => new CondLE<byte>(lhs, rhs),
-                2 => new CondLE<ushort>(lhs, rhs),
-                4 => new CondLE<uint>(lhs, rhs),
-                8 => new CondLE<ulong>(lhs, rhs),
-                _ => throw new TamperCompilationException($"Invalid instruction width {width} in Atmosphere cheat"),
-            };
-        }
-
-        private static ICondition CreateCondEQ(byte width, params Object[] operands)
-        {
-            IOperand lhs = (IOperand)operands[0];
-            IOperand rhs = (IOperand)operands[1];
-            
-            return width switch
-            {
-                1 => new CondEQ<byte>(lhs, rhs),
-                2 => new CondEQ<ushort>(lhs, rhs),
-                4 => new CondEQ<uint>(lhs, rhs),
-                8 => new CondEQ<ulong>(lhs, rhs),
-                _ => throw new TamperCompilationException($"Invalid instruction width {width} in Atmosphere cheat"),
-            };
-        }
-
-        private static ICondition CreateCondNE(byte width, params Object[] operands)
-        {
-            IOperand lhs = (IOperand)operands[0];
-            IOperand rhs = (IOperand)operands[1];
-            
-            return width switch
-            {
-                1 => new CondNE<byte>(lhs, rhs),
-                2 => new CondNE<ushort>(lhs, rhs),
-                4 => new CondNE<uint>(lhs, rhs),
-                8 => new CondNE<ulong>(lhs, rhs),
-                _ => throw new TamperCompilationException($"Invalid instruction width {width} in Atmosphere cheat"),
-            };
-        }
 
         public static ulong GetImmediate(byte[] instruction, int index, int nybbleCount)
         {

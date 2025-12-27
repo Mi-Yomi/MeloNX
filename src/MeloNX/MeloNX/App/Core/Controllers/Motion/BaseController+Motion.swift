@@ -30,8 +30,8 @@ extension BaseController {
                     let a = SIMD3(ax, ay, az)
                     let gDeg = g * (180.0 / .pi)
                     
-                    RyujinxBridge.setGamepadMotion(self.nativePointer, motionType: 1, axis: a)
-                    RyujinxBridge.setGamepadMotion(self.nativePointer, motionType: 2, axis: gDeg)
+                    RyujinxBridge.setGamepadMotion(self.pointer, motionType: 1, axis: a)
+                    RyujinxBridge.setGamepadMotion(self.pointer, motionType: 2, axis: gDeg)
                 }
             }
         } else {
@@ -43,8 +43,8 @@ extension BaseController {
                     guard let self = self,
                           Ryujinx.shared.isRunning,
                           ControllerManager.shared.hasVirtualController() else { return }
-                    RyujinxBridge.setGamepadMotion(self.nativePointer, motionType: 1, axis: accel)
-                    RyujinxBridge.setGamepadMotion(self.nativePointer, motionType: 2, axis: gyro)
+                    RyujinxBridge.setGamepadMotion(self.pointer, motionType: 1, axis: accel)
+                    RyujinxBridge.setGamepadMotion(self.pointer, motionType: 2, axis: gyro)
                 }
             }
             

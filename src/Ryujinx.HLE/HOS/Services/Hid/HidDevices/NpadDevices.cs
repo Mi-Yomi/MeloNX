@@ -207,7 +207,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid
 
             if (_activeCount == 0 && PerformanceCounter.ElapsedMilliseconds > _lastNotifyTimestamp + NoMatchNotifyFrequencyMs)
             {
-                Logger.Warning?.Print(LogClass.Hid, $"No matching controllers found. Application requests '{SupportedStyleSets}' on '{string.Join(", ", GetSupportedPlayers())}'");
+                Logger.Warning?.Print(LogClass.Hid, $"No matching controllers found {_configuredTypes}. Application requests '{SupportedStyleSets}' on '{string.Join(", ", GetSupportedPlayers())}'");
                 _lastNotifyTimestamp = PerformanceCounter.ElapsedMilliseconds;
             }
         }

@@ -11,22 +11,12 @@ import UIKit
 import GameController
 
 class NativeController: BaseController {
-    override init(nativeController: GCController?, id: UnsafeMutableRawPointer? = nil) {
-        super.init(nativeController: nativeController, id: id)
-        setupNativeController()
+    override init(nativeController: GCController?) {
+        super.init(nativeController: nativeController)
     }
     
-    func setupNewNativeController(_ newNativeController: GCController?, id id2: UnsafeMutableRawPointer? = nil) {
-        self.nativeController = newNativeController
-        
-        if id2 != nativePointer, let id2 {
-            nativePointer = id2
-        }
-        
-        setupNativeController()
-    }
     
-    func setupNativeController() {
+    override public func setupController() {
         guard let gamepad = nativeController?.extendedGamepad
         else { return }
         

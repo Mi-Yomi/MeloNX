@@ -57,6 +57,12 @@ final class RyujinxBridge {
             Int(SN_main_ryujinx_sdl(argc, cStrings))
         }
     }
+    
+    static func changeControllerInfo(argv: [String]) {
+        argv.withCStrings { cStrings, argc in
+            SN_set_gamepad_configuration(argc, cStrings)
+        }
+    }
 
     static func updateSettingsExternal(argv: [String]) -> Int {
         return argv.withCStrings { cStrings, argc in
@@ -92,12 +98,12 @@ final class RyujinxBridge {
         SN_refresh_account_manager()
     }
 
-    static func createAccount(name: String, image: String) {
+    static func createAccount(name: String, image: Data) {
         name.withCString { namePtr in
-            image.withCString { imagePtr in
-                SN_create_account(UnsafeMutablePointer(mutating: namePtr),
-                               UnsafeMutablePointer(mutating: imagePtr),
-                               Int32(image.count))
+            image.withUnsafeBytes { bufferpointer in
+                let imagePtr = bufferpointer.baseAddress!.assumingMemoryBound(to: UInt8.self)
+                
+                SN_create_account(namePtr, imagePtr, Int32(image.count))
             }
         }
     }
@@ -182,6 +188,9 @@ func SN_initialize_dualmapped() -> Bool
 @_silgen_name("main_ryujinx_sdl")
 func SN_main_ryujinx_sdl(_ argc: Int32, _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>!) -> Int32
 
+@_silgen_name("set_gamepad_configuration")
+func SN_set_gamepad_configuration(_ argc: Int32, _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>!)
+
 @_silgen_name("update_settings_external")
 func SN_update_settings_external(_ argc: Int32, _ argv: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>!) -> Int32
 
@@ -201,7 +210,7 @@ func SN_touch_ended(_ index: Int32)
 func SN_refresh_account_manager()
 
 @_silgen_name("create_account")
-func SN_create_account(_ name: UnsafeMutablePointer<CChar>!, _ image: UnsafeMutablePointer<CChar>!, _ imagelength: Int32)
+func SN_create_account(_ name: UnsafePointer<CChar>!, _ image: UnsafePointer<UInt8>!, _ imagelength: Int32)
 
 @_silgen_name("open_user")
 func SN_open_user(_ userid: UnsafePointer<CChar>!)

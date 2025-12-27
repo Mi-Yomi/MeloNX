@@ -82,7 +82,7 @@ class ControllerManager: ObservableObject {
                 self._privAllControllers.removeAll { $0 === controller }
             }
             
-            for nativeController in connectedNativeControllers {
+            for (index, nativeController) in connectedNativeControllers.enumerated() {
                 if !self._privAllControllers.contains(where: { $0.nativeController === nativeController }) {
                     let newController = NativeController(nativeController: nativeController)
                     self._privAllControllers.append(newController)
@@ -99,6 +99,9 @@ class ControllerManager: ObservableObject {
                     self.selectedControllers.append(self.virtualController.id)
                 } else {
                     self.selectedControllers.append(contentsOf: physicalControllers)
+                }
+                if Ryujinx.shared.isRunning {
+                    Ryujinx.shared.reloadControllersWithInfo()
                 }
             }
         }
@@ -141,21 +144,7 @@ class ControllerManager: ObservableObject {
             guard let self = self else { return }
             
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.1) {
-                if Ryujinx.shared.isRunning {
-                    if let cool = notification.object as? GCController,
-                       let name = cool.vendorName,
-                       let controller = self.firstControllerForName(name) as? NativeController {
-                        controller.setupNewNativeController(cool)
-                    } else if  let cool = notification.object as? GCController, self.selectedControllers.count == 1, let controller = self.controllerForString(self.selectedControllers.first ?? ""), controller.virtual {
-                        let newController = NativeController(nativeController: cool, id: controller.nativePointer)
-                        self.allControllers.removeAll(where: { $0 == controller })
-                        self.allControllers.append(newController)
-                        
-                        self.isVCA = false
-                    }
-                } else {
-                    self.refreshControllersList()
-                }
+                self.refreshControllersList()
             }
         }
         
@@ -167,9 +156,7 @@ class ControllerManager: ObservableObject {
             guard let self = self else { return }
             
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 0.1) {
-                if !Ryujinx.shared.isRunning {
-                    self.refreshControllersList()
-                }
+                self.refreshControllersList()
             }
         }
     }

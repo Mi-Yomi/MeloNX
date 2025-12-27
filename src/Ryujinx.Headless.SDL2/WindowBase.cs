@@ -405,7 +405,8 @@ namespace Ryujinx.Headless.SDL2
                 ProcessMainThreadQueue();
 
                 // Polling becomes expensive if it's not slept
-                // Thread.Sleep(1);
+                // Why was this commented out???
+                Thread.Sleep(1); 
             }
 
             _exitEvent.Set();

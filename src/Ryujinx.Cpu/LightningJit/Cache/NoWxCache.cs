@@ -405,21 +405,27 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 sharedSizes[i] = SharedCacheSize;
             }
 
-            IEnumerable<ulong> callStack = Enumerable.Empty<ulong>();
-
-            for (int localIndex = 0; localIndex < _localCaches.Count; localIndex++)
+            // Collect call stack entries from all caches
+            HashSet<ulong> callStackAddresses = new HashSet<ulong>();
+            
+            for (int i = 0; i < Math.Max(_localCaches.Count, _sharedCaches.Count); i++)
             {
-                for (int sharedIndex = 0; sharedIndex < _sharedCaches.Count; sharedIndex++)
+                IntPtr localPtr = i < _localCaches.Count ? cachePointers[i] : IntPtr.Zero;
+                int localSize = i < _localCaches.Count ? cacheSizes[i] : 0;
+                IntPtr sharedPtr = i < _sharedCaches.Count ? sharedPointers[i] : IntPtr.Zero;
+                int sharedSize = i < _sharedCaches.Count ? sharedSizes[i] : 0;
+                
+                IEnumerable<ulong> callStack = _stackWalker.GetCallStack(
+                    framePointer,
+                    localPtr,
+                    localSize,
+                    sharedPtr,
+                    sharedSize
+                );
+                
+                foreach (ulong address in callStack)
                 {
-                    var currentCallStack = _stackWalker.GetCallStack(
-                        framePointer,
-                        cachePointers[localIndex],
-                        cacheSizes[localIndex],
-                        sharedPointers[sharedIndex],
-                        sharedSizes[sharedIndex]
-                    );
-
-                    callStack = callStack.Concat(currentCallStack);
+                    callStackAddresses.Add(address);
                 }
             }
 
@@ -437,7 +443,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
                 // We can only delete if the function is not part of the current thread call stack,
                 // otherwise we will crash the program when the thread returns to it.
-                foreach (ulong funcAddress in callStack)
+                foreach (ulong funcAddress in callStackAddresses)
                 {
                     if (funcAddress >= (ulong)entry.FuncPtr && funcAddress < (ulong)entry.FuncPtr + (ulong)entry.Size)
                     {

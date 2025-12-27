@@ -12,15 +12,24 @@ import GameController
 import CoreMotion
 
 class BaseController: Equatable, Identifiable {
-    var id: String = ""
+    var id: String {
+        let pointerInt64 = Int64(bitPattern: UInt64(UInt(bitPattern: self.pointer)))
+        
+        let hexString = String(pointerInt64, radix: 16, uppercase: true)
+        
+        return hexString
+    }
+    
+    var pointer: UnsafeMutableRawPointer {
+        UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
+    }
+    
     var type: ControllerType
     var virtual: Bool = false
     
     var name: String { virtual ? "MeloNX Virtual Controller" : nativeController?.vendorName ?? "Unknown" }
     
     var nativeController: GCController?
-    var nativePointer: UnsafeMutableRawPointer = UnsafeMutableRawPointer(bitPattern: 0)!
-    
     
     // Motion
     var orientation: UIDeviceOrientation =
@@ -42,7 +51,7 @@ class BaseController: Equatable, Identifiable {
                                                       name.lowercased() == "backbone one") }
 
     
-    init(nativeController: GCController?, id: UnsafeMutableRawPointer? = nil) {
+    init(nativeController: GCController?) {
         self.nativeController = nativeController
         self.virtual = nativeController == nil
         self.type = virtual ? .joyconPair : .proController
@@ -58,49 +67,22 @@ class BaseController: Equatable, Identifiable {
         self.inputQueue = DispatchQueue(label: queueLabel, qos: .userInteractive)
         self.motionQueue = DispatchQueue(label: motionLabel, qos: .background)
         
-        if let providedId = id {
-            self.nativePointer = providedId
-        } else {
-            self.nativePointer = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
-        }
+        RyujinxBridge.attachGamepad(self.pointer, self.name)
         
-        self.id = setupHandheldController() ?? identifier
+        setupController()
     }
+    
 
     
-    private func setupHandheldController(_ id2: UnsafeMutableRawPointer? = nil) -> String? {
-        if id2 != nativePointer, let id2 {
-            nativePointer = id2
-        }
-        
-        
-        if !id.isEmpty, id == generateGamepadId() {
-            return id
-        }
-        
-        let id = getGamePadId()
-        
-        RegisterCallbackWithData("rumble-\(id ?? UUID().uuidString)") { data in 
-            if let rumbleData = RumbleData(data: data ?? Data()) {
-                self.rumbleController?.rumble(lowFreq: rumbleData.lowFrequency, highFreq: rumbleData.highFrequency, durationMs: rumbleData.durationMs)
-            }
-        }
-        
-        // funni input queue
-        inputQueue.async { [weak self] in
-            guard let self = self else { return }
-            RyujinxBridge.attachGamepad(self.nativePointer, self.name)
-        }
-        
+    public func setupController() {
         inputQueue.async { [weak self] in
             guard let self = self else { return }
             setupMotion()
         }
         
+        RyujinxBridge.attachGamepad(self.pointer, self.name)
         
         setupHaptics()
-        
-        return id
     }
     
     func setupHaptics() {
@@ -110,11 +92,19 @@ class BaseController: Equatable, Identifiable {
                     rumbleController = nil
                     try hapticsEngine.start()
                     rumbleController = RumbleController(engine: hapticsEngine, rumbleMultiplier: device ? 2.0 : 2.5)
+
+                    
                 } catch {
                     rumbleController = nil
                 }
             } else {
                 rumbleController = nil
+            }
+            
+            RegisterCallbackWithData("rumble-\(self.id)") { data in
+                if let rumbleData = RumbleData(data: data ?? Data()) {
+                    self.rumbleController?.rumble(lowFreq: rumbleData.lowFrequency, highFreq: rumbleData.highFrequency, durationMs: rumbleData.durationMs)
+                }
             }
         }
         
@@ -131,26 +121,10 @@ class BaseController: Equatable, Identifiable {
         }
     }
     
-    func getGamePadId() -> String? {
-        if !id.isEmpty {
-            return id
-        }
-        
-        return generateGamepadId()
-    }
-    
-    func generateGamepadId() -> String? {
-        let pointerInt64 = Int64(bitPattern: UInt64(UInt(bitPattern: self.nativePointer)))
-        
-        let hexString = String(pointerInt64, radix: 16, uppercase: true)
-        
-        return hexString
-    }
-    
     func updateAxisValue(x: Float, y: Float, forAxis axis: Int) {
         inputQueue.async { [weak self] in
             guard let self = self else { return }
-            RyujinxBridge.setGamepadStickAxis(self.nativePointer, stickId: axis, x: x, y: y)
+            RyujinxBridge.setGamepadStickAxis(self.pointer, stickId: axis, x: x, y: y)
         }
     }
     
@@ -165,7 +139,7 @@ class BaseController: Equatable, Identifiable {
     func setButtonState(_ state: Uint8, for button: VirtualControllerButton) {
         inputQueue.async { [weak self] in
             guard let self = self else { return }
-            RyujinxBridge.setGamepadButtonState(self.nativePointer, buttonId: button.rawValue, pressed: state == 1)
+            RyujinxBridge.setGamepadButtonState(self.pointer, buttonId: button.rawValue, pressed: state == 1)
         }
     }
     
@@ -176,7 +150,7 @@ class BaseController: Equatable, Identifiable {
     func cleanup() {
         inputQueue.async { [weak self] in
             guard let self = self else { return }
-            RyujinxBridge.detachGamepad(self.nativePointer)
+            RyujinxBridge.detachGamepad(self.pointer)
         }
     }
     
@@ -185,7 +159,7 @@ class BaseController: Equatable, Identifiable {
     }
     
     static func == (lhs: BaseController, rhs: BaseController) -> Bool {
-        lhs.nativePointer == rhs.nativePointer &&
+        lhs.id == rhs.id &&
         lhs.hapticEngine == rhs.hapticEngine &&
         lhs.name == rhs.name && lhs.virtual == rhs.virtual && lhs.id == rhs.id
     }

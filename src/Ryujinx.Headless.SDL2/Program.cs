@@ -60,6 +60,7 @@ using System.Text.RegularExpressions;
 using System.Runtime;
 using System.Linq;
 using System.Threading.Tasks;
+using Ryujinx.Input.Native;
 
 namespace Ryujinx.Headless.SDL2
 {
@@ -144,7 +145,6 @@ namespace Ryujinx.Headless.SDL2
             {
                 image = new byte[imageLength];
                 Marshal.Copy(imagePtr, image, 0, imageLength);
-                Marshal.FreeHGlobal(imagePtr);
             }
 
             _accountManager.AddUser(name, image);
@@ -331,7 +331,14 @@ namespace Ryujinx.Headless.SDL2
         [UnmanagedCallersOnly(EntryPoint = "attach_gamepad")]    
         public static IntPtr AttachGamepad(IntPtr namePtr, IntPtr idPtr)
         {
-           return NativeGamepadDriver.AttachGamepad(namePtr, idPtr);
+            if (namePtr == IntPtr.Zero || idPtr == IntPtr.Zero)
+            {
+                return IntPtr.Zero;
+            }
+
+            string value = Marshal.PtrToStringAnsi(namePtr);
+
+            return NativeGamepadDriver.AttachGamepad(value, idPtr);
         }
 
         [UnmanagedCallersOnly(EntryPoint = "detach_gamepad")]    
@@ -357,6 +364,75 @@ namespace Ryujinx.Headless.SDL2
         {
             NativeGamepadDriver.SetMotionData(idPtr, motionType, x, y, z);
         }
+
+        [UnmanagedCallersOnly(EntryPoint = "set_gamepad_configuration")] 
+        unsafe static void setGamepadConfiguration(int argCount, IntPtr* pArgs)
+        {
+            ControllerOptions Get(int argCount, IntPtr* pArgs)
+            {
+                string[] args = new string[argCount];
+
+                try
+                {
+                    for (int i = 0; i < argCount; i++)
+                    {
+                        args[i] = Marshal.PtrToStringAnsi(pArgs[i]);
+
+                        Console.WriteLine(args[i]);
+                    }
+    
+                    ControllerOptions options = null;
+                    Parser.Default.ParseArguments<ControllerOptions>(args)
+                    .WithParsed(option => options = option)
+                    .WithNotParsed(errors => errors.Output());
+                    return options;
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e.ToString());
+                    return null;
+                }
+            }
+
+
+            ControllerOptions option = Get(argCount, pArgs);
+            if (option == null)
+            {
+                return;
+            }
+
+            static void LoadPlayerConfiguration(string inputProfileName, string inputId, string inputDSUServer, PlayerIndex index, ControllerOptions option)
+            {
+                if (inputId == null)
+                {
+                    return;
+                }
+
+                InputConfig inputConfig = HandlePlayerConfiguration(inputProfileName, inputId, inputDSUServer, index, null, option);
+
+                if (inputConfig != null)
+                {
+                    _inputConfiguration.Add(inputConfig);
+                }
+            }
+
+            _inputConfiguration = new List<InputConfig>();
+
+            LoadPlayerConfiguration(null, option.InputId1, null, PlayerIndex.Player1, option);
+            LoadPlayerConfiguration(null, option.InputId2, null, PlayerIndex.Player2, option);
+            LoadPlayerConfiguration(null, option.InputId3, null, PlayerIndex.Player3, option);
+            LoadPlayerConfiguration(null, option.InputId4, null, PlayerIndex.Player4, option);
+            LoadPlayerConfiguration(null, option.InputId5, null, PlayerIndex.Player5, option);
+            LoadPlayerConfiguration(null, option.InputId6, null, PlayerIndex.Player6, option);
+            LoadPlayerConfiguration(null, option.InputId7, null, PlayerIndex.Player7, option);
+            LoadPlayerConfiguration(null, option.InputId8, null, PlayerIndex.Player8, option);
+            LoadPlayerConfiguration(null, option.InputIdHandheld, null, PlayerIndex.Handheld, option);
+
+            Logger.Info?.Print(LogClass.Application, $"Configured {_inputConfiguration.Count} gamepads, {_inputConfiguration} from native code.");
+
+            _window.NpadManager.ReloadConfiguration(_inputConfiguration, _enableKeyboard, _enableMouse);    
+        }
+
 
         [UnmanagedCallersOnly(EntryPoint = "get_current_fps")]
         public static unsafe int GetFPS() 
@@ -1028,9 +1104,38 @@ namespace Ryujinx.Headless.SDL2
 
             return gameInfo;
         }
-        
 
-        private static InputConfig HandlePlayerConfiguration(string inputProfileName, string inputId, string inputDSUServer, PlayerIndex index, Options option)
+        static ControllerType GetControllerTypeByIndex(Options optionsInstance, int index)
+        {
+            if (index < 0 || index > 7)
+                throw new ArgumentOutOfRangeException(nameof(index), "Index must be between 0 and 7.");
+
+            string propertyName = $"controllerType{index + 1}";
+            var property = typeof(Options).GetProperty(propertyName);
+
+            if (property == null)
+                throw new InvalidOperationException($"Property '{propertyName}' not found in Options.");
+
+            return (ControllerType)property.GetValue(optionsInstance);
+        }
+
+        static ControllerType GetControllerTypeByIndex(ControllerOptions optionsInstance, int index)
+        {
+            if (index < 0 || index > 7)
+                throw new ArgumentOutOfRangeException(nameof(index), "Index must be between 0 and 7.");
+
+            string propertyName = $"controllerType{index + 1}";
+            var property = typeof(ControllerOptions).GetProperty(propertyName);
+
+            if (property == null)
+                throw new InvalidOperationException($"Property '{propertyName}' not found in ControllerOptions.");
+
+            return (ControllerType)property.GetValue(optionsInstance);
+        }
+        
+#nullable enable
+        private static InputConfig HandlePlayerConfiguration(string inputProfileName, string inputId, string inputDSUServer, PlayerIndex index, Options? option, ControllerOptions? controllerOptions = null)
+#nullable disable
         {
             if (inputId == null)
             {
@@ -1062,27 +1167,10 @@ namespace Ryujinx.Headless.SDL2
                 }
             }
 
-            string gamepadName = gamepad.Name;
 
             gamepad.Dispose();
 
             InputConfig config;
-
-            Common.Configuration.Hid.ControllerType GetControllerTypeByIndex(Options optionsInstance, int index)
-            {
-                if (index < 0 || index > 7)
-                    throw new ArgumentOutOfRangeException(nameof(index), "Index must be between 0 and 7.");
-
-                string propertyName = $"controllerType{index + 1}";
-                var property = typeof(Options).GetProperty(propertyName);
-
-                if (property == null)
-                    throw new InvalidOperationException($"Property '{propertyName}' not found in Options.");
-
-                return (Common.Configuration.Hid.ControllerType)property.GetValue(optionsInstance);
-            }
-
-
 
             if (inputProfileName == null || inputProfileName.Equals("default"))
             {
@@ -1151,10 +1239,23 @@ namespace Ryujinx.Headless.SDL2
                     }
                     else
                     {
-                        currentController = GetControllerTypeByIndex(option, (int)index);
+                        if (option == null)
+                        {
+                            if (controllerOptions != null)
+                            {
+                                currentController = GetControllerTypeByIndex(controllerOptions, (int)index);
+                            }
+                            else
+                            {
+                                currentController = ControllerType.JoyconPair;
+                            }
+                        } else
+                        {
+                            currentController = GetControllerTypeByIndex(option, (int)index);
+                        }
                     }
 
-                    Console.WriteLine($"Configuring {index} as {currentController}");
+                    Console.WriteLine($"Configuring {inputId} as {currentController} ({index})");
 
                     config = new StandardControllerInputConfig
                     {
@@ -1385,6 +1486,11 @@ namespace Ryujinx.Headless.SDL2
 
             static void LoadPlayerConfiguration(string inputProfileName, string inputId, string inputDSUServer, PlayerIndex index, Options option)
             {
+                if (inputId == null)
+                {
+                    return;
+                }
+
                 InputConfig inputConfig = HandlePlayerConfiguration(inputProfileName, inputId, inputDSUServer, index, option);
 
                 if (inputConfig != null)
@@ -1451,7 +1557,14 @@ namespace Ryujinx.Headless.SDL2
             AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
             {
                 var ex = e.ExceptionObject as Exception;
-                Logger.Info?.Print(LogClass.Application, "Unhandled exception: " + ex?.ToString());
+                var trace = new System.Diagnostics.StackTrace(ex, true);
+                var frame = trace.GetFrame(0);
+                var file = frame?.GetFileName();
+                var line = frame?.GetFileLineNumber();
+
+                Logger.Info?.Print(LogClass.Application,
+                    $"Unhandled exception: {ex}\nFile: {file}\nLine: {line}");
+
             };
 
 
@@ -1994,4 +2107,6 @@ namespace Ryujinx.Headless.SDL2
             }
         }
     }
+
+
 }

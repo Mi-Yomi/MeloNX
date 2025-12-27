@@ -26,14 +26,6 @@ struct iOSNav<Content: View>: View {
     }
 }
 
-func threadEntry(_ arg: () -> Void) -> UnsafeMutableRawPointer? {
-    arg()
-    return nil
-}
-
-
-
-
 class Ryujinx : ObservableObject {
     // Models
     @Published var isRunning = false
@@ -62,50 +54,22 @@ class Ryujinx : ObservableObject {
     let controllerManager = ControllerManager.shared
     
     // Ryujinx Thread
-    var thread: pthread_t? = nil
+    var runner = Runner()
     
     static let shared = Ryujinx()
     
     init() {
         checkForJIT()
     }
-
+    
     func addGames() {
         self.games = loadGames()
     }
     
     func runloop(_ cool: @escaping () -> Void) {
-        if UserDefaults.standard.bool(forKey: "runOnMainThread") {
-            RunLoop.main.perform {
-                cool()
-            }
-        } else {
-            // Box the closure
-            let boxed = Unmanaged.passRetained(ClosureBox(cool)).toOpaque()
-
-            var thread: pthread_t?
-            let result = pthread_create(&thread, nil, { arg in
-                let unmanaged = Unmanaged<ClosureBox>.fromOpaque(arg)
-                let box = unmanaged.takeRetainedValue()
-                box.closure()
-                return nil
-            }, boxed)
-
-            if result == 0 {
-                pthread_detach(thread!)
-            } else {
-                print("Failed to create thread: \(result)")
-                Unmanaged<ClosureBox>.fromOpaque(boxed).release()
-            }
-        }
+        runner.start(cool)
     }
-
-    private class ClosureBox {
-        let closure: () -> Void
-        init(_ closure: @escaping () -> Void) {
-            self.closure = closure
-        }
-    }
+    
     
     public class Arguments : Observable, Codable, Equatable {
         @IgnoreCoding var gamepath: String = ""
@@ -119,9 +83,9 @@ class Ryujinx : ObservableObject {
         var listinputids: Bool = false
         var aspectRatio: AspectRatio = .fixed16x9
         var memoryManagerMode: String = "HostMappedUnsafe"
-        var disableShaderCache: Bool = false
+        var enableShaderCache: Bool = false
         var hypervisor: Bool = false
-        var disableDockedMode: Bool = false
+        var enableDockedMode: Bool = false
         var enableTextureRecompression: Bool = true
         var additionalArgs: [String] = []
         var maxAnisotropy: Double = 1.0
@@ -133,34 +97,34 @@ class Ryujinx : ObservableObject {
         var disablevsync: Bool = false
         var language: SystemLanguage = .americanEnglish
         var regioncode: SystemRegionCode = .usa
-
+        
         
         static func == (lhs: Arguments, rhs: Arguments) -> Bool {
             return lhs.resscale == rhs.resscale &&
-                   lhs.debuglogs == rhs.debuglogs &&
-                   lhs.tracelogs == rhs.tracelogs &&
-                   lhs.nintendoinput == rhs.nintendoinput &&
-                   lhs.enableInternet == rhs.enableInternet &&
-                   lhs.listinputids == rhs.listinputids &&
-                   lhs.aspectRatio == rhs.aspectRatio &&
-                   lhs.memoryManagerMode == rhs.memoryManagerMode &&
-                   lhs.disableShaderCache == rhs.disableShaderCache &&
-                   lhs.hypervisor == rhs.hypervisor &&
-                   lhs.disableDockedMode == rhs.disableDockedMode &&
-                   lhs.enableTextureRecompression == rhs.enableTextureRecompression &&
-                   lhs.additionalArgs == rhs.additionalArgs &&
-                   lhs.maxAnisotropy == rhs.maxAnisotropy &&
-                   lhs.macroHLE == rhs.macroHLE &&
-                   lhs.ignoreMissingServices == rhs.ignoreMissingServices &&
-                   lhs.expandRam == rhs.expandRam &&
-                   lhs.dfsIntegrityChecks == rhs.dfsIntegrityChecks &&
-                   lhs.disablePTC == rhs.disablePTC &&
-                   lhs.disablevsync == rhs.disablevsync &&
-                   lhs.language == rhs.language &&
-                   lhs.regioncode == rhs.regioncode 
+            lhs.debuglogs == rhs.debuglogs &&
+            lhs.tracelogs == rhs.tracelogs &&
+            lhs.nintendoinput == rhs.nintendoinput &&
+            lhs.enableInternet == rhs.enableInternet &&
+            lhs.listinputids == rhs.listinputids &&
+            lhs.aspectRatio == rhs.aspectRatio &&
+            lhs.memoryManagerMode == rhs.memoryManagerMode &&
+            lhs.enableShaderCache == rhs.enableShaderCache &&
+            lhs.hypervisor == rhs.hypervisor &&
+            lhs.enableDockedMode == rhs.enableDockedMode &&
+            lhs.enableTextureRecompression == rhs.enableTextureRecompression &&
+            lhs.additionalArgs == rhs.additionalArgs &&
+            lhs.maxAnisotropy == rhs.maxAnisotropy &&
+            lhs.macroHLE == rhs.macroHLE &&
+            lhs.ignoreMissingServices == rhs.ignoreMissingServices &&
+            lhs.expandRam == rhs.expandRam &&
+            lhs.dfsIntegrityChecks == rhs.dfsIntegrityChecks &&
+            lhs.disablePTC == rhs.disablePTC &&
+            lhs.disablevsync == rhs.disablevsync &&
+            lhs.language == rhs.language &&
+            lhs.regioncode == rhs.regioncode
         }
     }
-
+    
     
     func start(with config: Arguments) throws {
         guard !isRunning else {
@@ -199,6 +163,7 @@ class Ryujinx : ObservableObject {
                 Task { @MainActor in
                     self.isRunning = false
                 }
+                
                 Thread.sleep(forTimeInterval: 0.3)
                 let logs = LogCapture.shared.capturedLogs
                 let parsedLogs = extractExceptionInfo(logs)
@@ -258,36 +223,36 @@ class Ryujinx : ObservableObject {
     
     static func clearShaderCache(_ titleId: String = "") {
         showAlert(title: "Clear Shader Cache", message: titleId.isEmpty ? "Are you sure you want to clear ALL shader cache?" : "Are you sure you want to clear your shader cache?",
-                      actions: [
-                          (title: "Cancel", style: .cancel, handler: nil),
-                          (title: "Clear", style: .destructive, handler: {
-                              if titleId.isEmpty {
-                                  let fileManager = FileManager.default
-                                  let gamesURL = URL.documentsDirectory.appendingPathComponent("games")
-                                  
-                                  do {
-                                      let contents = try fileManager.contentsOfDirectory(at: gamesURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
-                                      
-                                      let folderURLs = contents.filter { url in
-                                          (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                                      }
-                                      
-                                      for folderURL in folderURLs {
-                                          try? fileManager.removeItem(at: folderURL.appendingPathComponent("cache"))
-                                      }
-                                  
-                                  } catch {
-                                      print("Error reading games folder: \(error)")
-                                  }
-                              } else {
-                                  let fileManager = FileManager.default
-                                  let cacheURL = URL.documentsDirectory.appendingPathComponent("games").appendingPathComponent(titleId).appendingPathComponent("cache")
-                                  
-                                  try? fileManager.removeItem(at: cacheURL)
-                              }
-                          }),
-                      ]
-                  )
+                  actions: [
+                    (title: "Cancel", style: .cancel, handler: nil),
+                    (title: "Clear", style: .destructive, handler: {
+                        if titleId.isEmpty {
+                            let fileManager = FileManager.default
+                            let gamesURL = URL.documentsDirectory.appendingPathComponent("games")
+                            
+                            do {
+                                let contents = try fileManager.contentsOfDirectory(at: gamesURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
+                                
+                                let folderURLs = contents.filter { url in
+                                    (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                                }
+                                
+                                for folderURL in folderURLs {
+                                    try? fileManager.removeItem(at: folderURL.appendingPathComponent("cache"))
+                                }
+                                
+                            } catch {
+                                print("Error reading games folder: \(error)")
+                            }
+                        } else {
+                            let fileManager = FileManager.default
+                            let cacheURL = URL.documentsDirectory.appendingPathComponent("games").appendingPathComponent(titleId).appendingPathComponent("cache")
+                            
+                            try? fileManager.removeItem(at: cacheURL)
+                        }
+                    }),
+                  ]
+        )
         
     }
     
@@ -296,7 +261,7 @@ class Ryujinx : ObservableObject {
         let message: String
         let lineIndex: Int
     }
-
+    
     func extractExceptionInfo(_ logs: [String]) -> ExceptionInfo? {
         for i in (0..<logs.count).reversed() {
             let line = logs[i]
@@ -326,13 +291,13 @@ class Ryujinx : ObservableObject {
         
         return nil
     }
-
+    
     
     func stop() throws {
         guard isRunning else {
             throw RyujinxError.notRunning
         }
-
+        
         isRunning = false
         
         UserDefaults.standard.set(false, forKey: "lockInApp")
@@ -342,16 +307,16 @@ class Ryujinx : ObservableObject {
         
         
     }
-
+    
     
     func loadGames() -> [Game] {
         let fileManager = FileManager.default
         guard let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
-
+        
         var romdirs: [URL] = [documentsDirectory.appendingPathComponent("roms")]
         let romfoldermanager = ROMFolderManager.shared
         romfoldermanager.loadBookmarks()
-
+        
         for bookmarkData in romfoldermanager.bookmarks {
             var isStale = false
             do {
@@ -359,7 +324,7 @@ class Ryujinx : ObservableObject {
                                   options: [withSecurityScope],
                                   relativeTo: nil,
                                   bookmarkDataIsStale: &isStale)
-
+                
                 if isStale {
                     if fileManager.fileExists(atPath: url.path) {
                         _ = romfoldermanager.addFolder(url: url)
@@ -367,7 +332,7 @@ class Ryujinx : ObservableObject {
                 }
                 
                 print(url.path)
-
+                
                 if url.startAccessingSecurityScopedResource() {
                     romdirs.append(url)
                 }
@@ -375,7 +340,7 @@ class Ryujinx : ObservableObject {
                 print("Failed to resolve bookmark: \(error)")
             }
         }
-
+        
         let originalRom = documentsDirectory.appendingPathComponent("roms")
         if !fileManager.fileExists(atPath: originalRom.path) {
             do {
@@ -384,23 +349,23 @@ class Ryujinx : ObservableObject {
                 print("Failed to create roms directory: \(error)")
             }
         }
-
+        
         var games: [Game] = []
-
+        
         for romsDirectory in romdirs {
             if let enumerator = fileManager.enumerator(at: romsDirectory, includingPropertiesForKeys: nil) {
                 for case let fileURL as URL in enumerator {
                     if !GameFileType.isSupported(fileExtension: fileURL.pathExtension) {
                         continue
                     }
-
+                    
                     do {
                         let handle = try FileHandle(forReadingFrom: fileURL)
                         let fileExtension = (fileURL.pathExtension as NSString)
                         let gameInfo = RyujinxBridge.getGameInfo(arg0: handle.fileDescriptor, arg1: fileExtension)
-
+                        
                         let game = Game.convertGameInfoToGame(gameInfo: gameInfo, url: fileURL)
-
+                        
                         games.append(game)
                     } catch {
                         print("Failed to read file at \(fileURL): \(error)")
@@ -410,11 +375,11 @@ class Ryujinx : ObservableObject {
             
             romsDirectory.stopAccessingSecurityScopedResource()
         }
-
+        
         return games
     }
-
-
+    
+    
     func buildCommandLineArgs(from config: Arguments) -> [String] {
         var args: [String] = []
         
@@ -437,8 +402,6 @@ class Ryujinx : ObservableObject {
             args.append(contentsOf: ["--exclusive-fullscreen-width", "\(Int(target.width))"])
             args.append(contentsOf: ["--exclusive-fullscreen-height", "\(Int(target.height))"])
         }
-        // We don't need this. Ryujinx should handle it fine :3
-        // this also causes crashes in some games :3
         
         var model = ""
         
@@ -471,7 +434,7 @@ class Ryujinx : ObservableObject {
         args.append(contentsOf: ["--system-timezone", TimeZone.current.identifier])
         
         // args.append(contentsOf: ["--system-time-offset", String(TimeZone.current.secondsFromGMT())])
-
+        
         
         if config.nintendoinput {
             args.append("--correct-controller")
@@ -485,7 +448,7 @@ class Ryujinx : ObservableObject {
             args.append("--disable-vsync")
         }
         
-         
+        
         if config.hypervisor {
             args.append("--use-hypervisor")
         }
@@ -530,15 +493,16 @@ class Ryujinx : ObservableObject {
             args.append("--disable-macro-hle")
         }
         
-        if !config.disableShaderCache { // same with disableShaderCache
+        // Finally fixed these by replacing disable with enable.
+        if !config.enableShaderCache {
             args.append("--disable-shader-cache")
         }
         
-        if !config.disableDockedMode { // disableDockedMode is actually enableDockedMode, i just have flipped it around in the settings page to make it easier to understand :3
+        if !config.enableDockedMode {
             args.append("--disable-docked-mode")
         }
         if config.enableTextureRecompression {
-            args.append("--enable-texture-recompression")
+            // args.append("--enable-texture-recompression")
         }
         
         if config.debuglogs {
@@ -547,7 +511,7 @@ class Ryujinx : ObservableObject {
         if config.tracelogs {
             args.append("--enable-trace-logs")
         }
-
+        
         // List the input ids
         if config.listinputids {
             args.append("--list-inputs-ids")
@@ -555,26 +519,61 @@ class Ryujinx : ObservableObject {
         
         // Append the input ids (limit to 8 (used to be 4) just in case)
         if !config.inputids.isEmpty {
-            config.inputids.prefix(8).enumerated().forEach { index, inputId in
-                // controllerType
-                if let controller = controllerManager.controllerForString(inputId), controller.type == .handheld {
-                    args.append(contentsOf: ["--input-id-handheld", inputId])
-                } else {
-                    args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
-                }
+            for (index, inputId) in config.inputids.prefix(8).enumerated() {
+                if args.contains(inputId) { continue }
                 
+                // controllerType
                 if let controller = controllerManager.controllerForString(inputId) {
+                    controller.setupController()
+                    if controller.type == .handheld {
+                        args.append(contentsOf: ["--input-id-handheld", inputId])
+                    } else {
+                        args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
+                    }
+                    
                     args.append(contentsOf: ["--controller-type-\(index + 1)", controller.type.rawValue])
-                } else {
+                } else if inputId == "0" {
+                    args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
                     args.append(contentsOf: ["--controller-type-\(index + 1)", ControllerType.proController.rawValue])
                 }
             }
         }
         
         args.append(contentsOf: config.additionalArgs)
-
+        
         return args
     }
+    
+    func reloadControllersWithInfo() {
+        var args: [String] = []
+        
+        if !controllerManager.selectedControllers.isEmpty {
+            for (index, inputId) in controllerManager.selectedControllers.prefix(8).enumerated() {
+                if args.contains(inputId) { continue }
+                
+                // controllerType
+                if let controller = controllerManager.controllerForString(inputId) {
+                    controller.setupController()
+                    if controller.type == .handheld {
+                        args.append(contentsOf: ["--input-id-handheld", inputId])
+                    } else {
+                        args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
+                    }
+                    
+                    args.append(contentsOf: ["--controller-type-\(index + 1)", controller.type.rawValue])
+                } else if inputId == "0" {
+                    args.append(contentsOf: ["--input-id-\(index + 1)", inputId])
+                    args.append(contentsOf: ["--controller-type-\(index + 1)", ControllerType.proController.rawValue])
+                }
+            }
+        } else {
+            args.append(contentsOf: ["--input-id-1", "0"])
+            args.append(contentsOf: ["--controller-type-1", ControllerType.proController.rawValue])
+        }
+        
+        RyujinxBridge.changeControllerInfo(argv: args)
+    }
+    
     
     func checkIfKeysImported() -> Bool {
         let keysDirectory = URL.documentsDirectory.appendingPathComponent("system")

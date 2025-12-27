@@ -404,22 +404,8 @@ namespace Ryujinx.Cpu.LightningJit
             {
                 return _dualMappedCache.MapPageAligned(code);
             }
-            else
-            {
-                IntPtr ptr = Marshal.AllocHGlobal(code.Length);
-
-                // Copy code into unmanaged memory
-                unsafe
-                {
-                    fixed (byte* pCode = code)
-                    {
-                        Buffer.MemoryCopy(pCode, (void*)ptr, code.Length, code.Length);
-                    }
-                }
-
-                // return JitCache.Map(code);
-                return ptr;
-            }
+            
+            return JitCache.Map(code);
         }
 
         private static Operand Register(int register, OperandType type = OperandType.I64)

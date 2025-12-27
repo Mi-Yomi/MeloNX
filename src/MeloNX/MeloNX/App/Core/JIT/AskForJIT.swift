@@ -11,7 +11,7 @@ import UIKit
 
 func askForJIT() {
     // Check if TrollStore exists by checking the presence of the directory
-    let urlScheme = "apple-magnifier://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier!)"
+    let urlScheme = "apple-magnifier://enable-jit?bundle-id=\(Bundle.main.swizzled_bundleIdentifier!)"
     if let launchURL = URL(string: urlScheme) {
         if UIApplication.shared.canOpenURL(launchURL) {
             // Open the URL to enable JIT

@@ -122,6 +122,8 @@ namespace Ryujinx.Input.HLE
             {
                 NpadController[] oldControllers = _controllers.ToArray();
 
+                Console.WriteLine($"Reloading input configuration... {inputConfig} controllers");
+
                 List<InputConfig> validInputs = new();
 
                 foreach (InputConfig inputConfigEntry in inputConfig)
@@ -141,6 +143,10 @@ namespace Ryujinx.Input.HLE
                     }
 
                     bool isValid = DriverConfigurationUpdate(ref controller, inputConfigEntry);
+
+                    Console.WriteLine(isValid
+                        ? $" - Player {inputConfigEntry.PlayerIndex}: Connected '{controller.Id}' as {inputConfigEntry.ControllerType}"
+                        : $" - Player {inputConfigEntry.PlayerIndex}: No valid controller found for configuration '{inputConfigEntry.Id}'");
 
                     if (!isValid)
                     {

@@ -142,34 +142,35 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         public long AwaitResult(AutoResetEvent wakeSignal = null)
         {
             long data = _defaultValue;
+            int iterations = 0;
 
-            if (wakeSignal == null)
+            while (WaitingForValue(data))
             {
-                while (WaitingForValue(data))
+                if (iterations++ >= MaxQueryRetries)
                 {
-                    data = Marshal.ReadInt64(_bufferMap);
-                }
-            }
-            else
-            {
-                int iterations = 0;
-                while (WaitingForValue(data) && iterations++ < MaxQueryRetries)
-                {
-                    data = Marshal.ReadInt64(_bufferMap);
-                    if (WaitingForValue(data))
-                    {
-                        wakeSignal.WaitOne(1);
-                    }
+                    Logger.Error?.Print(
+                        LogClass.Gpu,
+                        $"Query {_type} timed out after {MaxQueryRetries} retries."
+                    );
+
+                    break;
                 }
 
-                if (iterations >= MaxQueryRetries)
+                data = Marshal.ReadInt64(_bufferMap);
+
+                if (wakeSignal != null)
                 {
-                    Logger.Error?.Print(LogClass.Gpu, $"Error: Query result {_type} timed out. Took more than {MaxQueryRetries} tries.");
+                    wakeSignal.WaitOne(1);
+                }
+                else
+                {
+                    Thread.Yield(); 
                 }
             }
 
             return data;
         }
+
 
         public void PoolReset(CommandBuffer cmd, int resetSequence)
         {

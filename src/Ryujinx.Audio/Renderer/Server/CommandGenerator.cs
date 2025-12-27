@@ -11,6 +11,7 @@ using Ryujinx.Audio.Renderer.Server.Sink;
 using Ryujinx.Audio.Renderer.Server.Splitter;
 using Ryujinx.Audio.Renderer.Server.Voice;
 using Ryujinx.Audio.Renderer.Utils;
+using Ryujinx.Common.Logging; 
 using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -789,37 +790,43 @@ namespace Ryujinx.Audio.Renderer.Server
                 GeneratePerformance(ref performanceEntry, PerformanceCommand.Type.Start, nodeId);
             }
 
-            switch (effect.Type)
+            try
             {
-                case EffectType.BufferMix:
-                    GenerateBufferMixerEffect((int)mix.BufferOffset, (BufferMixEffect)effect, nodeId);
-                    break;
-                case EffectType.AuxiliaryBuffer:
-                    GenerateAuxEffect(mix.BufferOffset, (AuxiliaryBufferEffect)effect, nodeId);
-                    break;
-                case EffectType.Delay:
-                    GenerateDelayEffect(mix.BufferOffset, (DelayEffect)effect, nodeId, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
-                    break;
-                case EffectType.Reverb:
-                    GenerateReverbEffect(mix.BufferOffset, (ReverbEffect)effect, nodeId, mix.IsLongSizePreDelaySupported, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
-                    break;
-                case EffectType.Reverb3d:
-                    GenerateReverb3dEffect(mix.BufferOffset, (Reverb3dEffect)effect, nodeId, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
-                    break;
-                case EffectType.BiquadFilter:
-                    GenerateBiquadFilterEffect(mix.BufferOffset, (BiquadFilterEffect)effect, nodeId);
-                    break;
-                case EffectType.Limiter:
-                    GenerateLimiterEffect(mix.BufferOffset, (LimiterEffect)effect, nodeId, effectId);
-                    break;
-                case EffectType.CaptureBuffer:
-                    GenerateCaptureEffect(mix.BufferOffset, (CaptureBufferEffect)effect, nodeId);
-                    break;
-                case EffectType.Compressor:
-                    GenerateCompressorEffect(mix.BufferOffset, (CompressorEffect)effect, nodeId, effectId);
-                    break;
-                default:
-                    throw new NotImplementedException($"Unsupported effect type {effect.Type}");
+                switch (effect.Type)
+                {
+                    case EffectType.BufferMix:
+                        GenerateBufferMixerEffect((int)mix.BufferOffset, (BufferMixEffect)effect, nodeId);
+                        break;
+                    case EffectType.AuxiliaryBuffer:
+                        GenerateAuxEffect(mix.BufferOffset, (AuxiliaryBufferEffect)effect, nodeId);
+                        break;
+                    case EffectType.Delay:
+                        GenerateDelayEffect(mix.BufferOffset, (DelayEffect)effect, nodeId, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
+                        break;
+                    case EffectType.Reverb:
+                        GenerateReverbEffect(mix.BufferOffset, (ReverbEffect)effect, nodeId, mix.IsLongSizePreDelaySupported, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
+                        break;
+                    case EffectType.Reverb3d:
+                        GenerateReverb3dEffect(mix.BufferOffset, (Reverb3dEffect)effect, nodeId, _rendererContext.BehaviourInfo.IsNewEffectChannelMappingSupported());
+                        break;
+                    case EffectType.BiquadFilter:
+                        GenerateBiquadFilterEffect(mix.BufferOffset, (BiquadFilterEffect)effect, nodeId);
+                        break;
+                    case EffectType.Limiter:
+                        GenerateLimiterEffect(mix.BufferOffset, (LimiterEffect)effect, nodeId, effectId);
+                        break;
+                    case EffectType.CaptureBuffer:
+                        GenerateCaptureEffect(mix.BufferOffset, (CaptureBufferEffect)effect, nodeId);
+                        break;
+                    case EffectType.Compressor:
+                        GenerateCompressorEffect(mix.BufferOffset, (CompressorEffect)effect, nodeId, effectId);
+                        break;
+                    default:
+                        throw new NotImplementedException($"Unsupported effect type {effect.Type}");
+                }
+            } catch
+            {
+                Logger.Debug?.Print(LogClass.AudioRenderer, $"Error while generating effect of type {effect.Type} for mix {mix.MixId} at node {nodeId}");
             }
 
             if (performanceInitialized)

@@ -43,6 +43,7 @@ class ROMFolderManager: ObservableObject {
     func getUrl(from bookmark: Data) -> URL? {
         var isStale = false
         
+        
         do {
             var url = try URL(
                 resolvingBookmarkData: bookmark,

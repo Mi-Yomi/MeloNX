@@ -1,0 +1,109 @@
+//
+//  MeloNXApp.swift
+//  MeloNX
+//
+//  Created by Stossy11 on 09/11/2025.
+//
+
+import SwiftUI
+
+struct EnvironmentVariable: Codable, Hashable {
+    let string: String
+    var value: String
+    
+    func set() {
+        setenv(string, value, 1)
+    }
+    
+    static func set(_ env: EnvironmentVariable) {
+        setenv(env.string, env.value, 1)
+    }
+}
+
+@main
+struct MeloNXApp: App {
+    @AppStorage("hasbeenfinished") var inSetup: Bool = true
+    @AppStorage("skippedSetup") var skippedSetup: Bool = false
+    @State var viewShown = false
+
+    
+    let environment: [EnvironmentVariable] = [
+        EnvironmentVariable(string: "MVK_USE_METAL_PRIVATE_API", value: "1"),
+        EnvironmentVariable(string: "MVK_CONFIG_USE_METAL_PRIVATE_API", value: "1"),
+        EnvironmentVariable(string: "MVK_DEBUG", value: "0"),
+        EnvironmentVariable(string: "MVK_CONFIG_PREFILL_METAL_COMMAND_BUFFERS", value: "0"),
+        EnvironmentVariable(string: "MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE", value: "512"),
+        // EnvironmentVariable(string: "MVK_CONFIG_SHADER_COMPRESSION_ALGORITHM", value: "4"),
+        EnvironmentVariable(string: "DOTNET_DefaultStackSize", value: "200000") // probably doesn't work on NativeAOT
+    ]
+    
+    let fileManager = FileManager.default
+    
+    init() {
+        SDL_SetMainReady()
+        SDL_iPhoneSetEventPump(SDL_TRUE)
+        SDL_Init(SDL_INIT_EVENTS | SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK | SDL_INIT_AUDIO | SDL_INIT_VIDEO)
+        setupEnvironment()
+    }
+    
+    var body: some Scene {
+        WindowGroup {
+            Group {
+                if !inSetup {
+                    ContentView(viewShown: $viewShown)
+                        .onAppear() {
+                            if skippedSetup {
+                                return
+                            }
+                            
+                            if !Ryujinx.shared.checkIfKeysImported() {
+                                inSetup = true
+                            }
+                            let firmware = Ryujinx.shared.fetchFirmwareVersion()
+                            
+                            if (firmware == "" ? "0" : firmware) == "0" {
+                                inSetup = true
+                            }
+                        }
+                } else {
+                    SetupView(isInSetup: $inSetup)
+                        .onAppear() {
+                            skippedSetup = false
+                        }
+                }
+            }
+        }
+    }
+    
+    func setupEnvironment() {
+        environment.forEach { env in
+            env.set()
+        }
+        
+        EnvironmentVariable(string: "HAS_TXM", value: ProcessInfo.processInfo.hasTXM && !ProcessInfo.processInfo.isiOSAppOnMac ? "1" : "0").set()
+
+        RyujinxBridge.initialize()
+        
+        let cool: Bool
+        if #available(iOS 19, *) {
+            if ProcessInfo.processInfo.hasTXM {
+                NativeSettingsManager.shared.setting(forKey: "DUAL_MAPPED_JIT", default: true).value = true
+            }
+            
+            cool = NativeSettingsManager.shared.setting(forKey: "DUAL_MAPPED_JIT", default: true).value
+        } else {
+            cool = NativeSettingsManager.shared.setting(forKey: "DUAL_MAPPED_JIT", default: false).value
+        }
+        
+        JIT26BreakpointHandler()
+        
+        if cool {
+            EnvironmentVariable(string: "DUAL_MAPPED_JIT", value: "1").set()
+            LaunchGameHandler.succeededJIT = RyujinxBridge.initialize_dualmapped()
+        } else {
+            EnvironmentVariable(string: "DUAL_MAPPED_JIT", value: "0").set()
+        }
+    }
+}
+
+

@@ -50,35 +50,24 @@ func checkifappinstalled(_ id: String) -> Bool {
     let result = SBSLaunchApplicationWithIdentifier(bundleID, suspended)
 
     return result == 9
-}
+} 
 
 func enableJITStik() {
-    if !ProcessInfo.processInfo.hasTXM {
-        let urlScheme = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier ?? "wow")"
-        if let launchURL = URL(string: urlScheme), !isJITEnabled() {
-            UIApplication.shared.open(launchURL, options: [:], completionHandler: nil)
+    let bundle = shouldAsCopy ? Bundle.main.swizzled_bundleIdentifier : Bundle.main.bundleIdentifier
+    var urlScheme: String = "stikjit://enable-jit?bundle-id=" + (bundle ?? Bundle.main.originalBundleID!)
+    
+    if #available(iOS 19.0, *), !ProcessInfo.processInfo.hasTXM {
+        let scriptdata = script.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        if isInLiveContainer.0 {
+            urlScheme += "&pid=\(getpid())&script-name=MeloNX"
         }
-        return
+        
+        urlScheme += "&script-data=\(scriptdata)"
     }
     
-    if #available(iOS 19.0, *), !isInLiveContainer.0 {
-        let scriptdata = script.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlScheme = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier ?? "wow")&script-data=\(scriptdata)"
-        if let launchURL = URL(string: urlScheme), !isJITEnabled() {
-            UIApplication.shared.open(launchURL, options: [:], completionHandler: nil)
-        }
-    } else if #available(iOS 19.0, *), isInLiveContainer.0 {
-        
-        let scriptdata = script.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlScheme = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier ?? "wow")&pid=\(getpid())&script-name=MeloNX&script-data=\(scriptdata)"
-        if let launchURL = URL(string: urlScheme), !isJITEnabled() {
-            UIApplication.shared.open(launchURL, options: [:], completionHandler: nil)
-        }
-    } else {
-        let urlScheme = "stikjit://enable-jit?bundle-id=\(Bundle.main.bundleIdentifier ?? "wow")"
-        if let launchURL = URL(string: urlScheme), !isJITEnabled() {
-            UIApplication.shared.open(launchURL, options: [:], completionHandler: nil)
-        }
+    
+    if let launchURL = URL(string: urlScheme), !isJITEnabled() {
+        UIApplication.shared.open(launchURL, options: [:], completionHandler: nil)
     }
 }
 

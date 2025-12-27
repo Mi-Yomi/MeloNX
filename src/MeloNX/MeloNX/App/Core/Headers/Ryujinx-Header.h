@@ -58,7 +58,6 @@ struct AvatarArray
     struct AvatarInfo* Avatars;
 };
 
-
 typedef void (^SwiftCallback)(NSString *result);
 typedef void (^SwiftCallback2)(NSData *result);
 

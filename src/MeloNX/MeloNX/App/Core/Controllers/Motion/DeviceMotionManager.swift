@@ -34,7 +34,9 @@ class DeviceMotionManager {
     func start() {
         guard !isActive else { return }
         
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        DispatchQueue.main.async {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        }
         
         motionManager.startDeviceMotionUpdates(to: motionQueue) { [weak self] motion, error in
             guard let self = self, let motion = motion else { return }
@@ -48,7 +50,9 @@ class DeviceMotionManager {
         guard isActive else { return }
         
         motionManager.stopDeviceMotionUpdates()
-        UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        DispatchQueue.main.async {
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        }
         isActive = false
     }
     

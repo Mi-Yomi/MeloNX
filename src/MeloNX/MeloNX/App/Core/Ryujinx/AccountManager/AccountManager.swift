@@ -9,14 +9,7 @@ import Foundation
 
 class AccountManager {
     static func createAccount(name: String, imageData: Data) {
-        name.withCString { namePtr in
-            imageData.withUnsafeBytes { bufferPtr in
-                let imagePtr = String(cString: bufferPtr.baseAddress!.assumingMemoryBound(to: CChar.self))
-                
-                RyujinxBridge.createAccount(name: name, image: imagePtr)
-                // create_account(UnsafeMutablePointer(mutating: namePtr), UnsafeMutablePointer(mutating: imagePtr), Int32(imageData.count))
-            }
-        }
+        RyujinxBridge.createAccount(name: name, image: imageData)
     }
     
     static func openUser(_ id: String) {
