@@ -71,7 +71,11 @@ struct MusicSelectorView: View {
                 ForEach(items) { music in
                     HStack {
                         Button(music.path) {
-                            selectedItem.path = music.path
+                            if music.path == selectedItem.path {
+                                selectedItem.path = ""
+                            } else {
+                                selectedItem.path = music.path
+                            }
                             selectedItem.loop = false
                         }
                         Spacer()
@@ -97,7 +101,7 @@ struct MusicSelectorView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if Self.isPlaying {
                         Button {
-                            FileImporterManager.shared.importFiles(types: [.item], allowMultiple: true, completion: handleFileImport)
+                            Self.stopMusic()
                         } label: {
                             Label("Stop", systemImage: "x.circle")
                         }
