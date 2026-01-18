@@ -65,7 +65,7 @@ Download and install MeloNX using your preferred Apple ID sideloader:
 #### 5. Enable JIT
   - Enable JIT using your preferred method. We recommend [StikDebug](https://apps.apple.com/us/app/stikdebug/id6744045754).
 
-### Free Developer Account (PlumeImpactor)
+### Free Developer Account (PlumeImpactor, Recommended)
 
 >  [SideStore](https://sidestore.io/) is recommended for an on-device Sideloader, and should be installed before performing this install.
 
@@ -97,7 +97,7 @@ To have MeloNX show inside SideStore (or AltStore), You must re-install it:
   - Enable JIT using your preferred method. We recommend [StikDebug](https://apps.apple.com/us/app/stikdebug/id6744045754).
 
    
-### Free Developer Account (On-Device)
+### Free Developer Account (On-Device, Legacy)
 
 >  [SideStore](https://sidestore.io/) is recommended to Sideload MeloNX.
 
@@ -110,7 +110,7 @@ Download and install both apps using your preferred **APPLE ID** sideloader:
   - **Entitlement App**: [Download IPA](https://github.com/hugeBlack/GetMoreRam/releases/download/nightly/Entitlement.ipa)
 
 #### 2. Enable Memory Entitlement
-> If the Entitlement / GetMoreRam app isn't working correctly, the new Xcode Method is for you. 
+> If the Entitlement / GetMoreRam app isn't working correctly, the new PlumeImpactor Method is for you. 
   - Open the **Entitlement app** > **Settings**
   - Sign in with the same Apple ID you used to Sideload MeloNX.
   - Go to **App IDs** > tap **Refresh**
