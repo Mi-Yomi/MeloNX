@@ -70,7 +70,14 @@ class NativeController: BaseController {
 
     func setupTriggerChangeListener(_ button: GCControllerButtonInput, for key: ThumbstickType) {
         button.valueChangedHandler = { [unowned self] _, _, pressed in
-            setButtonState(pressed ? 1 : 0, for: key == .left ? .leftTrigger : .rightTrigger)
+            switch type {
+            case .joyconLeft:
+                setButtonState(pressed ? 1 : 0, for: key == .left ? .singleLeftTrigger0 : .singleRightTrigger0)
+            case .joyconRight:
+                setButtonState(pressed ? 1 : 0, for: key == .left ? .singleLeftTrigger1 : .singleRightTrigger1)
+            default:
+                setButtonState(pressed ? 1 : 0, for: key == .left ? .leftTrigger : .rightTrigger)
+            }
         }
     }
 }

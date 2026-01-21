@@ -1074,6 +1074,7 @@ struct ButtonConfiguration {
         case .start: return ButtonConfiguration(iconName: "plus.circle.fill")
         case .back: return ButtonConfiguration(iconName: "minus.circle.fill")
         case .guide: return ButtonConfiguration(iconName: "gearshape.fill")
+        default: return ButtonConfiguration(iconName: "")
         }
     }
 }
