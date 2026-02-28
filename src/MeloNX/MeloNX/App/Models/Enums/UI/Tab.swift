@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum Tab: Hashable {
-    case games
-    case settings
+enum Tab: Int, Hashable {
+    case games = 0
+    case settings = 1
 }

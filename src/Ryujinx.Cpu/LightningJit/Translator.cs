@@ -11,7 +11,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
-using System.IO;
+using Ryujinx.Common.Logging;
 
 namespace Ryujinx.Cpu.LightningJit
 {
@@ -169,6 +169,8 @@ namespace Ryujinx.Cpu.LightningJit
 
             NativeInterface.RegisterThread(context, Memory, this);
 
+            // NativeInterface.SetPageTablePointer();
+
             Stubs.DispatchLoop(context.NativeContextPtr, address);
 
 
@@ -177,27 +179,109 @@ namespace Ryujinx.Cpu.LightningJit
             _dualMappedCache?.ClearEntireThreadLocalCache();
         }
 
+
         internal IntPtr GetOrTranslatePointer(IntPtr framePointer, ulong address, ExecutionMode mode)
         {
+            int guestCodeLength = 0;
             try
             {
                 if (_noWxCache != null)
                 {
+                    if (_noWxCache.TryGetThreadLocalFunction(address, out IntPtr funcPtr))
+                    {
+                        return funcPtr;
+                    }
+
                     CompiledFunction func = Compile(address, mode);
+                    guestCodeLength = func.Code.Length;
                     return _noWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
                 }
                 else if (_dualMappedCache != null)
                 {
+                    if (_dualMappedCache.TryGetThreadLocalFunction(address, out IntPtr funcPtr))
+                    {
+                        return funcPtr;
+                    }
+
                     CompiledFunction func = Compile(address, mode);
+                    guestCodeLength = func.Code.Length;
                     return _dualMappedCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                return IntPtr.Zero;
+                // thank you @BXYMartin for helping with this diagnostic info.
+                string dualMappedEnv = Environment.GetEnvironmentVariable("DUAL_MAPPED_JIT");
+                string diagnosticInfo = $"GetOrTranslatePointer failed for address 0x{address:X16}:\n" +
+                    $"  framePointer: 0x{framePointer:X}\n" +
+                    $"  mode: {mode}\n" +
+                    $"  IsNoWxPlatform: {IsNoWxPlatform}\n" +
+                    $"  DUAL_MAPPED_JIT env: '{dualMappedEnv}'\n" +
+                    $"  DualMappedJitAllocator.hasTXM: {DualMappedJitAllocator.hasTXM}\n" +
+                    $"  _noWxCache: {(_noWxCache != null ? "NOT NULL" : "NULL")}\n" +
+                    $"  _dualMappedCache: {(_dualMappedCache != null ? "NOT NULL" : "NULL")}\n" +
+                    $"  originalDualMappedCache: {(originalDualMappedCache != null ? "NOT NULL" : "NULL")}\n" +
+                    $"  firstSet: {firstSet}\n" +
+                    $"  Exception: {ex.GetType().Name}: {ex.Message}\n" +
+                    $"  Stack trace: {ex.StackTrace}";
+                    
+                
+                Logger.Info?.Print(LogClass.Cpu, diagnosticInfo);
+                int nopLength = guestCodeLength > 0 ? guestCodeLength : 4;
+                return CreateNopFunction(framePointer, address, mode, nopLength);
             }
 
             return GetOrTranslate(address, mode).FuncPointer;
+        }
+
+        private IntPtr CreateNopFunction(IntPtr framePointer, ulong address, ExecutionMode mode, int guestCodeLength)
+        {
+            byte[] nopInstruction;
+            byte[] retInstruction;
+            int instructionSize;
+            
+            if (mode == ExecutionMode.Aarch64)
+            {
+                nopInstruction = new byte[] { 0x1F, 0x20, 0x03, 0xD5 };
+                retInstruction = new byte[] { 0xC0, 0x03, 0x5F, 0xD6 };
+                instructionSize = 4;
+            }
+            else
+            {
+                nopInstruction = new byte[] { 0x90 };
+                retInstruction = new byte[] { 0xC3 };
+                instructionSize = 1;
+            }
+            
+            int totalSize = Math.Max(guestCodeLength, instructionSize);
+            byte[] nopCode = new byte[totalSize];
+            
+            for (int i = 0; i < totalSize - instructionSize; i++)
+            {
+                nopCode[i] = nopInstruction[i % instructionSize];
+            }
+            
+            for (int i = 0; i < instructionSize; i++)
+            {
+                nopCode[totalSize - instructionSize + i] = retInstruction[i];
+            }
+            
+            try
+            {
+                if (_noWxCache != null)
+                {
+                    return _noWxCache.Map(framePointer, nopCode, address, (ulong)totalSize); 
+                }
+                else if (_dualMappedCache != null)
+                {
+                    return _dualMappedCache.Map(framePointer, nopCode, address, (ulong)totalSize);
+                }
+            }
+            catch (Exception nopEx)
+            {
+                Logger.Warning?.Print(LogClass.Cpu, $"Failed to create NOP function for 0x{address:X16}: {nopEx.Message}");
+            }
+            return IntPtr.Zero;
         }
 
         private TranslatedFunction GetOrTranslate(ulong address, ExecutionMode mode)
@@ -236,7 +320,7 @@ namespace Ryujinx.Cpu.LightningJit
             return new TranslatedFunction(funcPointer, (ulong)func.GuestCodeLength);
         }
 
-        private CompiledFunction Compile(ulong address, ExecutionMode mode)
+        public CompiledFunction Compile(ulong address, ExecutionMode mode)
         {
             return AarchCompiler.Compile(CpuPresets.CortexA57, Memory, address, FunctionTable, Stubs.DispatchStub, mode, RuntimeInformation.ProcessArchitecture);
         }

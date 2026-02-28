@@ -16,6 +16,7 @@ struct SettingsToggle: View {
     @AppStorage("toggleGreen") var toggleGreen: Bool = false
     @AppStorage("oldSettingsUI") var oldSettingsUI = false
     @State var isPresented: Bool = false
+
     
     var body: some View {
         Group {
@@ -35,7 +36,7 @@ struct SettingsToggle: View {
                             .font(.body)
                     }
                 }
-                .toggleStyle(SwitchToggleStyle(tint: .blue))
+                .toggleStyle(NoGlassToggleSwitchStyle())
                 .disabled(disabled)
                 .padding(.vertical, 6)
             } else {
@@ -92,5 +93,41 @@ struct SettingsToggle: View {
         var view = self
         view.disabled = disabled
         return view
+    }
+}
+
+private extension CGFloat {
+    static let toggleWidth: Self = 48
+    static let toggleHeight: Self = 29
+    static let cornerRadius: Self = 16
+    static let thumbDiameter: Self = 27
+}
+
+public struct NoGlassToggleSwitchStyle: ToggleStyle {
+    @StateObject var nativeSettings: NativeSettingsManager = .shared
+    
+     
+    public func makeBody(configuration: Self.Configuration) -> some View {
+        if nativeSettings.disableLiquidGlass.value {
+            HStack {
+                configuration.label
+                Spacer()
+                RoundedRectangle(cornerRadius: .cornerRadius, style: .circular)
+                    .fill(configuration.isOn ? Color.green : Color.gray)
+                    .frame(width: .toggleWidth, height: .toggleHeight)
+                    .overlay(
+                        Circle()
+                            .fill(.white)
+                            .shadow(radius: 1, x: 0, y: 1)
+                            .padding(1)
+                            .frame(width: .thumbDiameter, height: .thumbDiameter)
+                            .offset(x: configuration.isOn ? (.thumbDiameter - 9.5) / 2 : -(.thumbDiameter - 9.5) / 2)
+                    )
+                    .animation(Animation.easeInOut(duration: 0.2))
+                    .onTapGesture { configuration.isOn.toggle() }
+            }
+        } else {
+            SwitchToggleStyle(tint: .green).makeBody(configuration: configuration)
+        }
     }
 }

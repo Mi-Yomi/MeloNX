@@ -10,11 +10,8 @@ import UIKit
 
 class OrientationManager {
     static func lockOrientation(_ orientation: UIInterfaceOrientationMask, rotateTo rotateOrientation: UIInterfaceOrientation) {
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            if let delegate = scene.delegate as? UIWindowSceneDelegate,
-               let window = delegate.window as? UIWindow {
-                window.overrideUserInterfaceStyle = .unspecified
-            }
+        if let window = AppDelegate.window {
+            window.overrideUserInterfaceStyle = .unspecified
         }
         
         AppDelegate.orientationLock = orientation
@@ -24,11 +21,8 @@ class OrientationManager {
     }
     
     static func lockOrientation(_ orientation: UIInterfaceOrientationMask, rotateTo rotateOrientation: UIDeviceOrientation) {
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            if let delegate = scene.delegate as? UIWindowSceneDelegate,
-               let window = delegate.window as? UIWindow {
-                window.overrideUserInterfaceStyle = .unspecified
-            }
+        if let window = AppDelegate.window {
+            window.overrideUserInterfaceStyle = .unspecified
         }
         
         AppDelegate.orientationLock = orientation
@@ -38,11 +32,8 @@ class OrientationManager {
     }
     
     static func lockCurrentOrientation(_ orientation: UIDeviceOrientation) {
-        if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-            if let delegate = scene.delegate as? UIWindowSceneDelegate,
-               let window = delegate.window as? UIWindow {
-                window.overrideUserInterfaceStyle = .unspecified
-            }
+        if let window = AppDelegate.window {
+            window.overrideUserInterfaceStyle = .unspecified
         }
         
         AppDelegate.orientationLock = interfaceOrientationMask(from: orientation)

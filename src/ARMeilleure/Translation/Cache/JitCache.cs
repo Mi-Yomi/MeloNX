@@ -95,6 +95,7 @@ namespace ARMeilleure.Translation.Cache
                 Debug.Assert(_initialized);
 
                 int funcOffset = Allocate(code.Length, deferProtect);
+
                 IntPtr funcPtr = _jitRegion == null ? _jitRegion26.RwPtr + funcOffset : _jitRegion.Pointer + funcOffset;
 
                 if (OperatingSystem.IsIOS())
@@ -109,7 +110,7 @@ namespace ARMeilleure.Translation.Cache
                     {
                         ReprotectAsExecutable(funcOffset, code.Length);
 
-                        JitSupportDarwinAot.Invalidate(_jitRegion26.RxPtr + funcOffset, (ulong)code.Length);
+                        JitSupportDarwinAot.Invalidate(_jitRegion == null ? _jitRegion26.RxPtr + funcOffset : _jitRegion.Pointer + funcOffset, (ulong)code.Length);
                     }
                 }
                 else if (OperatingSystem.IsMacOS()&& RuntimeInformation.ProcessArchitecture == Architecture.Arm64)

@@ -135,6 +135,11 @@ namespace Ryujinx.HLE.HOS.Services.Nfc.Nfp
                 return resultCode;
             }
 
+            if (OperatingSystem.IsIOS())
+            {
+                return ResultCode.Success;
+            }
+
             uint deviceHandle = (uint)context.RequestData.ReadUInt64();
 
             for (int i = 0; i < context.Device.System.NfpDevices.Count; i++)
@@ -160,6 +165,7 @@ namespace Ryujinx.HLE.HOS.Services.Nfc.Nfp
 
                     for (int i = 0; i < context.Device.System.NfpDevices.Count; i++)
                     {
+                        // TODO: figure out why there is a deadlock here.
                         if (context.Device.System.NfpDevices[i].State == NfpDeviceState.TagFound)
                         {
                             context.Device.System.NfpDevices[i].SignalActivate();

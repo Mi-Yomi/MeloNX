@@ -405,7 +405,7 @@ namespace Ryujinx.Graphics.Vulkan
             bool isDynamicStateSupported = OperatingSystem.IsIOSVersionAtLeast(17) && _physicalDevice.IsDeviceExtensionPresent(ExtExtendedDynamicState.ExtensionName);
 
             Capabilities = new HardwareCapabilities(
-                _physicalDevice.IsDeviceExtensionPresent("VK_EXT_index_type_uint8") && !IsMoltenVk,
+                _physicalDevice.IsDeviceExtensionPresent("VK_EXT_index_type_uint8"),
                 supportsCustomBorderColor,
                 supportsBlendOperationAdvanced,
                 propertiesBlendOperationAdvanced.AdvancedBlendCorrelatedOverlap,
@@ -423,7 +423,7 @@ namespace Ryujinx.Graphics.Vulkan
                 features2.Features.MultiViewport, // && !IsMoltenVk, // Workaround for AMD on MoltenVK issue
                 featuresRobustness2.NullDescriptor && !IsMoltenVk,
                 supportsPushDescriptors,
-                IsMoltenVk ? 16 : propertiesPushDescriptor.MaxPushDescriptors, 
+                IsMoltenVk ? 8 : propertiesPushDescriptor.MaxPushDescriptors,
                 featuresPrimitiveTopologyListRestart.PrimitiveTopologyListRestart,
                 featuresPrimitiveTopologyListRestart.PrimitiveTopologyPatchListRestart,
                 supportsTransformFeedback,

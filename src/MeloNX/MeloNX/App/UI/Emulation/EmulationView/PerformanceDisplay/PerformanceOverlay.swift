@@ -49,7 +49,7 @@ struct PerformanceOverlayView: View  {
     
     var body: some View {
         Group {
-            if #available(iOS 19.0, *) {
+            if #available(iOS 19.0, *), !NativeSettingsManager.shared.disableLiquidGlass.value {
                 GlassEffectContainer {
                     content
                         .glassEffect(.clear.tint(.black.opacity(0.6)),in: RoundedRectangle(cornerRadius: 5))

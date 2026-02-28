@@ -142,29 +142,35 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         public long AwaitResult(AutoResetEvent wakeSignal = null)
         {
             long data = _defaultValue;
-            int iterations = 0;
 
-            while (WaitingForValue(data))
+            if (wakeSignal == null)
             {
-                if (iterations++ >= MaxQueryRetries)
+                int iterations = 0;
+                while (WaitingForValue(data) && iterations++ < MaxQueryRetries)
                 {
-                    Logger.Error?.Print(
-                        LogClass.Gpu,
-                        $"Query {_type} timed out after {MaxQueryRetries} retries."
-                    );
-
-                    break;
+                    data = Marshal.ReadInt64(_bufferMap);
                 }
 
-                data = Marshal.ReadInt64(_bufferMap);
-
-                if (wakeSignal != null)
+                if (iterations >= MaxQueryRetries)
                 {
-                    wakeSignal.WaitOne(1);
+                    Logger.Error?.Print(LogClass.Gpu, $"Error: Query result timed out. Took more than {MaxQueryRetries} tries.");
                 }
-                else
+            }
+            else
+            {
+                int iterations = 0;
+                while (WaitingForValue(data) && iterations++ < MaxQueryRetries)
                 {
-                    Thread.Yield(); 
+                    data = Marshal.ReadInt64(_bufferMap);
+                    if (WaitingForValue(data))
+                    {
+                        wakeSignal.WaitOne(1);
+                    }
+                }
+
+                if (iterations >= MaxQueryRetries)
+                {
+                    Logger.Error?.Print(LogClass.Gpu, $"Error: Query result timed out. Took more than {MaxQueryRetries} tries.");
                 }
             }
 
@@ -184,6 +190,11 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
         public void PoolCopy(CommandBufferScoped cbs)
         {
+            if (!_isSupported)
+            {
+                return;
+            }
+
             var buffer = _buffer.GetBuffer(cbs.CommandBuffer, true).Get(cbs, 0, sizeof(long), true).Value;
 
             QueryResultFlags flags = QueryResultFlags.ResultWaitBit;

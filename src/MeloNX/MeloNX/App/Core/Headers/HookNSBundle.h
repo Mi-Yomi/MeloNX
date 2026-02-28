@@ -8,7 +8,11 @@
 #ifndef HookNSBundle_h
 #define HookNSBundle_h
 
+#include <Foundation/Foundation.h>
+#include "../Debugging/Watchdog.h"
+
 __attribute__((constructor))
 void EarlyInitConstructor(void);
+
 
 #endif /* HookNSBundle_h */

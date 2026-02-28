@@ -71,7 +71,7 @@ namespace Ryujinx.Graphics.Gpu
         /// <summary>
         /// Enables or disables color space passthrough, if available.
         /// </summary>
-        public static bool EnableColorSpacePassthrough = false;
+        public static bool EnableColorSpacePassthrough = true;
     }
 #pragma warning restore CA2211
 }

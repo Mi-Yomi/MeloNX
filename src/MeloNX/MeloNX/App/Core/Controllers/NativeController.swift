@@ -15,6 +15,7 @@ class NativeController: BaseController {
         super.init(nativeController: nativeController)
     }
     
+    var count = 0
     
     override public func setupController() {
         guard let gamepad = nativeController?.extendedGamepad
@@ -45,6 +46,20 @@ class NativeController: BaseController {
 
         setupTriggerChangeListener(gamepad.leftTrigger, for: .left)
         setupTriggerChangeListener(gamepad.rightTrigger, for: .right)
+        /*
+        gamepad.buttonHome?.valueChangedHandler = { [unowned self] _, _, pressed in
+            if pressed {
+                count += 1
+                
+                if count == 2 {
+                    count = 0
+                    
+                    
+                }
+            }
+        }
+         */
+        
 
         setupHaptics()
         

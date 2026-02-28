@@ -16,81 +16,111 @@ struct ContentView: View {
     @State private var selectedTab: Tab = .games
     @State var showing = true
     @Binding var viewShown: Bool
-    @State var launchedFromURL = false
     @State var date: Date?
-    
+
+    @StateObject var nativeSettings: NativeSettingsManager = .shared
+
     @AppStorage("gametorun") var gametorun: String = ""
     @AppStorage("gametorun-date") var gametorunDate: String = ""
-    
+
+    private var shouldLaunchGameBinding: Binding<Bool> {
+        .init(get: { gameHandler.shouldLaunchGame }, set: { _ in })
+    }
+
+    private var shouldShowEntitlementBinding: Binding<Bool> {
+        .init(get: { gameHandler.shouldShowEntitlement }, set: { _ in })
+    }
+
+    private var shouldCheckJITBinding: Binding<Bool> {
+        .init(get: { gameHandler.shouldCheckJIT }, set: { _ in })
+    }
+
+    private var shouldShowPopoverBinding: Binding<Bool> {
+        .init(get: { gameHandler.shouldShowPopover }, set: { _ in })
+    }
+
     @ViewBuilder
     var tabView: some View {
-        TabView(selection: $selectedTab) {
-            GamesListView()
-                .tabItem {
-                    Label("Library", systemImage: "gamecontroller.fill")
-                }
-                .tag(Tab.games)
-            
-            SettingsViewNew()
-                .tabItem {
-                    Label("Settings", systemImage: "gear")
-                }
-                .tag(Tab.settings)
-        }
-        .if(!gameHandler.showApp) { view in
-            view.hidden()
+        if #available(iOS 19, *), nativeSettings.disableLiquidGlass.value, UIDevice.current.userInterfaceIdiom == .phone {
+            Pre26TabView(selectedIndex: $selectedTab, items: [
+                Pre26TabItem(title: "Library", image: "gamecontroller.fill", view: { GamesListView() }),
+                
+                Pre26TabItem(title: "Settings", image: "gear", view: { SettingsViewNew() })
+            ])
+            .ignoresSafeArea(edges: .bottom)
+            .ignoresSafeArea(edges: .horizontal)
+            .if(!gameHandler.showApp) { $0.hidden() }
+        } else {
+            TabView(selection: $selectedTab) {
+                GamesListView()
+                    .tabItem { Label("Library", systemImage: "gamecontroller.fill") }
+                    .tag(Tab.games)
+
+                SettingsViewNew()
+                    .tabItem { Label("Settings", systemImage: "gear") }
+                    .tag(Tab.settings)
+            }
+            .if(!gameHandler.showApp) { $0.hidden() }
         }
     }
-    
+
+    // MARK: - Body
+
     var body: some View {
         tabView
             .background {
                 if showing {
-                    // To load all defaults :3
                     SettingsViewNew().allBody
+                        .opacity(0.001)
                 }
             }
-            .onOpenURL { url in
-                launchedFromURL = true
-                handleDeepLink(url)
-            }
-            .onAppear() {
+            .onAppear {
                 controllerManager.initAll()
-                
                 MusicSelectorView.playMusic()
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if !launchedFromURL {
+
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    
+                    if AppDelegate.url == nil {
                         gameHandler.enableJIT()
                     }
-                }
-                
-                Air.play(AnyView(
-                    GamesListAirplay()
-                        .environmentObject(gameHandler)
-                        .environmentObject(ryujinx)
-                ))
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                    showing = false
-                }
-                
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                    viewShown = true
                     
-                    Task { @MainActor in
-                        checkJITAndRunGame()
+                    if let url = AppDelegate.url {
+                        handleDeepLink(url)
+                    }
+
+                    if !ProcessInfo.processInfo.isiOSAppOnMac {
+                        Air.play(AnyView(
+                            GamesListAirplay()
+                                .environmentObject(gameHandler)
+                                .environmentObject(ryujinx)
+                        ))
+                    }
+
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    showing = false
+
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                    viewShown = true
+
+                    checkJITAndRunGame()
+                    
+                    if nativeSettings.mainThreadWatchdog.value {
+                        Watchdog.shared.start()
                     }
                 }
             }
             .environmentObject(gameHandler)
             .environmentObject(ryujinx)
             .environment(\.gameNamespace, gameAnimation)
-            .fullScreenCover(isPresented: gameHandler.shouldLaunchGame) {
+            .fullScreenCover(isPresented: shouldLaunchGameBinding) {
                 Group {
                     if #available(iOS 18.0, *) {
                         EmulationContainerView()
-                            .navigationTransition(.zoom(sourceID: gameHandler.currentGame?.fileURL.absoluteString ?? "cool", in: gameAnimation))
+                            .navigationTransition(.zoom(
+                                sourceID: gameHandler.currentGame?.fileURL.absoluteString ?? "cool",
+                                in: gameAnimation
+                            ))
                     } else {
                         EmulationContainerView()
                     }
@@ -107,7 +137,7 @@ struct ContentView: View {
                 .environmentObject(gameHandler)
                 .environmentObject(ryujinx)
             }
-            .alert(isPresented: gameHandler.shouldShowEntitlement) {
+            .alert(isPresented: shouldShowEntitlementBinding) {
                 Alert(
                     title: Text("Entitlement"),
                     message: Text(LocalizedStringKey("MeloNX **REQUIRES** the Increased Memory Limit entitlement, Please follow the instructions on how to Install MeloNX and Enable the Entitlement.")),
@@ -121,40 +151,43 @@ struct ContentView: View {
                     secondaryButton: .cancel(Text("Cancel"))
                 )
             }
-            .fullScreenCover(isPresented: gameHandler.shouldCheckJIT) {
-                JITPopover() {
-                    
-                }
-                .environmentObject(gameHandler)
+            .fullScreenCover(isPresented: shouldCheckJITBinding) {
+                JITPopover() {}
+                    .environmentObject(gameHandler)
             }
-            .if(gameHandler.shouldShowPopover.wrappedValue) { view in
-                view
-                    .halfScreenSheet(isPresented: gameHandler.shouldShowPopover) {
-                        AccountSelector { cool in
-                            if cool {
-                                gameHandler.profileSelected = true
-                            } else {
-                                gameHandler.currentGame = nil
-                            }
+            .onReceive(NotificationCenter.default.publisher(for: .init("URLOpened"))) { notif in
+                guard let url = notif.object as? URL else { return }
+                handleDeepLink(url)
+            }
+            .if(gameHandler.shouldShowPopover) { view in
+                view.halfScreenSheet(isPresented: shouldShowPopoverBinding) {
+                    AccountSelector { success in
+                        if success {
+                            gameHandler.profileSelected = true
+                        } else {
+                            gameHandler.currentGame = nil
                         }
                     }
+                }
             }
     }
-    
+
     func checkJITAndRunGame(attempt: Int = 0) {
-        if gametorun.isEmpty { return }
-        
-        guard attempt < 6 else { return }
+        guard !gametorun.isEmpty, attempt < 6 else { return }
 
         if isJITEnabled() {
+            let shouldLaunch: Bool
             if let timeInterval = TimeInterval(gametorunDate) {
-                let date = Date(timeIntervalSince1970: timeInterval)
-                let isMoreThan60SecondsOld = Date().timeIntervalSince(date) > 60
-                if !isMoreThan60SecondsOld {
-                    gameHandler.currentGame = ryujinx.games.first(where: { $0.titleId == gametorun || $0.titleName == gametorun })
-                }
+                let savedDate = Date(timeIntervalSince1970: timeInterval)
+                shouldLaunch = Date().timeIntervalSince(savedDate) <= 60
             } else {
-                gameHandler.currentGame = ryujinx.games.first(where: { $0.titleId == gametorun || $0.titleName == gametorun })
+                shouldLaunch = true
+            }
+
+            if shouldLaunch {
+                gameHandler.currentGame = ryujinx.games.first {
+                    $0.titleId == gametorun || $0.titleName == gametorun
+                }
             }
 
             gametorunDate = ""
@@ -165,54 +198,48 @@ struct ContentView: View {
             }
         }
     }
-    
-    
-    //         if let data = try? JSONEncoder().encode(controllerTypes)
-    
+
     private func handleDeepLink(_ url: URL) {
         Task {
-            if let components = URLComponents(url: url, resolvingAgainstBaseURL: true) {
-                switch components.host {
-                case "game":
-                    while (!viewShown) {
-                        try? await Task.sleep(nanoseconds: 100)
-                    }
-                    
-                    if let text = components.queryItems?.first(where: { $0.name == "id" })?.value {
-                        gameHandler.currentGame = ryujinx.games.first(where: { $0.titleId == text || $0.titleName == text })
-                        
-                    } else if let text = components.queryItems?.first(where: { $0.name == "name" })?.value {
-                        gameHandler.currentGame = ryujinx.games.first(where: { $0.titleId == text || $0.titleName == text })
-                    }
-                case "gameInfo":
-                    guard let urlscheme = components.queryItems?.first(where: { $0.name == "scheme" })?.value else { return }
+            guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return }
 
-                    if let data = try? JSONEncoder().encode(ryujinx.games.map({ GameScheme($0) })) {
-                        let string = data.base64urlEncodedString()
-                        if let url = URL(string: urlscheme + "://" + (url.scheme ?? "melonx") + "?games=" + string) {
-                            await UIApplication.shared.open(url)
-                            if !ryujinx.jitenabled {
-                                exit(0)
-                            }
-                        }
+            switch components.host {
+            case "game":
+                let idMatch = components.queryItems?.first(where: { $0.name == "id" })?.value
+                let nameMatch = components.queryItems?.first(where: { $0.name == "name" })?.value
+
+                if let query = idMatch ?? nameMatch {
+                    gameHandler.currentGame = ryujinx.games.first {
+                        $0.titleId == query || $0.titleName == query
                     }
-                default:
-                    return
                 }
-                
+
+            case "gameInfo":
+                guard let urlscheme = components.queryItems?.first(where: { $0.name == "scheme" })?.value,
+                      let data = try? JSONEncoder().encode(ryujinx.games.map { GameScheme($0) }) else { return }
+
+                let encoded = data.base64urlEncodedString()
+                let scheme = url.scheme ?? "melonx"
+                if let returnURL = URL(string: "\(urlscheme)://\(scheme)?games=\(encoded)") {
+                    await UIApplication.shared.open(returnURL)
+                    if !ryujinx.jitenabled {
+                        exit(0)
+                    }
+                }
+
+            default:
+                return
             }
         }
     }
 }
 
 extension Data {
-    
     public func base64urlEncodedString() -> String {
-        var result = self.base64EncodedString()
-        result = result.replacingOccurrences(of: "+", with: "-")
-        result = result.replacingOccurrences(of: "/", with: "_")
-        result = result.replacingOccurrences(of: "=", with: "")
-        return result
+        self.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 

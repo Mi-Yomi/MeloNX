@@ -132,6 +132,11 @@ namespace Ryujinx.Cpu.LightningJit.State
             _undefinedCallback?.Invoke(this, address, opCode);
         }
 
+        public void SetPageTablePointer(IMemoryManager memoryManager) 
+        {
+            _nativeContext.SetPageTablePointer((ulong)memoryManager.PageTablePointer);
+        }
+
         public void StopRunning()
         {
             Running = false;

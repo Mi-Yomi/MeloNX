@@ -507,7 +507,9 @@ namespace Ryujinx.Headless.SDL2
         {
             if (OperatingSystem.IsIOS()) 
             {
-                AlertHelper.ShowAlert(title, message, false);
+                // TODO: Rework this :3
+                Console.WriteLine($"Alert: {title}, message: {message}");
+                //AlertHelper.ShowAlert(title, message, false);
             } else {
                 SDL_ShowSimpleMessageBox(SDL_MessageBoxFlags.SDL_MESSAGEBOX_INFORMATION, title, message, WindowHandle);
             }

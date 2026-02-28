@@ -27,6 +27,7 @@ class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate 
         self.currentCompletion = { result in
            Task { @MainActor in
                 completion(result)
+               self.stopAccessingSecurityScopedResources()
             }
         }
         
@@ -38,6 +39,7 @@ class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate 
         self.currentDocumentPicker = documentPicker
         
         guard let topViewController = getTopViewController() else {
+            print("Failed to get top view conntroller")
             let error = NSError(
                 domain: "FileImporterManager",
                 code: 1,
@@ -47,18 +49,34 @@ class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate 
             return
         }
         
-        topViewController.present(documentPicker, animated: true)
+        DispatchQueue.main.async {
+            topViewController.present(documentPicker, animated: true)
+        }
     }
     
     private func getTopViewController() -> UIViewController? {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let window = windowScene.windows.first else { return nil }
-        
-        var topController = window.rootViewController
-        while let presentedController = topController?.presentedViewController {
-            topController = presentedController
+        guard let rootViewController = AppDelegate.window?.rootViewController else {
+            return nil
         }
-        return topController
+        return topMost(of: rootViewController)
+    }
+
+    private func topMost(of viewController: UIViewController) -> UIViewController {
+        if let presented = viewController.presentedViewController {
+            return topMost(of: presented)
+        }
+        
+        if let nav = viewController as? UINavigationController,
+           let visible = nav.visibleViewController {
+            return topMost(of: visible)
+        }
+        
+        if let tab = viewController as? UITabBarController,
+           let selected = tab.selectedViewController {
+            return topMost(of: selected)
+        }
+        
+        return viewController
     }
     
     private func stopAccessingSecurityScopedResources() {

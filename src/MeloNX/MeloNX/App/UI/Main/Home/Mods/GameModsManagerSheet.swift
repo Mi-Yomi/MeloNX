@@ -189,29 +189,13 @@ struct ModsManagerSheet: View {
                 defer { selectedURL.stopAccessingSecurityScopedResource() }
                 
                 do {
-                    
-                    var isMod: Bool = false
-                    
-                    let contents = (try? FileManager.default.contentsOfDirectory(at: selectedURL, includingPropertiesForKeys: nil)) ?? []
-                    if contents.isEmpty {
-                        for folder in contents {
-                            isMod = folder.lastPathComponent.lowercased().contains("romfs") || folder.lastPathComponent.lowercased().contains("exefs") || folder.lastPathComponent.contains("cheats")
-                        }
-                    }
-                    
-                    guard isMod else {
-                        print("Not a mod")
-                        return
-                    }
-                    
-                    
                     let fileManager = FileManager.default
                     let updatesDirectory = URL.documentsDirectory.appendingPathComponent("mods")
                     let contentsDirectory = updatesDirectory.appendingPathComponent("contents")
                     let gameModsDirectory = contentsDirectory.appendingPathComponent(game.titleId)
                     
                     // Create directories if needed
-                    try fileManager.createDirectory(at: gameModsDirectory, withIntermediateDirectories: true)
+                    try? fileManager.createDirectory(at: gameModsDirectory, withIntermediateDirectories: true)
                     
                     // Copy the file
                     try? fileManager.removeItem(at: gameModsDirectory.appendingPathComponent(selectedURL.lastPathComponent))
@@ -235,9 +219,6 @@ struct ModsManagerSheet: View {
             
             
             self.mods.append(contentsOf: updates)
-            
-            
-            Ryujinx.shared.games = Ryujinx.shared.loadGames()
             
         case .failure(let error):
             print("File import failed: \(error.localizedDescription)")

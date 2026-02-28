@@ -29,7 +29,6 @@ class ImportHandler {
                     gameHandler.currentGame = game
                 }
             } catch {
-                
             }
             
         case .failure(let err):
@@ -48,12 +47,20 @@ class ImportHandler {
             defer { cool ? url.stopAccessingSecurityScopedResource() : () }
             
             do {
+                if !GameFileType.isSupported(fileExtension: url.pathExtension) {
+                    showAlert(title: "Failed to import", message: "Unsupported file extension", actions:
+                        [
+                            (title: "Cancel", style: .cancel, handler: nil)
+                        ]
+                    )
+                }
+                
                 let fileManager = FileManager.default
                 let documentsDirectory = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first!
                 let romsDirectory = documentsDirectory.appendingPathComponent("roms")
                 
                 if !fileManager.fileExists(atPath: romsDirectory.path) {
-                    try fileManager.createDirectory(at: romsDirectory, withIntermediateDirectories: true, attributes: nil)
+                    try? fileManager.createDirectory(at: romsDirectory, withIntermediateDirectories: true, attributes: nil)
                 }
                 
                 let destinationURL = romsDirectory.appendingPathComponent(url.lastPathComponent)
@@ -61,7 +68,11 @@ class ImportHandler {
                 
                 Ryujinx.shared.games = Ryujinx.shared.loadGames()
             } catch {
-                
+                showAlert(title: "Failed to import", message: error.localizedDescription, actions:
+                    [
+                        (title: "Cancel", style: .cancel, handler: nil)
+                    ]
+                )
             }
         case .failure(let err):
             print("File import failed: \(err.localizedDescription)")

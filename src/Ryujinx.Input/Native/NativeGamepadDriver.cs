@@ -1,6 +1,8 @@
 using Ryujinx.Common.Configuration.Hid;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 
 namespace Ryujinx.Input.Native
@@ -8,15 +10,17 @@ namespace Ryujinx.Input.Native
     public class NativeGamepadDriver : IGamepadDriver
     {
         private static NativeGamepadDriver _instance;
-        private readonly Dictionary<string, NativeGamepad> _gamepads;
+        
+        private readonly ConcurrentDictionary<IntPtr, NativeGamepad> _gamepads;
+        
         private readonly List<string> _gamepadIds;
-        private static readonly object _lock = new object();
+        private static readonly object _idLock = new object();
 
         public ReadOnlySpan<string> GamepadsIds
         {
             get
             {
-                lock (_lock)
+                lock (_idLock)
                 {
                     return _gamepadIds.ToArray();
                 }
@@ -30,7 +34,7 @@ namespace Ryujinx.Input.Native
 
         public NativeGamepadDriver()
         {
-            _gamepads = new Dictionary<string, NativeGamepad>();
+            _gamepads = new ConcurrentDictionary<IntPtr, NativeGamepad>();
             _gamepadIds = new List<string>();
             _instance = this;
         }
@@ -39,19 +43,20 @@ namespace Ryujinx.Input.Native
         {
             try
             {
-                string id = idPtr.ToInt64().ToString("X");
-                
-                if (_instance != null && !string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(id))
+                if (_instance != null && !string.IsNullOrEmpty(name) && idPtr != IntPtr.Zero)
                 {
-                    lock (_lock)
+                    // Convert to hex string once during connection only
+                    string idString = idPtr.ToInt64().ToString("X");
+
+                    NativeGamepad gamepad = new NativeGamepad(name, idString);
+                    
+                    if (_instance._gamepads.TryAdd(idPtr, gamepad))
                     {
-                        if (!_instance._gamepads.ContainsKey(id))
+                        lock (_idLock)
                         {
-                            NativeGamepad gamepad = new(name, id);
-                            _instance._gamepads.Add(id, gamepad);
-                            _instance._gamepadIds.Add(id);
-                            _instance.OnGamepadConnected?.Invoke(id);
+                            _instance._gamepadIds.Add(idString);
                         }
+                        _instance.OnGamepadConnected?.Invoke(idString);
                     }
                 }
 
@@ -67,108 +72,94 @@ namespace Ryujinx.Input.Native
         {
             try
             {
-                string id = idPtr.ToInt64().ToString("X");
-
-                if (_instance != null && !string.IsNullOrEmpty(id))
+                if (_instance != null && idPtr != IntPtr.Zero)
                 {
-                    lock (_lock)
+                    if (_instance._gamepads.TryRemove(idPtr, out NativeGamepad gamepad))
                     {
-                        if (_instance._gamepads.TryGetValue(id, out NativeGamepad gamepad))
+                        string idString = gamepad.Id;
+                        lock (_idLock)
                         {
-                            gamepad.Dispose();
-                            _instance._gamepads.Remove(id);
-                            _instance._gamepadIds.Remove(id);
-                            _instance.OnGamepadDisconnected?.Invoke(id);
+                            _instance._gamepadIds.Remove(idString);
                         }
+                        gamepad.Dispose();
+                        _instance.OnGamepadDisconnected?.Invoke(idString);
                     }
                 }
             }
             catch { }
-        }
-
-        private static NativeGamepad GetGamepadById(string id)
-        {
-            if (_instance != null && !string.IsNullOrEmpty(id))
-            {
-                lock (_lock)
-                {
-                    if (_instance._gamepads.TryGetValue(id, out NativeGamepad gamepad))
-                    {
-                        return gamepad;
-                    }
-                }
-            }
-            return null;
         }
 
         public static void SetButtonState(IntPtr idPtr, int buttonId, byte pressed)
         {
-            try
+            if (_instance != null && _instance._gamepads.TryGetValue(idPtr, out var gamepad))
             {
-                string id = idPtr.ToInt64().ToString("X");
-                NativeGamepad gamepad = GetGamepadById(id);
-                gamepad?.SetButtonStateInternal(buttonId, pressed != 0);
+                gamepad.SetButtonStateInternal(buttonId, pressed != 0);
             }
-            catch { }
         }
 
         public static void SetStickAxis(IntPtr idPtr, int stickId, float x, float y)
         {
-            try
+            if (_instance != null && _instance._gamepads.TryGetValue(idPtr, out var gamepad))
             {
-                string id = idPtr.ToInt64().ToString("X");
-                NativeGamepad gamepad = GetGamepadById(id);
-                gamepad?.SetStickAxisInternal(stickId, x, y);
+                gamepad.SetStickAxisInternal(stickId, x, y);
             }
-            catch { }
         }
 
         public static void SetMotionData(IntPtr idPtr, int motionType, float x, float y, float z)
         {
-            try
+            if (_instance != null && _instance._gamepads.TryGetValue(idPtr, out var gamepad))
             {
-                string id = idPtr.ToInt64().ToString("X");
-                NativeGamepad gamepad = GetGamepadById(id);
-                gamepad?.SetMotionDataInternal(motionType, x, y, z);
+                gamepad.SetMotionDataInternal(motionType, x, y, z);
             }
-            catch { }
         }
 
         public static void ResetState(IntPtr idPtr)
         {
-            try
+            if (_instance != null && _instance._gamepads.TryGetValue(idPtr, out var gamepad))
             {
-                string id = idPtr.ToInt64().ToString("X");
-                NativeGamepad gamepad = GetGamepadById(id);
-                gamepad?.ResetStateInternal();
+                gamepad.ResetStateInternal();
             }
-            catch { }
         }
 
         public IGamepad GetGamepad(string id)
         {
-            return GetGamepadById(id);
+            if (string.IsNullOrEmpty(id)) return null;
+
+            try 
+            {
+                IntPtr idPtr = (IntPtr)Convert.ToInt64(id, 16);
+                if (_gamepads.TryGetValue(idPtr, out var gamepad))
+                {
+                    return gamepad;
+                }
+            }
+            catch 
+            {
+                return _gamepads.Values.FirstOrDefault(g => g.Id == id);
+            }
+            
+            return null;
         }
 
         protected virtual void Dispose(bool disposing)
         {
             if (disposing)
             {
-                lock (_lock)
+                foreach (var gamepad in _gamepads.Values)
                 {
-                    foreach (var gamepad in _gamepads.Values)
-                    {
-                        gamepad.Dispose();
-                    }
+                    gamepad.Dispose();
+                }
 
+                lock (_idLock)
+                {
                     foreach (string id in _gamepadIds)
                     {
                         OnGamepadDisconnected?.Invoke(id);
                     }
-
-                    _gamepads.Clear();
                     _gamepadIds.Clear();
                 }
+
+                _gamepads.Clear();
 
                 if (_instance == this)
                 {

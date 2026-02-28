@@ -77,6 +77,15 @@ final class RyujinxBridge {
     static var currentFPS: Int {
         Int(SN_get_current_fps())
     }
+    
+    static var currentVolume: Float {
+        get {
+            SN_get_game_volume()
+        } set {
+            SN_set_game_volume(newValue)
+        }
+    }
+
 
     static func touchBegan(x: Float, y: Float, index: Int) {
         SN_touch_began(x, y, Int32(index))
@@ -125,6 +134,7 @@ final class RyujinxBridge {
     }
 
     static func setGamepadButtonState(_ id: UnsafeMutableRawPointer?, buttonId: Int, pressed: Bool) {
+        print("Gamepad button State \(Int32(buttonId)), pressed \(pressed)")
         SN_set_gamepad_button_state(id, Int32(buttonId), pressed ? 1 : 0)
     }
 
@@ -196,6 +206,12 @@ func SN_update_settings_external(_ argc: Int32, _ argv: UnsafeMutablePointer<Uns
 
 @_silgen_name("get_current_fps")
 func SN_get_current_fps() -> Int32
+
+@_silgen_name("get_game_volume")
+func SN_get_game_volume() -> Float
+
+@_silgen_name("set_game_volume")
+func SN_set_game_volume(_ vol: Float)
 
 @_silgen_name("touch_began")
 func SN_touch_began(_ x: Float, _ y: Float, _ index: Int32)

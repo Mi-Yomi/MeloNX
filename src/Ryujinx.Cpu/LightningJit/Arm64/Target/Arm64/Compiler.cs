@@ -304,6 +304,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
             }
         }
 
+
         public static CompiledFunction Compile(CpuPreset cpuPreset, IMemoryManager memoryManager, ulong address, AddressTable<ulong> funcTable, IntPtr dispatchStubPtr)
         {
             MultiBlock multiBlock = Decoder.DecodeMulti(cpuPreset, memoryManager, address);

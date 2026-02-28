@@ -1,6 +1,7 @@
 using CommandLine;
 using LibHac.Tools.FsSystem;
 using Ryujinx.Audio.Backends.SDL2;
+using Ryujinx.Audio.Backends.Apple;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Configuration.Hid;
 using Ryujinx.Common.Configuration.Hid.Controller;
@@ -447,6 +448,32 @@ namespace Ryujinx.Headless.SDL2
             int intValue = (int)Device.Statistics.GetGameFrameRate(); 
 
             return intValue;
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "set_game_volume")]
+        public static unsafe void SetGameVolume(float volume) {
+            if (_emulationContext == null)
+            {
+                return;
+            }
+
+            Console.WriteLine($"Set Volume, current: {_emulationContext.GetVolume()}, set to: {volume}");
+
+            _emulationContext.SetVolume(volume);
+
+            Console.WriteLine($"tried to set volume {_emulationContext.GetVolume()}");
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "get_game_volume")]
+        public static unsafe float GetGameVolume() {
+            if (_emulationContext == null)
+            {
+                return 0;
+            }
+
+            Console.WriteLine($"Volume gotten: {_emulationContext.GetVolume()} :3");
+
+            return (float)_emulationContext.GetVolume();
         }
 
         [UnmanagedCallersOnly(EntryPoint = "initialize")]
@@ -1326,28 +1353,6 @@ namespace Ryujinx.Headless.SDL2
                             EnableRumble = true,
                         },
                     };
-
-                    // Setup DSU Motion
-                    if (config is StandardControllerInputConfig standardConfig && !string.IsNullOrWhiteSpace(inputDSUServer))
-                    {
-                        var serverString = inputDSUServer.Trim();
-
-                        var parts = serverString.Split(new[] { ':' }, 2);
-                        if (parts.Length == 2 && int.TryParse(parts[1], out var port))
-                        {
-                            var slot = index == PlayerIndex.Handheld ? 0 : (int)index;
-                            standardConfig.Motion = new CemuHookMotionConfigController
-                            {
-                                MotionBackend = MotionInputBackendType.CemuHook,
-                                EnableMotion = true,
-                                Sensitivity = 100,
-                                GyroDeadzone = 1,
-                                Slot = slot,
-                                DsuServerHost = parts[0],
-                                DsuServerPort = port,
-                            };
-                        }
-                    }
                 }
             }
             else
@@ -1575,6 +1580,7 @@ namespace Ryujinx.Headless.SDL2
             GraphicsConfig.MaxAnisotropy = option.MaxAnisotropy;
             GraphicsConfig.ShadersDumpPath = option.GraphicsShadersDumpPath;
             GraphicsConfig.EnableMacroHLE = !option.DisableMacroHLE;
+            GraphicsConfig.EnableColorSpacePassthrough = true;
 
             DriverUtilities.InitDriverConfig(option.BackendThreading == BackendThreading.Off);
             _virtualFileSystem.ReloadKeySet();
@@ -1721,13 +1727,16 @@ namespace Ryujinx.Headless.SDL2
                 AppleHV = options.UseHypervisor;
             }
 
+            // idk :3
+            HLE.HOS.Services.Nifm.StaticService.AnyInternetRequestAccepted.isAnyInternetRequestAccepted = options.EnableInternetAccess;
+
             HLEConfiguration configuration = new(_virtualFileSystem,
                 _libHacHorizonManager,
                 _contentManager,
                 _accountManager,
                 _userChannelPersistence,
                 renderer,
-                new SDL2HardwareDeviceDriver(),
+                new SDL2HardwareDeviceDriver(), // AppleHardwareDeviceDriver(), // Will rework Apple Audio later.
                 options.ExpandRAM ? MemoryConfiguration.MemoryConfiguration8GiB : MemoryConfiguration.MemoryConfiguration4GiB,
                 window,
                 options.SystemLanguage,
@@ -1798,6 +1807,8 @@ namespace Ryujinx.Headless.SDL2
             _window.AntiAliasing = options.AntiAliasing;
             _window.ScalingFilter = options.ScalingFilter;
             _window.ScalingFilterLevel = options.ScalingFilterLevel;
+            renderer.Window?.SetColorSpacePassthrough(true);
+
 
             _emulationContext = InitializeEmulationContext(window, renderer, options);
 

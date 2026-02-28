@@ -127,6 +127,24 @@ namespace Ryujinx.Cpu.LightningJit.Arm64.Target.Arm64
             return false;
         }
 
+        public static void WriteSvcCall(CodeWriter writer, RegisterAllocator regAlloc, ulong pc, uint encoding)
+        {
+            uint svcId = (encoding >> 5) & 0xFFFF;
+            
+            Assembler asm = new(writer);
+            
+            int tempRegister = regAlloc.AllocateTempGprRegister();
+            
+            asm.Mov(Register(0), pc);
+            
+            asm.Mov(Register(1), svcId);
+
+            asm.Mov(Register(tempRegister), (ulong)GetSvcHandlerPtr());
+            asm.Blr(Register(tempRegister));
+            
+            regAlloc.FreeTempGprRegister(tempRegister);
+        }
+
         private static bool IsCtrEl0AccessForbidden()
         {
             // Only Linux allows accessing CTR_EL0 from user mode.

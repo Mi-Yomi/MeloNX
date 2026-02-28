@@ -30,6 +30,7 @@ struct EmulationView: View {
     @FocusState private var isFocused: Bool
     @EnvironmentObject var ryujinx: Ryujinx
     @State var rotationlock = false
+    @State private var isPortrait: Bool = false
     
     var body: some View {
         ZStack {
@@ -38,19 +39,17 @@ struct EmulationView: View {
                 .edgesIgnoringSafeArea(.all)
                 .allowsHitTesting(false)
             
-            if isAirplaying {
+            if isAirplaying, !ProcessInfo.processInfo.isiOSAppOnMac {
                 TouchView()
                     .ignoresSafeArea()
                     .edgesIgnoringSafeArea(.all)
                     .onAppear {
-                        Air.play(AnyView(MetalView().ignoresSafeArea().edgesIgnoringSafeArea(.all)))
-                    }
-                    .overlay(alignment: .topTrailing) {
-                        if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
-                            PerformanceOverlayView()
-                                .opacity(controllerOpacity)
-                                .padding(5)
+                        if !ProcessInfo.processInfo.isiOSAppOnMac {
+                            Air.play(AnyView(MetalView().ignoresSafeArea().edgesIgnoringSafeArea(.all)))
                         }
+                    }
+                    .overlay(alignment: .top) {
+                        hudView
                     }
             } else {
                 // The Emulation View
@@ -59,22 +58,19 @@ struct EmulationView: View {
                         .allowsHitTesting(true)
                         .ignoresSafeArea(.all)
                         .edgesIgnoringSafeArea(.all)
-                        .overlay(alignment: .topTrailing) {
-                            if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
-                                PerformanceOverlayView()
-                                    .opacity(controllerOpacity)
-                                    .padding(5)
-                            }
+                        .overlay(alignment: .top) {
+                            hudView
                         }
                 } else {
-                    MetalViewContainer()
+                    MetalViewContainer(isPortrait: $isPortrait) {
+                        hudView
+                    }
                         .allowsHitTesting(true)
-                        .overlay(alignment: .topTrailing) {
-                            if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
-                                PerformanceOverlayView()
-                                    .opacity(controllerOpacity)
-                                    .padding(5)
-                            }
+                        .if(!isPortrait) {
+                            $0
+                                .overlay(alignment: .top) {
+                                    self.hudView
+                                }
                         }
                 }
             }
@@ -89,98 +85,7 @@ struct EmulationView: View {
                     .allowsHitTesting(false)
             }
             
-            
-            VStack {
-                HStack {
-                    if !performacehud, showlogsgame, ProcessInfo.processInfo.isLowPowerModeEnabled {
-                        Circle()
-                            .fill(Color.orange)
-                            .frame(width: 10, height: 10)
-                            .padding()
-                    }
-                    
 
-                    if ssb {
-                        Menu {
-                            Button {
-                                RyujinxBridge.pauseEmulation(pauseEmu)
-                                pauseEmu.toggle()
-                            } label: {
-                                Label {
-                                    Text(pauseEmu ? "Pause" : "Play")
-                                } icon: {
-                                    Image(systemName: pauseEmu ? "pause.circle" : "play.circle")
-                                }
-                            }
-                            
-                            Button {
-                                // ryujijnx.config?.aspectRatio
-                                ryujinx.aspectRatio = nextAspectRatio(current: ryujinx.aspectRatio)
-                                
-    
-                            } label: {
-                                Label {
-                                    Text(ryujinx.aspectRatio.displayName)
-                                } icon: {
-                                    Image(systemName: "rectangle.expand.vertical")
-                                }
-                            }
-                            
-                            Button {
-                                showControllerSettings = true
-                            } label: {
-                                Label {
-                                    Text("Configure Controllers")
-                                } icon: {
-                                    Image(systemName: "gamecontroller")
-                                }
-                            }
-                            
-                            
-                            //  OrientationManager.lockOrientation(.landscape, rotateTo: .landscapeRight)
-                            
-                            if UIDevice.current.userInterfaceIdiom == .phone {
-                                Button {
-                                    // UIDevice.current.orientation
-                                    rotationlock.toggle()
-                                    if rotationlock {
-                                        OrientationManager.lockCurrentOrientation(UIDevice.current.orientation)
-                                    } else {
-                                        OrientationManager.lockOrientation(.all, rotateTo: UIDevice.current.orientation)
-                                    }
-                                } label: {
-                                    Label {
-                                        Text("Rotation Lock")
-                                    } icon: {
-                                        Image(systemName: rotationlock ? "lock" : "lock.open")
-                                    }
-                                }
-                            }
-                            
-                            Button(role: .destructive) {
-                                stop()
-                            } label: {
-                                Label {
-                                    Text("Exit (Unstable)")
-                                } icon: {
-                                    Image(systemName: "x.circle")
-                                }
-                            }
-                        } label: {
-                            ExtButtonIconView(button: .guide, opacity: 0.4)
-                        }
-                        .menuStyle(.borderlessButton)
-                        .menuIndicator(.hidden)
-                        .padding()
-                    }
-                    
-                    
-                    Spacer()
-                }
-                
-                Spacer()
-            }
-            
             if showlogsgame, !Ryujinx.shared.showLoading {
                 VStack {
                     LogView(isfps: false)
@@ -190,15 +95,25 @@ struct EmulationView: View {
                 .allowsHitTesting(false)
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if ProcessInfo.processInfo.isLowPowerModeEnabled {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 10, height: 10)
+                    .padding()
+            }
+        }
         .onAppear {
            Task { @MainActor in
                 isFocused = true
             }
             
             // LocationManager.sharedInstance.startUpdatingLocation()
-            Air.shared.connectionCallbacks.append { cool in
-               Task { @MainActor in
-                    isAirplaying = cool
+            if !ProcessInfo.processInfo.isiOSAppOnMac {
+                Air.shared.connectionCallbacks.append { cool in
+                    Task { @MainActor in
+                        isAirplaying = cool
+                    }
                 }
             }
             
@@ -217,12 +132,15 @@ struct EmulationView: View {
             if newPhase == .background {
                 RyujinxBridge.pauseEmulation(true)
                 isInBackground = true
+                pauseEmu = true
             } else if newPhase == .active {
                 RyujinxBridge.pauseEmulation(false)
                 isInBackground = false
+                pauseEmu = false
             } else if newPhase == .inactive {
                 RyujinxBridge.pauseEmulation(true)
                 isInBackground = true
+                pauseEmu = true
             }
         }
         .sheet(isPresented: $showControllerSettings) {
@@ -236,6 +154,98 @@ struct EmulationView: View {
             }
             .onDisappear {
                 ryujinx.reloadControllersWithInfo()
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var hudView: some View {
+        HStack {
+            if ssb {
+                Menu {
+                    menuButton
+                } label: {
+                    ButtonView(disabled: true, button: .guide, opacity: 0.4)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .padding()
+            }
+            
+            Spacer()
+            
+            if performacehud, getenv("MTL_HUD_ENABLED").flatMap({ String(cString: $0) }) != "1" {
+                PerformanceOverlayView()
+                    .opacity(controllerOpacity)
+                    .padding(5)
+            }
+        }
+        .padding()
+    }
+    
+    @ViewBuilder
+    private var menuButton: some View {
+        Button {
+            RyujinxBridge.pauseEmulation(pauseEmu)
+            pauseEmu.toggle()
+        } label: {
+            Label {
+                Text(pauseEmu ? "Pause" : "Play")
+            } icon: {
+                Image(systemName: pauseEmu ? "pause.circle" : "play.circle")
+            }
+        }
+        
+        Button {
+            // ryujijnx.config?.aspectRatio
+            ryujinx.aspectRatio = nextAspectRatio(current: ryujinx.aspectRatio)
+            
+
+        } label: {
+            Label {
+                Text(ryujinx.aspectRatio.displayName)
+            } icon: {
+                Image(systemName: "rectangle.expand.vertical")
+            }
+        }
+        
+        Button {
+            showControllerSettings = true
+        } label: {
+            Label {
+                Text("Configure Controllers")
+            } icon: {
+                Image(systemName: "gamecontroller")
+            }
+        }
+        
+        //  OrientationManager.lockOrientation(.landscape, rotateTo: .landscapeRight)
+        
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            Button {
+                // UIDevice.current.orientation
+                rotationlock.toggle()
+                if rotationlock {
+                    OrientationManager.lockCurrentOrientation(UIDevice.current.orientation)
+                } else {
+                    OrientationManager.lockOrientation(.all, rotateTo: UIDevice.current.orientation)
+                }
+            } label: {
+                Label {
+                    Text("Rotation Lock")
+                } icon: {
+                    Image(systemName: rotationlock ? "lock" : "lock.open")
+                }
+            }
+        }
+        
+        Button(role: .destructive) {
+            stop()
+        } label: {
+            Label {
+                Text("Exit (Unstable)")
+            } icon: {
+                Image(systemName: "x.circle")
             }
         }
     }

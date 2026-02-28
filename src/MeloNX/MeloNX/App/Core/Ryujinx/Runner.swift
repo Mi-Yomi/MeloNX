@@ -14,7 +14,7 @@ final class Runner {
         task = Task.detached(priority: .userInitiated) {
             body()
         }
-    }
+    } 
 
     func stop() {
         task?.cancel()

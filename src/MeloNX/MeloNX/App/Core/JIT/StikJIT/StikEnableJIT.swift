@@ -54,15 +54,16 @@ func checkifappinstalled(_ id: String) -> Bool {
 
 func enableJITStik() {
     let bundle = shouldAsCopy ? Bundle.main.swizzled_bundleIdentifier : Bundle.main.bundleIdentifier
-    var urlScheme: String = "stikjit://enable-jit?bundle-id=" + (bundle ?? Bundle.main.originalBundleID!)
+    var urlScheme: String = "stikjit://enable-jit"
     
     if #available(iOS 19.0, *), !ProcessInfo.processInfo.hasTXM {
         let scriptdata = script.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        if isInLiveContainer.0 {
-            urlScheme += "&pid=\(getpid())&script-name=MeloNX"
-        }
+        
+        urlScheme += isInLiveContainer.0 ? "?pid=\(getpid())&script-name=MeloNX" : ("?bundle-id=" + (bundle ?? Bundle.main.originalBundleID!))
         
         urlScheme += "&script-data=\(scriptdata)"
+    } else {
+        urlScheme += isInLiveContainer.0 ? "?pid=\(getpid())" : "?bundle-id=" + (bundle ?? Bundle.main.originalBundleID!)
     }
     
     

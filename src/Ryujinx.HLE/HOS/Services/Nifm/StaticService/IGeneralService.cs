@@ -9,8 +9,13 @@ using System.Runtime.CompilerServices;
 
 namespace Ryujinx.HLE.HOS.Services.Nifm.StaticService
 {
+    public static class AnyInternetRequestAccepted {
+        static public bool isAnyInternetRequestAccepted = false;
+    }
+
     partial class IGeneralService : DisposableIpcService
     {
+    
         private readonly GeneralServiceDetail _generalServiceDetail;
 
         private IPInterfaceProperties _targetPropertiesCache = null;
@@ -22,7 +27,7 @@ namespace Ryujinx.HLE.HOS.Services.Nifm.StaticService
             _generalServiceDetail = new GeneralServiceDetail
             {
                 ClientId = GeneralServiceManager.Count,
-                IsAnyInternetRequestAccepted = false, // NOTE: Why not accept any internet request?
+                IsAnyInternetRequestAccepted = AnyInternetRequestAccepted.isAnyInternetRequestAccepted, // NOTE: Why not accept any internet request?
             };
 
             NetworkChange.NetworkAddressChanged += LocalInterfaceCacheHandler;

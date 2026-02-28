@@ -4,52 +4,107 @@ using Ryujinx.Memory;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
+using System.Threading;
 
 namespace Ryujinx.Cpu.LightningJit.Cache
 {
     class NoWxCache : IDisposable
     {
-        private const int CodeAlignment = 4;
-        private const int SharedCacheSize = 512 * 1024 * 1024;
-        private const int LocalCacheSize = 128 * 1024 * 1024;
+        private const int CodeAlignment = 4; // Bytes.
+        private const int SharedCacheSize = 2047 * 1024 * 1024;
+        private const int LocalCacheSize = 256 * 1024 * 1024;
+        private const int CacheExpansionSize = 512 * 1024 * 1024; // Size to expand by
+
+        // How many calls to the same function we allow until we pad the shared cache to force the function to become available there
+        // and allow the guest to take the fast path.
         private const int MinCallsForPad = 8;
 
         private class MemoryCache : IDisposable
         {
-            private readonly ReservedRegion _region;
-            private readonly CacheMemoryAllocator _cacheAllocator;
-            public readonly IJitMemoryAllocator Allocator;
+            private readonly List<ReservedRegion> _regions = new();
+            private readonly List<CacheMemoryAllocator> _allocators = new();
+            private readonly IJitMemoryAllocator _jitAllocator;
+            private readonly ulong _initialSize;
+            private readonly ulong _expansionSize;
 
-            public CacheMemoryAllocator CacheAllocator => _cacheAllocator;
-            public IntPtr Pointer => _region.Block.Pointer;
+            public nint Pointer => _regions[0].Block.Pointer;
 
-            public MemoryCache(IJitMemoryAllocator allocator, ulong size)
+            public MemoryCache(IJitMemoryAllocator allocator, ulong size, ulong expansionSize)
             {
-                Allocator = allocator;
-                _region = new(allocator, size);
-                _cacheAllocator = new((int)size);
+                _jitAllocator = allocator;
+                _initialSize = size;
+                _expansionSize = expansionSize;
+                
+                AddCacheSegment(size);
+            }
+
+            private void AddCacheSegment(ulong size)
+            {
+                var region = new ReservedRegion(_jitAllocator, size);
+                var cacheAllocator = new CacheMemoryAllocator((int)size);
+                
+                _regions.Add(region);
+                _allocators.Add(cacheAllocator);
             }
 
             public int Allocate(int codeSize)
             {
                 codeSize = AlignCodeSize(codeSize);
 
-                int allocOffset = _cacheAllocator.Allocate(codeSize);
-
-                if (allocOffset < 0)
+                if (_allocators.Count > 0)
                 {
-                    throw new OutOfMemoryException("JIT Cache exhausted.");
+                    int baseOffset = 0;
+                    for (int i = 0; i < _allocators.Count - 1; i++)
+                    {
+                        baseOffset += _allocators[i].Capacity;
+                    }
+                    
+                    int allocOffset = _allocators[^1].Allocate(codeSize);
+                    
+                    if (allocOffset >= 0)
+                    {
+                        int absoluteOffset = baseOffset + allocOffset;
+                        _regions[^1].ExpandIfNeeded((ulong)allocOffset + (ulong)codeSize);
+                        return absoluteOffset;
+                    }
                 }
 
-                _region.ExpandIfNeeded((ulong)allocOffset + (ulong)codeSize);
+                int searchBaseOffset = 0;
+                for (int i = 0; i < _allocators.Count; i++)
+                {
+                    int allocOffset = _allocators[i].Allocate(codeSize);
+                    
+                    if (allocOffset >= 0)
+                    {
+                        int absoluteOffset = searchBaseOffset + allocOffset;
+                        _regions[i].ExpandIfNeeded((ulong)allocOffset + (ulong)codeSize);
+                        return absoluteOffset;
+                    }
+                    
+                    searchBaseOffset += _allocators[i].Capacity;
+                }
 
-                return allocOffset;
+                int newBaseOffset = searchBaseOffset;
+                
+                ulong newSize = Math.Max(_expansionSize, (ulong)codeSize);
+                AddCacheSegment(newSize);
+                
+                int newAllocOffset = _allocators[^1].Allocate(codeSize);
+                if (newAllocOffset < 0)
+                {
+                    throw new OutOfMemoryException("JIT Cache exhausted even after expansion.");
+                }
+                
+                int finalOffset = newBaseOffset + newAllocOffset;
+                _regions[^1].ExpandIfNeeded((ulong)newAllocOffset + (ulong)codeSize);
+                
+                return finalOffset;
             }
 
             public void Free(int offset, int size)
             {
-                _cacheAllocator.Free(offset, size);
+                var (allocatorIndex, localOffset) = GetAllocatorForOffset(offset);
+                _allocators[allocatorIndex].Free(localOffset, size);
             }
 
             public void ReprotectAsRw(int offset, int size)
@@ -57,7 +112,8 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 Debug.Assert(offset >= 0 && (offset & (int)(MemoryBlock.GetPageSize() - 1)) == 0);
                 Debug.Assert(size > 0 && (size & (int)(MemoryBlock.GetPageSize() - 1)) == 0);
 
-                _region.Block.MapAsRw((ulong)offset, (ulong)size);
+                var (allocatorIndex, localOffset) = GetAllocatorForOffset(offset);
+                _regions[allocatorIndex].Block.MapAsRw((ulong)localOffset, (ulong)size);
             }
 
             public void ReprotectAsRx(int offset, int size)
@@ -65,16 +121,44 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 Debug.Assert(offset >= 0 && (offset & (int)(MemoryBlock.GetPageSize() - 1)) == 0);
                 Debug.Assert(size > 0 && (size & (int)(MemoryBlock.GetPageSize() - 1)) == 0);
 
-                _region.Block.MapAsRx((ulong)offset, (ulong)size);
+                var (allocatorIndex, localOffset) = GetAllocatorForOffset(offset);
+                _regions[allocatorIndex].Block.MapAsRx((ulong)localOffset, (ulong)size);
 
                 if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
                 {
-                    JitSupportDarwin.SysIcacheInvalidate(_region.Block.Pointer + offset, size);
+                    JitSupportDarwin.SysIcacheInvalidate(_regions[allocatorIndex].Block.Pointer + localOffset, size);
                 }
                 else
                 {
                     throw new PlatformNotSupportedException();
                 }
+            }
+
+            public nint GetPointerForOffset(int offset)
+            {
+                var (allocatorIndex, localOffset) = GetAllocatorForOffset(offset);
+                return _regions[allocatorIndex].Block.Pointer + localOffset;
+            }
+
+            private (int allocatorIndex, int localOffset) GetAllocatorForOffset(int offset)
+            {
+                int baseOffset = 0;
+                for (int i = 0; i < _allocators.Count; i++)
+                {
+                    int capacity = _allocators[i].Capacity;
+                    if (offset < baseOffset + capacity)
+                    {
+                        return (i, offset - baseOffset);
+                    }
+                    baseOffset += capacity;
+                }
+                
+                throw new ArgumentOutOfRangeException(nameof(offset), "Offset is outside allocated cache regions.");
+            }
+
+            public CacheMemoryAllocator GetCurrentAllocator()
+            {
+                return _allocators[^1];
             }
 
             private static int AlignCodeSize(int codeSize)
@@ -86,8 +170,16 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             {
                 if (disposing)
                 {
-                    _region.Dispose();
-                    _cacheAllocator.Clear();
+                    foreach (var region in _regions)
+                    {
+                        region.Dispose();
+                    }
+                    foreach (var allocator in _allocators)
+                    {
+                        allocator.Clear();
+                    }
+                    _regions.Clear();
+                    _allocators.Clear();
                 }
             }
 
@@ -100,25 +192,23 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
         private readonly IStackWalker _stackWalker;
         private readonly Translator _translator;
-        private readonly List<MemoryCache> _sharedCaches;
-        private readonly List<MemoryCache> _localCaches;
-        private readonly Dictionary<ulong, PageAlignedRangeList> _pendingMaps;
-        private readonly object _lock;
+        private readonly MemoryCache _sharedCache;
+        private readonly MemoryCache _localCache;
+        private readonly PageAlignedRangeList _pendingMap;
+        private readonly object _lock = new();
 
         class ThreadLocalCacheEntry
         {
             public readonly int Offset;
             public readonly int Size;
-            public readonly IntPtr FuncPtr;
-            public readonly int CacheIndex;
+            public readonly nint FuncPtr;
             private int _useCount;
 
-            public ThreadLocalCacheEntry(int offset, int size, IntPtr funcPtr, int cacheIndex)
+            public ThreadLocalCacheEntry(int offset, int size, nint funcPtr)
             {
                 Offset = offset;
                 Size = size;
                 FuncPtr = funcPtr;
-                CacheIndex = cacheIndex;
                 _useCount = 0;
             }
 
@@ -135,249 +225,82 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         {
             _stackWalker = stackWalker;
             _translator = translator;
-            _sharedCaches = new List<MemoryCache> { new(allocator, SharedCacheSize) };
-            _localCaches = new List<MemoryCache> { new(allocator, LocalCacheSize) };
-            _pendingMaps = new Dictionary<ulong, PageAlignedRangeList>();
-            _lock = new();
+            _sharedCache = new(allocator, SharedCacheSize, CacheExpansionSize);
+            _localCache = new(allocator, LocalCacheSize, CacheExpansionSize);
+            _pendingMap = new(_sharedCache.ReprotectAsRx, RegisterFunction);
         }
 
-        private PageAlignedRangeList GetPendingMapForCache(int cacheIndex)
+        public unsafe nint Map(nint framePointer, ReadOnlySpan<byte> code, ulong guestAddress, ulong guestSize)
         {
-            ulong cacheKey = (ulong)cacheIndex;
-            if (!_pendingMaps.TryGetValue(cacheKey, out var pendingMap))
+            if (TryGetThreadLocalFunction(guestAddress, out nint funcPtr))
             {
-                pendingMap = new PageAlignedRangeList(
-                    (offset, size) => _sharedCaches[cacheIndex].ReprotectAsRx(offset, size),
-                    (address, func) => RegisterFunction(address, func));
-                _pendingMaps[cacheKey] = pendingMap;
-            }
-            return pendingMap;
-        }
-
-        private bool HasInAnyPendingMap(ulong guestAddress)
-        {
-            foreach (var pendingMap in _pendingMaps.Values)
-            {
-                if (pendingMap.Has(guestAddress))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
-        private int AllocateInSharedCache(int codeLength)
-        {
-            for (int i = 0; i < _sharedCaches.Count; i++)
-            {
-                try
-                {
-                    return (i << 28) | _sharedCaches[i].Allocate(codeLength);
-                }
-                catch (OutOfMemoryException)
-                {
-                }
+                return funcPtr;
             }
 
             lock (_lock)
             {
-                for (int i = 0; i < _sharedCaches.Count; i++)
+                if (!_pendingMap.Has(guestAddress) && !Translator.Functions.ContainsKey(guestAddress))
                 {
-                    try
-                    {
-                        return (i << 28) | _sharedCaches[i].Allocate(codeLength);
-                    }
-                    catch (OutOfMemoryException)
-                    {
-                    }
-                }
+                    int funcOffset = _sharedCache.Allocate(code.Length);
 
-                var allocator = _sharedCaches[0].Allocator;
-                _sharedCaches.Add(new(allocator, SharedCacheSize));
-                int newIndex = _sharedCaches.Count - 1;
-                return (newIndex << 28) | _sharedCaches[newIndex].Allocate(codeLength);
-            }
-        }
-
-        private int AllocateInLocalCache(int codeLength)
-        {
-            for (int i = 0; i < _localCaches.Count; i++)
-            {
-                try
-                {
-                    return (i << 28) | _localCaches[i].Allocate(codeLength);
-                }
-                catch (OutOfMemoryException)
-                {
-                }
-            }
-
-            lock (_lock)
-            {
-                for (int i = 0; i < _localCaches.Count; i++)
-                {
-                    try
-                    {
-                        return (i << 28) | _localCaches[i].Allocate(codeLength);
-                    }
-                    catch (OutOfMemoryException)
-                    {
-                    }
-                }
-
-                var allocator = _localCaches[0].Allocator;
-                _localCaches.Add(new(allocator, LocalCacheSize));
-                int newIndex = _localCaches.Count - 1;
-                return (newIndex << 28) | _localCaches[newIndex].Allocate(codeLength);
-            }
-        }
-
-        private static (int cacheIndex, int offset) SplitCacheOffset(int combinedOffset)
-        {
-            return (combinedOffset >> 28, combinedOffset & 0xFFFFFFF);
-        }
-
-        public unsafe IntPtr Map(IntPtr framePointer, ReadOnlySpan<byte> code, ulong guestAddress, ulong guestSize)
-        {
-            try
-            {
-                if (TryGetThreadLocalFunction(guestAddress, out IntPtr funcPtr))
-                {
-                    return funcPtr;
-                }
-
-                lock (_lock)
-                {
-                    if (!HasInAnyPendingMap(guestAddress) && !Translator.Functions.ContainsKey(guestAddress))
-                    {
-                        int combinedOffset = AllocateInSharedCache(code.Length);
-                        var (cacheIndex, funcOffset) = SplitCacheOffset(combinedOffset);
-
-                        MemoryCache cache = _sharedCaches[cacheIndex];
-                        funcPtr = cache.Pointer + funcOffset;
-                        code.CopyTo(new Span<byte>((void*)funcPtr, code.Length));
-                        funcPtr = cache.Pointer + funcOffset;
-
-                        TranslatedFunction function = new(funcPtr, guestSize);
-
-                        GetPendingMapForCache(cacheIndex).Add(funcOffset, code.Length, guestAddress, function);
-                    }
-
-                    ClearThreadLocalCache(framePointer);
-
-                    return AddThreadLocalFunction(code, guestAddress);
-                }
-            }
-            catch
-            {
-                lock (_lock)
-                {
-                    var funcPtr = IntPtr.Zero;
-                    int combinedOffset = AllocateInSharedCache(code.Length);
-                    var (cacheIndex, funcOffset) = SplitCacheOffset(combinedOffset);
-
-                    MemoryCache cache = _sharedCaches[cacheIndex];
-                    funcPtr = cache.Pointer + funcOffset;
+                    funcPtr = _sharedCache.GetPointerForOffset(funcOffset);
                     code.CopyTo(new Span<byte>((void*)funcPtr, code.Length));
-                    funcPtr = cache.Pointer + funcOffset;
 
                     TranslatedFunction function = new(funcPtr, guestSize);
 
-                    GetPendingMapForCache(cacheIndex).Add(funcOffset, code.Length, guestAddress, function);
-
-                    ClearThreadLocalCache(framePointer);
-
-                    return AddThreadLocalFunction(code, guestAddress);
+                    _pendingMap.Add(funcOffset, code.Length, guestAddress, function);
                 }
+
+                ClearThreadLocalCache(framePointer);
+
+                return AddThreadLocalFunction(code, guestAddress);
             }
         }
-        
-        public unsafe IntPtr MapPageAligned(ReadOnlySpan<byte> code)
+
+        public unsafe nint MapPageAligned(ReadOnlySpan<byte> code)
         {
             lock (_lock)
             {
-                int cacheIndex;
-                int funcOffset;
-                IntPtr mappedFuncPtr = IntPtr.Zero;
+                // Ensure we will get an aligned offset from the allocator.
+                _pendingMap.Pad(_sharedCache.GetCurrentAllocator());
 
-                for (cacheIndex = 0; cacheIndex < _sharedCaches.Count; cacheIndex++)
-                {
-                    try
-                    {
-                        var pendingMap = GetPendingMapForCache(cacheIndex);
-
-                        pendingMap.Pad(_sharedCaches[cacheIndex].CacheAllocator);
-
-                        int sizeAligned = BitUtils.AlignUp(code.Length, (int)MemoryBlock.GetPageSize());
-                        funcOffset = _sharedCaches[cacheIndex].Allocate(sizeAligned);
-
-                        Debug.Assert((funcOffset & ((int)MemoryBlock.GetPageSize() - 1)) == 0);
-
-                        IntPtr funcPtr1 = _sharedCaches[cacheIndex].Pointer + funcOffset;
-                        code.CopyTo(new Span<byte>((void*)funcPtr1, code.Length));
-
-                        _sharedCaches[cacheIndex].ReprotectAsRx(funcOffset, sizeAligned);
-
-                        return funcPtr1;
-                    }
-                    catch (OutOfMemoryException)
-                    {
-                    }
-                }
-
-                var allocator = _sharedCaches[0].Allocator;
-                var newCache = new MemoryCache(allocator, SharedCacheSize);
-                _sharedCaches.Add(newCache);
-                cacheIndex = _sharedCaches.Count - 1;
-
-                var newPendingMap = GetPendingMapForCache(cacheIndex);
-
-                newPendingMap.Pad(newCache.CacheAllocator);
-
-                int newSizeAligned = BitUtils.AlignUp(code.Length, (int)MemoryBlock.GetPageSize());
-                funcOffset = newCache.Allocate(newSizeAligned);
+                int sizeAligned = BitUtils.AlignUp(code.Length, (int)MemoryBlock.GetPageSize());
+                int funcOffset = _sharedCache.Allocate(sizeAligned);
 
                 Debug.Assert((funcOffset & ((int)MemoryBlock.GetPageSize() - 1)) == 0);
 
-                IntPtr funcPtr = newCache.Pointer + funcOffset;
+                nint funcPtr = _sharedCache.GetPointerForOffset(funcOffset);
                 code.CopyTo(new Span<byte>((void*)funcPtr, code.Length));
 
-                newCache.ReprotectAsRx(funcOffset, newSizeAligned);
+                _sharedCache.ReprotectAsRx(funcOffset, sizeAligned);
 
                 return funcPtr;
             }
         }
 
-        private bool TryGetThreadLocalFunction(ulong guestAddress, out IntPtr funcPtr)
-        {       
-            if ((_threadLocalCache ??= new()).TryGetValue(guestAddress, out var entry))
+        public bool TryGetThreadLocalFunction(ulong guestAddress, out nint funcPtr)
+        {
+            if ((_threadLocalCache ??= new()).TryGetValue(guestAddress, out ThreadLocalCacheEntry entry))
             {
                 if (entry.IncrementUseCount() >= MinCallsForPad)
                 {
                     lock (_lock)
                     {
-                        foreach (var kvp in _pendingMaps)
-                        {
-                            ulong cacheIndex = kvp.Key;
-                            var pendingMap = kvp.Value;
-                            
-                            if (cacheIndex < (ulong)_sharedCaches.Count)
-                            {
-                                pendingMap.Pad(_sharedCaches[(int)cacheIndex].CacheAllocator);
-                            }
-                        }
+                        _pendingMap.Pad(_sharedCache.GetCurrentAllocator());
                     }
                 }
 
                 funcPtr = entry.FuncPtr;
+
                 return true;
             }
 
-            funcPtr = IntPtr.Zero;
+            funcPtr = nint.Zero;
+
             return false;
         }
 
-        private void ClearThreadLocalCache(IntPtr framePointer)
+        private void ClearThreadLocalCache(nint framePointer)
         {
             // Try to delete functions that are already on the shared cache
             // and no longer being executed.
@@ -387,63 +310,24 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 return;
             }
 
-            IntPtr[] cachePointers = new IntPtr[_localCaches.Count];
-            int[] cacheSizes = new int[_localCaches.Count];
+            IEnumerable<ulong> callStack = _stackWalker.GetCallStack(
+                framePointer,
+                _localCache.Pointer,
+                LocalCacheSize,
+                _sharedCache.Pointer,
+                SharedCacheSize);
 
-            for (int i = 0; i < _localCaches.Count; i++)
-            {
-                cachePointers[i] = _localCaches[i].Pointer;
-                cacheSizes[i] = LocalCacheSize;
-            }
-
-            IntPtr[] sharedPointers = new IntPtr[_sharedCaches.Count];
-            int[] sharedSizes = new int[_sharedCaches.Count];
-
-            for (int i = 0; i < _sharedCaches.Count; i++)
-            {
-                sharedPointers[i] = _sharedCaches[i].Pointer;
-                sharedSizes[i] = SharedCacheSize;
-            }
-
-            // Collect call stack entries from all caches
-            HashSet<ulong> callStackAddresses = new HashSet<ulong>();
-            
-            for (int i = 0; i < Math.Max(_localCaches.Count, _sharedCaches.Count); i++)
-            {
-                IntPtr localPtr = i < _localCaches.Count ? cachePointers[i] : IntPtr.Zero;
-                int localSize = i < _localCaches.Count ? cacheSizes[i] : 0;
-                IntPtr sharedPtr = i < _sharedCaches.Count ? sharedPointers[i] : IntPtr.Zero;
-                int sharedSize = i < _sharedCaches.Count ? sharedSizes[i] : 0;
-                
-                IEnumerable<ulong> callStack = _stackWalker.GetCallStack(
-                    framePointer,
-                    localPtr,
-                    localSize,
-                    sharedPtr,
-                    sharedSize
-                );
-                
-                foreach (ulong address in callStack)
-                {
-                    callStackAddresses.Add(address);
-                }
-            }
-
-            List<(ulong, ThreadLocalCacheEntry)> toDelete = new();
+            List<(ulong, ThreadLocalCacheEntry)> toDelete = [];
 
             foreach ((ulong address, ThreadLocalCacheEntry entry) in _threadLocalCache)
             {
-                // We only want to delete if the function is already on the shared cache,
-                // otherwise we will keep translating the same function over and over again.
-                bool canDelete = !HasInAnyPendingMap(address);
+                bool canDelete = !_pendingMap.Has(address);
                 if (!canDelete)
                 {
                     continue;
                 }
 
-                // We can only delete if the function is not part of the current thread call stack,
-                // otherwise we will crash the program when the thread returns to it.
-                foreach (ulong funcAddress in callStackAddresses)
+                foreach (ulong funcAddress in callStack)
                 {
                     if (funcAddress >= (ulong)entry.FuncPtr && funcAddress < (ulong)entry.FuncPtr + (ulong)entry.Size)
                     {
@@ -465,10 +349,9 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 _threadLocalCache.Remove(address);
 
                 int sizeAligned = BitUtils.AlignUp(entry.Size, pageSize);
-                var (cacheIndex, offset) = SplitCacheOffset(entry.Offset);
 
-                _localCaches[cacheIndex].Free(offset, sizeAligned);
-                _localCaches[cacheIndex].ReprotectAsRw(offset, sizeAligned);
+                _localCache.Free(entry.Offset, sizeAligned);
+                _localCache.ReprotectAsRw(entry.Offset, sizeAligned);
             }
         }
 
@@ -484,10 +367,9 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             foreach ((_, ThreadLocalCacheEntry entry) in _threadLocalCache)
             {
                 int sizeAligned = BitUtils.AlignUp(entry.Size, pageSize);
-                var (cacheIndex, offset) = SplitCacheOffset(entry.Offset);
 
-                _localCaches[cacheIndex].Free(offset, sizeAligned);
-                _localCaches[cacheIndex].ReprotectAsRw(offset, sizeAligned);
+                _localCache.Free(entry.Offset, sizeAligned);
+                _localCache.ReprotectAsRw(entry.Offset, sizeAligned);
             }
 
             _threadLocalCache.Clear();
@@ -497,17 +379,16 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         private unsafe IntPtr AddThreadLocalFunction(ReadOnlySpan<byte> code, ulong guestAddress)
         {
             int alignedSize = BitUtils.AlignUp(code.Length, (int)MemoryBlock.GetPageSize());
-            int combinedOffset = AllocateInLocalCache(alignedSize);
-            var (cacheIndex, funcOffset) = SplitCacheOffset(combinedOffset);
+            int funcOffset = _localCache.Allocate(alignedSize);
 
             Debug.Assert((funcOffset & (int)(MemoryBlock.GetPageSize() - 1)) == 0);
 
-            IntPtr funcPtr = _localCaches[cacheIndex].Pointer + funcOffset;
+            nint funcPtr = _localCache.GetPointerForOffset(funcOffset);
             code.CopyTo(new Span<byte>((void*)funcPtr, code.Length));
 
-            (_threadLocalCache ??= new()).Add(guestAddress, new(funcOffset, code.Length, funcPtr, cacheIndex));
+            (_threadLocalCache ??= new()).Add(guestAddress, new(funcOffset, code.Length, funcPtr));
 
-            _localCaches[cacheIndex].ReprotectAsRx(funcOffset, alignedSize);
+            _localCache.ReprotectAsRx(funcOffset, alignedSize);
 
             return funcPtr;
         }
@@ -525,18 +406,8 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         {
             if (disposing)
             {
-                foreach (var cache in _localCaches)
-                {
-                    cache.Dispose();
-                }
-                
-                foreach (var cache in _sharedCaches)
-                {
-                    cache.Dispose();
-                }
-                
-                _localCaches.Clear();
-                _sharedCaches.Clear();
+                _localCache.Dispose();
+                _sharedCache.Dispose();
             }
         }
 

@@ -1047,6 +1047,30 @@ namespace Ryujinx.Cpu.LightningJit.Arm64
             return name == InstName.Bl || name == InstName.Blr;
         }
 
+        public static bool IsBranch(this InstName name)
+        {
+            switch (name)
+            {
+                case InstName.BUncond:
+                case InstName.BCond:
+                case InstName.Bl:
+                case InstName.Blr:
+                case InstName.Blra:
+                case InstName.Br:
+                case InstName.Bra:
+                case InstName.Cbnz:
+                case InstName.Cbz:
+                case InstName.Ret:
+                case InstName.Reta:
+                case InstName.Tbnz:
+                case InstName.Tbz:
+                    return true;
+            }
+
+            return false;
+        }
+
+
         public static bool IsControlFlowOrException(this InstName name)
         {
             switch (name)

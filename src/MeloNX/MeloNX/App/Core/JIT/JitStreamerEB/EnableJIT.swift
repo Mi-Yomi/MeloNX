@@ -37,8 +37,8 @@ func enableJITEBRequest() {
         }
         
        Task { @MainActor in
-            if let data = data, let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
-                showLaunchAppAlert(jsonData: data, in: windowScene.windows.last!.rootViewController!)
+            if let data = data, let viewController = AppDelegate.window?.rootViewController {
+                showLaunchAppAlert(jsonData: data, in: viewController)
             } else {
                 fatalError("Unable to get Window")
             }
@@ -105,9 +105,7 @@ func pingSite(host: String = "http://[fd00::]:9172/hello", completion: @escaping
 
 
 func presentAlert(title: String, message: String, imageName: String? = nil, completion: (() -> Void)? = nil) {
-    guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-          let lastWindow = windowScene.windows.last,
-          let rootVC = lastWindow.rootViewController else { return }
+    guard let rootVC = AppDelegate.window?.rootViewController else { return }
     
     if let imageName = imageName, UIImage(named: imageName) != nil {
         let customAlert = MacClassicAlertViewController(title: title, message: message, imageName: imageName, completion: completion)

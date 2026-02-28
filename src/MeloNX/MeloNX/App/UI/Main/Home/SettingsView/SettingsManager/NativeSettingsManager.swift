@@ -14,6 +14,16 @@ class NativeSettingsManager: ObservableObject {
     var settings: Set<AnyHashable> = []
     static var shared = NativeSettingsManager()
     
+    private var cancellables = Set<AnyCancellable>()
+    
+    init() {
+        NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.objectWillChange.send() }
+            }
+            .store(in: &cancellables)
+    }
+    
     subscript<T: Any>(dynamicMember member: String) -> (T) -> Setting<T> {
         return { [weak self] input in
             Setting<T>.getOrCreateSetting(named: member, default: input, self: self)
@@ -35,7 +45,7 @@ class NativeSettingsManager: ObservableObject {
     }
 }
 
-class Setting<T: Any>: Hashable, DynamicProperty {
+class Setting<T: Any>: Hashable {
     static func == (lhs: Setting<T>, rhs: Setting<T>) -> Bool {
         lhs.name == rhs.name && lhs.parent === rhs.parent
     }
@@ -112,6 +122,8 @@ class Setting<T: Any>: Hashable, DynamicProperty {
             return
         }
         
+        parent?.objectWillChange.send()
+        
         if isPropertyListCompatible(value) {
             UserDefaults.standard.set(value, forKey: name)
         } else if let encoded = encodeToData(value) {
@@ -185,8 +197,8 @@ class Setting<T: Any>: Hashable, DynamicProperty {
     }
     
     static func getOrCreateSetting(named name: String, default defaultValue: T?, self: NativeSettingsManager?) -> Setting<T> {
-        if let setting = self?.settings.first(where: { ($0 as? Setting<T>)?.name == name}) {
-            return setting as? Setting ?? Setting(name: name, defaultAny: defaultValue, parent: self)
+        if let setting = self?.settings.first(where: { ($0 as? Setting<T>)?.name == name}) as? Setting<T> {
+            return setting
         }
         
         let setting = Setting<T>(name: name, defaultAny: defaultValue, parent: self)
@@ -195,14 +207,20 @@ class Setting<T: Any>: Hashable, DynamicProperty {
     }
 }
 
-extension Setting where T == Bool {
-    static prefix func ! (setting: Setting<Bool>) -> Bool {
-        return !setting.value
-    }
-
-    static func == (lhs: Setting<Bool>, rhs: Bool) -> Bool {
+extension Setting where T: Equatable {
+    static func == (lhs: Setting<T>, rhs: T) -> Bool {
         lhs.value == rhs
     }
 
-    var wrappedValue: Bool { value }
+    static func == (lhs: T, rhs: Setting<T>) -> Bool {
+        lhs == rhs.value
+    }
+
+    var wrappedValue: T { value }
+}
+
+extension Setting where T == Bool {
+    static prefix func ! (setting: Setting<Bool>) -> Bool {
+        !setting.value
+    }
 }

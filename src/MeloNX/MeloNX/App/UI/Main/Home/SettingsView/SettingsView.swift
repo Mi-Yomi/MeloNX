@@ -18,7 +18,6 @@ struct SettingsViewNew: View {
     @StateObject var metalHudEnabler = MTLHud.shared
     
     @AppStorage("useTrollStore") var useTrollStore: Bool = false
-    @AppStorage("stikJIT") var stikJIT: Bool = false
     @AppStorage("OldView") var oldView = true
     @AppStorage("LDN_MITM") var ldn = printAllIPv4Addresses().first ?? "Unknown"
     @AppStorage("portal") var gamepo = false
@@ -233,13 +232,14 @@ struct SettingsViewNew: View {
                     categoryScrollView
                     Divider()
                     
-                    ScrollView {
+                    ScrollView(.vertical) {
                         VStack(spacing: 24) {
                             deviceInfoCard
                                 .padding(.horizontal)
                                 .padding(.top)
                             
                             selectedCategory.view(for: self)
+                                .frame(maxWidth: UIScreen.main.bounds.width)
                             
                             Spacer(minLength: 50)
                         }
@@ -279,17 +279,23 @@ struct SettingsViewNew: View {
                 .fill(ryujinx.jitenabled ? Color.green : Color.red)
                 .frame(width: 12, height: 12)
             
-            if !checkAppEntitlement("get-task-allow") &&
-                !checkAppEntitlement("com.apple.security.cs.allow-jit") &&
-                !checkAppEntitlement("dynamic-codesigning") &&
-                !ryujinx.jitenabled {
-                Text("No JIT Support. (no get-task-allow)")
-                    .font(.subheadline.weight(.medium))
-                    .foregroundColor(.red)
-            } else {
-                Text(ryujinx.jitenabled ? "JIT Enabled" : "JIT Not Acquired")
+            if ProcessInfo.processInfo.isiOSAppOnMac && !checkAppEntitlement("get-task-allow") {
+                Text("JIT Enabled (macOS)")
                     .font(.subheadline.weight(.medium))
                     .foregroundColor(ryujinx.jitenabled ? .green : .red)
+            } else {
+                if !checkAppEntitlement("get-task-allow") &&
+                    !checkAppEntitlement("com.apple.security.cs.allow-jit") &&
+                    !checkAppEntitlement("dynamic-codesigning") &&
+                    !ryujinx.jitenabled {
+                    Text("No JIT Support. (no get-task-allow)")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(.red)
+                } else {
+                    Text(ryujinx.jitenabled ? "JIT Enabled" : "JIT Not Acquired")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundColor(ryujinx.jitenabled ? .green : .red)
+                }
             }
         }
     }
@@ -310,36 +316,45 @@ struct SettingsViewNew: View {
             color: .gray
         )
         
-        InfoCard(
-            title: "Increased Memory Limit",
-            value: checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit") ? "Enabled" : "Disabled",
-            icon: "memorychip.fill",
-            color: .orange
-        )
-        
-        if checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing") {
+        if ProcessInfo.processInfo.isiOSAppOnMac {
             InfoCard(
-                title: "Extended Virtual Addressing",
-                value: "Enabled",
-                icon: "memorychip",
-                color: .yellow
+                title: "Increased Memory Limit",
+                value: "Not needed (macOS)",
+                icon: "memorychip.fill",
+                color: .orange
             )
-        }
-        
-        if let lc = isInLiveContainer.1, !isInLiveContainer.2 {
+        } else {
             InfoCard(
-                title: "LiveContainer",
-                value: "v\(lc.infoDictionary?["CFBundleShortVersionString"] as? String ?? (lc.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown")) \(lc.infoDictionary?["LCVersionInfo"] as? String ?? "")",
-                icon: "app.fill",
-                color: .indigo
+                title: "Increased Memory Limit",
+                value: checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit") ? "Enabled" : "Disabled",
+                icon: "memorychip.fill",
+                color: .orange
             )
-        } else if isInLiveContainer.2 {
-            InfoCard(
-                title: "LiveContainer",
-                value: "Multitask",
-                icon: "app.fill",
-                color: .indigo
-            )
+            
+            if checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing") {
+                InfoCard(
+                    title: "Extended Virtual Addressing",
+                    value: "Enabled",
+                    icon: "memorychip",
+                    color: .yellow
+                )
+            }
+            
+            if let lc = isInLiveContainer.1, !isInLiveContainer.2 {
+                InfoCard(
+                    title: "LiveContainer",
+                    value: "v\(lc.infoDictionary?["CFBundleShortVersionString"] as? String ?? (lc.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown")) \(lc.infoDictionary?["LCVersionInfo"] as? String ?? "")",
+                    icon: "app.fill",
+                    color: .indigo
+                )
+            } else if isInLiveContainer.2 {
+                InfoCard(
+                    title: "LiveContainer",
+                    value: "Multitask",
+                    icon: "app.fill",
+                    color: .indigo
+                )
+            }
         }
     }
     
@@ -415,6 +430,13 @@ struct SettingsViewNew: View {
         }
     }
     
+    // StackOverflow to the rescue fr
+    private static let formatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        return formatter
+    }()
+    
     private var resolutionScaleCard: some View {
         SettingsCard {
             VStack(alignment: .leading, spacing: 12) {
@@ -429,14 +451,26 @@ struct SettingsViewNew: View {
                     )
                 }
                 
-                sliderWithLabels(
-                    value: config.resscale,
-                    range: 0.1...3.0,
-                    step: 0.05,
-                    currentValue: settingsManager.config.resscale,
-                    minLabel: "0.1x",
-                    maxLabel: "3.0x"
-                )
+                if nativeSettingsManager.allowCustomResValue.value {
+                    TextField("Resolution Scale", value: config.resscale, formatter: Self.formatter)
+                        .keyboardType(.numberPad)
+                } else {
+                    sliderWithLabels(
+                        value: config.resscale,
+                        range: 0.1...3.0,
+                        step: 0.05,
+                        currentValue: settingsManager.config.resscale,
+                        minLabel: "0.1x",
+                        maxLabel: "3.0x"
+                    )
+                }
+            }
+            .contextMenu {
+                Button("Allow Any Resolution Scale" + (nativeSettingsManager.allowCustomResValue.value ? "  ✓" : "")) {
+                    if nativeSettingsManager.allowCustomResValue.value {
+                        nativeSettingsManager.allowCustomResValue.value = false
+                    } else { nativeSettingsManager.allowCustomResValue.value = true }
+                }
             }
         }
     }
@@ -477,7 +511,7 @@ struct SettingsViewNew: View {
                 Divider()
                 SettingsToggle(isOn: config.enableDockedMode, icon: "dock.rectangle", label: "Docked Mode", infoMessage: "Docked mode makes the emulated system behave as a docked Nintendo Switch. This improves graphical fidelity in most games. Conversely, disabling this will make the emulated system behave as a handheld Nintendo Switch, reducing graphics quality but improving performance.\n\nLeave OFF if unsure.")
                 Divider()
-                SettingsToggle(isOn: config.macroHLE, icon: "gearshape", label: "Macro HLE", infoMessage: "High-level emulation of GPU Macro code.\n\nImproves performance, but may cause graphical glitches in some games.\n\nLeave ON if unsure.")
+                SettingsToggle(isOn: config.macroHLE, icon: "gearshape", label: "Macro HLE", infoMessage: "High-level emulation of GPU Macro code.\n\nImproves performance, but may cause graphical glitches in some games.\n\nLeave OFF if unsure.")
             }
         }
     }
@@ -599,7 +633,7 @@ struct SettingsViewNew: View {
                 
                 SettingsToggle(isOn: nativeSettingsManager.stickButton.projectedValue, icon: "l.joystick.press.down", label: "Show Stick Buttons", infoMessage: "Shows L3 and R3 (Left Joystick and Right Joystick buttons) on the Virtual Controller.")
                 Divider()
-                SettingsToggle(isOn: nativeSettingsManager.virtualControllerOffDefault.projectedValue, icon: "formfitting.gamecontroller.fill", label: "Deselected By Default (Virtual Controller)", infoMessage: "Deselects the Virtual Controller by Default whether you have a physical controller connected or not.")
+                SettingsToggle(isOn: nativeSettingsManager.virtualControllerOffDefault(ProcessInfo.processInfo.isiOSAppOnMac).projectedValue, icon: "formfitting.gamecontroller.fill", label: "Deselected By Default (Virtual Controller)", infoMessage: "Deselects the Virtual Controller by Default whether you have a physical controller connected or not.")
             }
         }
     }
@@ -814,6 +848,8 @@ struct SettingsViewNew: View {
         }
     }
     
+    @AppStorage("hasbeenfinished") var inSetup: Bool = true
+    
     private var advancedTogglesCard: some View {
         SettingsCard {
             VStack(spacing: 4) {
@@ -828,8 +864,11 @@ struct SettingsViewNew: View {
                 SettingsToggle(isOn: nativeSettingsManager.ignoreJIT.projectedValue, icon: "cpu", label: "Ignore JIT Popup", infoMessage: "Ignores the JIT popup and tries to load the game reguardless.")
                 Divider()
                 
+                SettingsToggle(isOn: nativeSettingsManager.mainThreadWatchdog(true).projectedValue, icon: "clock.badge.exclamationmark", label: "Enables Main Thread Watchdog", infoMessage: "Meant to help troubleshooting.\n\nLeave ON if unsure.")
+                Divider()
+                
                 Button {
-                    nativeSettingsManager.hasBeenFinished.value = true
+                    inSetup = true
                 } label: {
                     HStack {
                         Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
@@ -1008,6 +1047,12 @@ struct SettingsViewNew: View {
                 SettingsToggle(isOn: nativeSettingsManager.disableTouch.projectedValue, icon: "rectangle.and.hand.point.up.left.filled", label: "Disable Touch", infoMessage: "Disables the touch screen (Not Virtual Controller)")
                 Divider()
                 
+                if #available(iOS 19, *) {
+                    SettingsToggle(isOn: nativeSettingsManager.disableLiquidGlass.projectedValue, icon: "rectangle.slash", label: "Disable Liquid Glass", infoMessage: "Disables Liquid Glass in the settings menu and in the Library View.")
+                    Divider()
+                }
+                
+                
                 VStack(alignment: .leading, spacing: 12) {
                     labelWithIcon("Library View", iconName: "list.bullet")
                         .font(.headline)
@@ -1133,8 +1178,7 @@ struct SettingsViewNew: View {
             if #available(iOS 17.0.1, *) {
                 let checked = stikJITorStikDebug()
                 let stikJIT = checked == 1 ? "StikDebug" : checked == 2 ? "StikJIT" : "StikDebug"
-                
-                SettingsToggle(isOn: $stikJIT, icon: "bolt.heart", label: "\(stikJIT)", infoMessage: "\(stikJIT) is a really amazing iOS Application to Enable JIT on the go on-device, made by the best, most kind, helpful and nice developers of all time jkcoxson and Blu <3")
+                SettingsToggle(isOn: nativeSettingsManager.stikJIT(isInLiveContainer.0).projectedValue, icon: "bolt.heart", label: "\(stikJIT)", infoMessage: "\(stikJIT) is an app used to Enable JIT on the go on-device, made by jkcoxson and Blu")
             } else {
                 SettingsToggle(isOn: $useTrollStore, icon: "troll.svg", label: "TrollStore JIT", infoMessage: "Enables JIT automatically using TrollStore's URL Scheme ('apple-magnifier://enable-jit?bundle-id')")
             }
@@ -1174,7 +1218,11 @@ struct SettingsViewNew: View {
         format: String = "%.2f"
     ) -> some View {
         VStack(spacing: 8) {
-            Slider(value: value, in: range, step: step)
+            if nativeSettingsManager.disableLiquidGlass.value {
+                Pre26Slider(value: value, range: range, step: step)
+            } else {
+                Slider(value: value, in: range, step: step)
+            }
             
             HStack {
                 Text(minLabel)
@@ -1223,8 +1271,7 @@ struct SettingsViewNew: View {
     }
     
     private func showAlert(title: String, message: String, learnMoreURL: String? = nil) {
-        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let mainWindow = windowScene.windows.last else { return }
+        guard let mainWindow = AppDelegate.window else { return }
         
         let alertController = UIAlertController(title: title, message: message, preferredStyle: .alert)
         

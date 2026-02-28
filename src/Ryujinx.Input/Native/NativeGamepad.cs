@@ -14,27 +14,26 @@ namespace Ryujinx.Input.Native
         private readonly float[] _stickStates; 
         private readonly Vector3[] _motionStates; 
 
-        private readonly Dictionary<int, GamepadButtonInputId> intToInputId = new()
+        private static readonly GamepadButtonInputId[] ButtonMapping = new GamepadButtonInputId[17]
         {
-            [0] = GamepadButtonInputId.A,
-            [1] = GamepadButtonInputId.B,
-            [2] = GamepadButtonInputId.X,
-            [3] = GamepadButtonInputId.Y,
-            [4] = GamepadButtonInputId.Back,
-            [5] = GamepadButtonInputId.Guide,
-            [6] = GamepadButtonInputId.Start,
-            [7] = GamepadButtonInputId.LeftStick,
-            [8] = GamepadButtonInputId.RightStick,
-            [9] = GamepadButtonInputId.LeftShoulder,
-            [10] = GamepadButtonInputId.RightShoulder,
-            [11] = GamepadButtonInputId.DpadUp,
-            [12] = GamepadButtonInputId.DpadDown,
-            [13] = GamepadButtonInputId.DpadLeft,
-            [14] = GamepadButtonInputId.DpadRight,
-            [15] = GamepadButtonInputId.LeftTrigger,
-            [16] = GamepadButtonInputId.RightTrigger
+            GamepadButtonInputId.A,             // 0
+            GamepadButtonInputId.B,             // 1
+            GamepadButtonInputId.X,             // 2
+            GamepadButtonInputId.Y,             // 3
+            GamepadButtonInputId.Back,          // 4
+            GamepadButtonInputId.Guide,         // 5
+            GamepadButtonInputId.Start,         // 6
+            GamepadButtonInputId.LeftStick,     // 7
+            GamepadButtonInputId.RightStick,    // 8
+            GamepadButtonInputId.LeftShoulder,  // 9
+            GamepadButtonInputId.RightShoulder, // 10
+            GamepadButtonInputId.DpadUp,        // 11
+            GamepadButtonInputId.DpadDown,      // 12
+            GamepadButtonInputId.DpadLeft,      // 13
+            GamepadButtonInputId.DpadRight,     // 14
+            GamepadButtonInputId.LeftTrigger,   // 15
+            GamepadButtonInputId.RightTrigger   // 16
         };
-
 
         private StandardControllerInputConfig _configuration;
         private float _triggerThreshold;
@@ -59,15 +58,12 @@ namespace Ryujinx.Input.Native
 
         internal void SetButtonStateInternal(int buttonId2, bool pressed)
         {
-            GamepadButtonInputId buttonEnum = intToInputId[buttonId2];
-            
-            int buttonId = (int)buttonEnum;
-
-            if (buttonId >= 0 && buttonId < (int)GamepadButtonInputId.Count)
+            if (buttonId2 >= 0 && buttonId2 < ButtonMapping.Length)
             {
+                int mappedId = (int)ButtonMapping[buttonId2];
                 lock (_stateLock)
                 {
-                    _buttonStates[buttonId] = pressed;
+                    _buttonStates[mappedId] = pressed;
                 }
             }
         }
@@ -76,12 +72,12 @@ namespace Ryujinx.Input.Native
         {
             lock (_stateLock)
             {
-                if (stickId == (int)StickInputId.Left)
+                if (stickId == 1) // Left Stick
                 {
                     _stickStates[0] = Math.Clamp(x, -1.0f, 1.0f);
                     _stickStates[1] = Math.Clamp(y, -1.0f, 1.0f);
                 }
-                else if (stickId == (int)StickInputId.Right)
+                else if (stickId == 2) // Right Stick
                 {
                     _stickStates[2] = Math.Clamp(x, -1.0f, 1.0f);
                     _stickStates[3] = Math.Clamp(y, -1.0f, 1.0f);
@@ -93,19 +89,53 @@ namespace Ryujinx.Input.Native
         {
             lock (_stateLock)
             {
-                // Console.WriteLine($"{motionType}, {x}, {y}, {z}");
                 if (motionType == (int)MotionInputId.Accelerometer)
-                {
                     _motionStates[0] = new Vector3(x, y, z);
-                }
                 else if (motionType == (int)MotionInputId.Gyroscope)
-                {
                     _motionStates[1] = new Vector3(x, y, z);
-                }
             }
         }
 
-        internal void ResetStateInternal()
+        public GamepadStateSnapshot GetStateSnapshot()
+        {
+            return IGamepad.GetStateSnapshot(this);
+        }
+        
+        public GamepadStateSnapshot GetMappedStateSnapshot() => GetStateSnapshot();
+
+        public bool IsPressed(GamepadButtonInputId inputId)
+        {
+            lock (_stateLock)
+            {
+                return (int)inputId >= 0 && (int)inputId < _buttonStates.Length && _buttonStates[(int)inputId];
+            }
+        }
+
+        public (float, float) GetStick(StickInputId inputId)
+        {
+            lock (_stateLock)
+            {
+                return inputId == StickInputId.Left ? (_stickStates[0], _stickStates[1]) : (_stickStates[2], _stickStates[3]);
+            }
+        }
+
+        public Vector3 GetMotionData(MotionInputId inputId)
+        {
+            lock (_stateLock)
+            {
+                return inputId == MotionInputId.Accelerometer ? _motionStates[0] : _motionStates[1];
+            }
+        }
+
+        public void SetConfiguration(InputConfig configuration)
+        {
+            _configuration = (StandardControllerInputConfig)configuration;
+            _triggerThreshold = _configuration.TriggerThreshold;
+        }
+
+        public void SetTriggerThreshold(float triggerThreshold) => _triggerThreshold = triggerThreshold;
+
+        public void ResetStateInternal()
         {
             lock (_stateLock)
             {
@@ -115,112 +145,25 @@ namespace Ryujinx.Input.Native
             }
         }
 
-        public bool IsPressed(GamepadButtonInputId inputId)
-        {
-            lock (_stateLock)
-            {
-                if ((int)inputId >= 0 && (int)inputId < _buttonStates.Length)
-                {
-                    return _buttonStates[(int)inputId];
-                }
-            }
-
-            return false;
-        }
-
-        public (float, float) GetStick(StickInputId inputId)
-        {
-            lock (_stateLock)
-            {
-                if (inputId == StickInputId.Left)
-                {
-                    return (_stickStates[0], _stickStates[1]);
-                }
-                else if (inputId == StickInputId.Right)
-                {
-                    return (_stickStates[2], _stickStates[3]);
-                }
-            }
-
-            return (0.0f, 0.0f);
-        }
-
-        public Vector3 GetMotionData(MotionInputId inputId)
-        {
-            lock (_stateLock)
-            {
-                if (inputId == MotionInputId.Accelerometer)
-                {
-                    return _motionStates[0];
-                }
-                else if (inputId == MotionInputId.Gyroscope)
-                {
-                    return _motionStates[1];
-                }
-            }
-
-            return Vector3.Zero;
-        }
-
-        public void SetConfiguration(InputConfig configuration)
-        {
-            _configuration = (StandardControllerInputConfig)configuration;
-            SetTriggerThreshold(_configuration.TriggerThreshold);
-        }
-
-        public void SetTriggerThreshold(float triggerThreshold)
-        {
-            _triggerThreshold = triggerThreshold;
-        }
-
-        public GamepadStateSnapshot GetStateSnapshot()
-        {
-            return IGamepad.GetStateSnapshot(this);
-        }
-
-        public GamepadStateSnapshot GetMappedStateSnapshot()
-        {
-            return GetStateSnapshot();
-        }
-
         [DllImport("RyujinxHelper.framework/RyujinxHelper", CallingConvention = CallingConvention.Cdecl)]
-        public static extern void TriggerCallbackWithData(string cIdentifier, IntPtr data,  UIntPtr dataLength);
+        public static extern void TriggerCallbackWithData(string cIdentifier, IntPtr data, UIntPtr dataLength);
 
         public void Rumble(float lowFrequency, float highFrequency, uint durationMs)
         {
-            var rumbleData = new RumbleData
-            {
-                LowFrequency = lowFrequency,
-                HighFrequency = highFrequency,
-                DurationMs = durationMs
-            };
-
+            var rumbleData = new RumbleData { LowFrequency = lowFrequency, HighFrequency = highFrequency, DurationMs = durationMs };
             int size = Marshal.SizeOf(typeof(RumbleData));
             IntPtr ptr = Marshal.AllocHGlobal(size);
-            Marshal.StructureToPtr(rumbleData, ptr, false);
-
-            try
-            {
+            try {
+                Marshal.StructureToPtr(rumbleData, ptr, false);
                 TriggerCallbackWithData($"rumble-{Id}", ptr, (UIntPtr)size);
-            }
-            finally
-            {
+            } finally {
                 Marshal.FreeHGlobal(ptr);
             }
         }
 
-        public void Dispose()
-        {
-            IsConnected = false;
-        }
+        public void Dispose() => IsConnected = false;
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    public struct RumbleData
-    {
-        public float LowFrequency;
-        public float HighFrequency;
-        public uint DurationMs;
-    }
-
+    public struct RumbleData { public float LowFrequency; public float HighFrequency; public uint DurationMs; }
 }

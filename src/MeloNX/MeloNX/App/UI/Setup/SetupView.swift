@@ -16,12 +16,32 @@ struct SetupView: View {
     @State private var alertMessage = ""
     @State private var keysImported = false
     @State private var firmImported = false
+    @State private var showMainSetup = false
     @AppStorage("skippedSetup") var skippedSetup: Bool = false
     @Binding var isInSetup: Bool
     
     let cool: LocalizedStringKey = "MeloNX has issues with Certificates and should not be used. Official Install Guides is [here](https://melonx.org)"
     
     var body: some View {
+        Group {
+            if showMainSetup {
+                mainBody
+            } else {
+                LinearGradient(
+                    gradient: Gradient(colors: [
+                        Color.blue.opacity(0.1),
+                        Color.red.opacity(0.1)
+                    ]),
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .ignoresSafeArea()
+                .overlay(content: { IconAnimation(showMainSetup: $showMainSetup)})
+            }
+        }
+    }
+    
+    var mainBody: some View {
         iOSNav {
             ZStack {
                 if UIDevice.current.systemName.contains("iPadOS") {
@@ -127,6 +147,24 @@ struct SetupView: View {
                                         )
                                 )
                                 .shadow(color: .black.opacity(0.1), radius: 15, x: 0, y: 6)
+                                .onTapGesture {
+                                    if MusicSelectorView.isPlaying {
+                                        MusicSelectorView.stopMusic()
+                                    } else {
+                                        let mp3 = MusicSelectorView.getMP3s().first(where: { $0.builtIn })
+                                        MusicSelectorView.playMusic(mp3)
+                                    }
+                                }
+                                .onTapGesture(count: 2) {
+                                    let documentsUrl = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+                                    var sharedurl = documentsUrl.absoluteString.replacingOccurrences(of: "file://", with: "shareddocuments://")
+                                    if ProcessInfo.processInfo.isiOSAppOnMac {
+                                        sharedurl = documentsUrl.absoluteString
+                                    }
+                                    if UIApplication.shared.canOpenURL(URL(string: sharedurl)!) {
+                                        UIApplication.shared.open(URL(string: sharedurl)!, options: [:])
+                                    }
+                                }
                             
                             Text("Welcome to MeloNX")
                                 .font(.title)
@@ -253,6 +291,14 @@ struct SetupView: View {
                             .shadow(color: .black.opacity(0.1), radius: 12, x: 0, y: 4)
                             .padding(.top, 40)
                             .onTapGesture {
+                                if MusicSelectorView.isPlaying {
+                                    MusicSelectorView.stopMusic()
+                                } else {
+                                    let mp3 = MusicSelectorView.getMP3s().first(where: { $0.builtIn })
+                                    MusicSelectorView.playMusic(mp3)
+                                }
+                            }
+                            .onTapGesture(count: 2) {
                                 let documentsUrl = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
                                 var sharedurl = documentsUrl.absoluteString.replacingOccurrences(of: "file://", with: "shareddocuments://")
                                 if ProcessInfo.processInfo.isiOSAppOnMac {

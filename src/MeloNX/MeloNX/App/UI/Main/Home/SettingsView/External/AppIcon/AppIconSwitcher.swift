@@ -155,7 +155,8 @@ struct AppIconSwitcherView: View {
         
         appIcons.append(contentsOf: [
             AppIcon(iconNames: [(isAvailable(iOS: 19) ? "Clear" : "Clear (Liquid Glass)"): "Clear", "Mel-o-Lantern": "Mel-o-Lantern", "MeloNXmas": "MeloNXmas", "MeluckyNX \n (Saint Patrick's Day)": "MeluckyNX"], creator: "Transistor"),
-            AppIcon(iconNames: ["MellowSkyNX": "MellowSkyNX"], creator: "Sky (@dootskyre)")
+            AppIcon(iconNames: ["MellowSkyNX": "MellowSkyNX"], creator: "Sky (@dootskyre)"),
+            AppIcon(iconNames: ["Skeuomorphic": "skeuomorphic"], creator: "@stars33k")
         ])
     }
     

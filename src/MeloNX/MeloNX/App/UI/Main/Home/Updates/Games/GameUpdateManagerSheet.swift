@@ -231,12 +231,13 @@ struct UpdateManagerSheet: View {
     private func handleFileImport(result: Result<[URL], Error>) {
         switch result {
         case .success(let urls):
-            var updates: [UpdateItem] = []
+            var newUpdates: [UpdateItem] = []
+            
             for selectedURL in urls {
                 guard let game = game,
                       selectedURL.startAccessingSecurityScopedResource() else {
                     print("Failed to access security-scoped resource")
-                    return
+                    continue
                 }
                 
                 defer { selectedURL.stopAccessingSecurityScopedResource() }
@@ -246,45 +247,50 @@ struct UpdateManagerSheet: View {
                     let updatesDirectory = URL.documentsDirectory.appendingPathComponent("updates")
                     let gameUpdatesDirectory = updatesDirectory.appendingPathComponent(game.titleId)
                     
-                    // Create directories if needed
                     try fileManager.createDirectory(at: gameUpdatesDirectory, withIntermediateDirectories: true)
                     
-                    // Copy the file
                     let destinationURL = gameUpdatesDirectory.appendingPathComponent(selectedURL.lastPathComponent)
-                    try? fileManager.removeItem(at: destinationURL) // Remove if exists
+                    let relativePath = "updates/\(game.titleId)/\(selectedURL.lastPathComponent)"
+                    
+                    if updates.contains(where: { $0.path == relativePath }) {
+                        print("Update already exists: \(selectedURL.lastPathComponent)")
+                        continue
+                    }
+                    
+                    try? fileManager.removeItem(at: destinationURL)
                     try fileManager.copyItem(at: selectedURL, to: destinationURL)
                     
-                    // Add to updates
-                    let relativePath = "updates/\(game.titleId)/\(selectedURL.lastPathComponent)"
                     let newUpdate = UpdateItem(
                         url: destinationURL,
                         filename: selectedURL.lastPathComponent,
-                        path: relativePath
+                        path: relativePath,
+                        isSelected: false
                     )
                     
-                    
-                    updates.append(newUpdate)
+                    newUpdates.append(newUpdate)
             
                 } catch {
                     print("Error copying update file: \(error)")
                 }
             }
             
-            if !updates.isEmpty {
-                updates[0].isSelected = true
+            if !newUpdates.isEmpty {
+                let hasSelectedUpdate = updates.contains(where: { $0.isSelected })
+                if !hasSelectedUpdate {
+                    newUpdates[0].isSelected = true
+                }
+                
+                self.updates.append(contentsOf: newUpdates)
+                
+                saveJSON()
+                
+                Ryujinx.shared.games = Ryujinx.shared.loadGames()
             }
-            
-            self.updates.append(contentsOf: updates)
-            
-            
-            
-            Ryujinx.shared.games = Ryujinx.shared.loadGames()
             
         case .failure(let error):
             print("File import failed: \(error.localizedDescription)")
         }
     }
-    
     private func toggleSelection(_ update: UpdateItem) {
         print("toggle selection \(update.path)")
         

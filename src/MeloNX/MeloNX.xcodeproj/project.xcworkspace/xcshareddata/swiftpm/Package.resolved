@@ -1,15 +1,6 @@
 {
-  "originHash" : "ea069c7880f1ba9440ab5353111623e6f588c93e5c734ab5a438682dbab790c7",
+  "originHash" : "c792a2924663f4c37fc87447015b66d6ddf16affc1d3bb2834b8a5a4e08a98b0",
   "pins" : [
-    {
-      "identity" : "cocoaasyncsocket",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/robbiehanson/CocoaAsyncSocket",
-      "state" : {
-        "revision" : "dbdc00669c1ced63b27c3c5f052ee4d28f10150c",
-        "version" : "7.6.5"
-      }
-    },
     {
       "identity" : "navigation-stack-backport",
       "kind" : "remoteSourceControl",

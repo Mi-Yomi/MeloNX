@@ -6,100 +6,186 @@
 //
 
 
+import UIKit
 import SwiftUI
 
-struct Joystick: View {
-    @AppStorage("On-ScreenControllerScale") var controllerScale: Double = 1.0
-    @State var right = true
-    @Binding var position: CGPoint
-    let joystickSize: CGFloat
-    var boundarySize: CGFloat
+final class JoystickView: UIView {
+    var right: Bool = true
+    var background: Bool = false
+    var sensitivity: CGFloat = 1.2
     
-    @State private var offset: CGSize = .zero
-    @Binding var showBackground: Bool
-    @State var joystickSmallSize = false
-    
-    let sensitivity: CGFloat = 1.2
-    
-    private var displayJoystickSize: CGFloat {
-        joystickSmallSize ? joystickSize * 1.4 : joystickSize
+    private var dragDiameter: CGFloat {
+        var base: CGFloat = 160
+        if UIDevice.current.systemName.contains("iPadOS") {
+            return base * 1.2
+        }
+        return base
     }
     
-    var dragGesture: some Gesture {
-        DragGesture()
-            .onChanged { value in
-                withAnimation(.easeIn) {
-                    showBackground = true
-                    joystickSmallSize = true
-                }
-                
-                let translation = value.translation
-                let distance = sqrt(translation.width * translation.width + translation.height * translation.height)
-                let maxRadius = (boundarySize - joystickSize) / 2
-                let extendedRadius = maxRadius + (joystickSize / 2)
-                
-                if distance <= extendedRadius {
-                    offset = translation
-                } else {
-                    let angle = atan2(translation.height, translation.width)
-                    offset = CGSize(width: cos(angle) * extendedRadius, height: sin(angle) * extendedRadius)
-                }
-                
-                position = CGPoint(
-                    x: max(-1, min(1, (offset.width / extendedRadius) * sensitivity)),
-                    y: max(-1, min(1, (offset.height / extendedRadius) * sensitivity))
+    private var joystickSize: CGFloat {
+        dragDiameter * 0.2
+    }
+    
+    private var boundarySize: CGFloat {
+        dragDiameter
+    }
+    
+    var onPositionChanged: ((CGPoint) -> Void)?
+    
+    private let boundaryView = UIView()
+    private let backgroundView = UIView()
+    private let joystickView = UIView()
+    private let joystickBackgroundView = UIView()
+    
+    private var offset: CGPoint = .zero
+    
+    private var extendedRadius: CGFloat {
+        let maxRadius = (boundarySize - joystickSize) / 2
+        return maxRadius + (joystickSize / 2)
+    }
+    
+    private let virtualController = ControllerManager.shared.virtualController
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+    
+    private func setup() {
+        clipsToBounds = false
+        
+        addSubview(boundaryView)
+        addSubview(backgroundView)
+        addSubview(joystickBackgroundView)
+        addSubview(joystickView)
+        
+        backgroundView.backgroundColor = UIColor.gray.withAlphaComponent(0.4)
+        backgroundView.alpha = background ? 1 : 0
+        
+        joystickBackgroundView.backgroundColor = UIColor.gray.withAlphaComponent(0.3)
+        joystickView.backgroundColor = UIColor.white.withAlphaComponent(0.5)
+        
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        joystickView.addGestureRecognizer(pan)
+        
+        updateScale()
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        
+        let size = boundarySize
+        frame.size = CGSize(width: size, height: size)
+        
+        boundaryView.frame = CGRect(origin: .zero, size: frame.size)
+        boundaryView.layer.cornerRadius = size / 2
+        
+        backgroundView.frame = boundaryView.frame
+        backgroundView.layer.cornerRadius = size / 2
+        
+        joystickBackgroundView.bounds = CGRect(
+            x: 0, y: 0,
+            width: joystickSize * 1.25,
+            height: joystickSize * 1.25
+        )
+        joystickBackgroundView.layer.cornerRadius = joystickBackgroundView.bounds.width / 2
+        
+        joystickView.bounds = CGRect(
+            x: 0, y: 0,
+            width: joystickSize,
+            height: joystickSize
+        )
+        joystickView.layer.cornerRadius = joystickSize / 2
+        
+        resetPosition()
+        
+    }
+    
+    private func updateScale() {
+        let scale = CGFloat(UserDefaults.standard.double(forKey: "On-ScreenControllerScale"))
+        transform = CGAffineTransform(scaleX: scale == 0 ? 1.0 : scale,
+                                      y: scale == 0 ? 1.0 : scale)
+    }
+    
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: self)
+        
+        switch gesture.state {
+        case .began, .changed:
+            animateBackground(show: true)
+            
+            let distance = hypot(translation.x, translation.y)
+            
+            if distance <= extendedRadius {
+                offset = translation
+            } else {
+                let angle = atan2(translation.y, translation.x)
+                offset = CGPoint(
+                    x: cos(angle) * extendedRadius,
+                    y: sin(angle) * extendedRadius
                 )
-                
-                setPos()
             }
-            .onEnded { _ in
-                offset = .zero
-                position = .zero
-                setPos()
-                withAnimation(.easeOut) {
-                    showBackground = false
-                    joystickSmallSize = false
-                }
-            }
+            
+            updateJoystickPosition()
+            
+            let normalized = CGPoint(
+                x: max(-1, min(1, (offset.x / extendedRadius) * sensitivity)),
+                y: max(-1, min(1, (offset.y / extendedRadius) * sensitivity))
+            )
+            
+            onPositionChanged?(normalized)
+            sendToController(normalized)
+            
+        case .ended, .cancelled:
+            resetPosition()
+            animateBackground(show: false)
+            
+        default:
+            break
+        }
     }
     
-    let virtualController = ControllerManager.shared.virtualController
     
-    func setPos() {
+    private func updateJoystickPosition() {
+        let centerPoint = CGPoint(
+            x: bounds.midX + offset.x,
+            y: bounds.midY + offset.y
+        )
+        
+        joystickView.center = centerPoint
+        joystickBackgroundView.center = centerPoint
+    }
+    
+    private func resetPosition() {
+        offset = .zero
+        
+        let centerPoint = CGPoint(x: bounds.midX, y: bounds.midY)
+        joystickView.center = centerPoint
+        joystickBackgroundView.center = centerPoint
+        
+        let zero = CGPoint.zero
+        onPositionChanged?(zero)
+        sendToController(zero)
+    }
+    
+    private func animateBackground(show: Bool) {
+        if !background {
+            UIView.animate(withDuration: 0.15) {
+                self.backgroundView.alpha = show ? 1 : 0
+            }
+        }
+    }
+    
+    private func sendToController(_ position: CGPoint) {
         if right {
             virtualController.thumbstickMoved(.right, x: position.x, y: position.y)
         } else {
             virtualController.thumbstickMoved(.left, x: position.x, y: position.y)
         }
-    }
-    
-    var body: some View {
-        ZStack {
-            Circle()
-                .fill(Color.clear.opacity(0))
-                .frame(width: boundarySize, height: boundarySize)
-                .scaleEffect(controllerScale)
-            
-            if showBackground {
-                Circle()
-                    .fill(Color.gray.opacity(0.4))
-                    .frame(width: boundarySize, height: boundarySize)
-                    .animation(.easeInOut(duration: 0.1), value: showBackground)
-                    .scaleEffect(controllerScale)
-            }
-            
-            Circle()
-                .fill(Color.white.opacity(0.5))
-                .frame(width: displayJoystickSize, height: displayJoystickSize)
-                .background(
-                    Circle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: displayJoystickSize * 1.25, height: displayJoystickSize * 1.25)
-                )
-                .offset(offset)
-                .gesture(dragGesture)
-                .scaleEffect(controllerScale)
-        }
-        .frame(width: boundarySize, height: boundarySize)
     }
 }

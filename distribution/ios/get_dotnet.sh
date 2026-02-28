@@ -10,7 +10,11 @@ SEARCH_PATHS=(
     "/opt"
     "/Library/Frameworks"
     "$HOME/.dotnet"
+    "$HOME/dotnet"
     "$HOME/Developer"
+    "~/.dotnet"
+    "~/dotnet"
+    "~/Developer"
 )
 
 

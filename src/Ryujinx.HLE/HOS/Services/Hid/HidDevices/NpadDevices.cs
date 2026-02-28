@@ -58,6 +58,24 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             JoyHold = NpadJoyHoldType.Vertical;
         }
 
+        public bool isAtRest(int playerNumber)
+        {
+            
+            ref NpadInternalState currentNpad = ref _device.Hid.SharedMemory.Npads[playerNumber].InternalState;
+            ref SixAxisSensorState storage = ref GetSixAxisSensorLifo(ref currentNpad, false).GetCurrentEntryRef();
+                
+            float acceleration = Math.Abs(storage.Acceleration.X)
+                                 + Math.Abs(storage.Acceleration.Y)
+                                 + Math.Abs(storage.Acceleration.Z);
+
+            float angularVelocity = Math.Abs(storage.AngularVelocity.X)
+                                    + Math.Abs(storage.AngularVelocity.Y)
+                                    + Math.Abs(storage.AngularVelocity.Z);
+
+            return ((acceleration <= 1.0F) && (angularVelocity <= 1.0F));
+        }
+
+
         internal ref KEvent GetStyleSetUpdateEvent(PlayerIndex player)
         {
             return ref _styleSetUpdateEvents[(int)player];

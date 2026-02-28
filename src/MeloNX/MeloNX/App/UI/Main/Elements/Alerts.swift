@@ -22,6 +22,13 @@ func showAlert(_ viewController: UIViewController? = nil,
         alert.addAction(uiAction)
     }
     
-    let coolVC = viewController ?? UIApplication.shared.windows.first?.rootViewController!
-    coolVC!.present(alert, animated: true, completion: nil)
+    if Thread.isMainThread {
+        let coolVC = viewController ?? UIApplication.shared.windows.first?.rootViewController!
+        coolVC!.present(alert, animated: true, completion: nil)
+    } else {
+        DispatchQueue.main.async {
+            let coolVC = viewController ?? UIApplication.shared.windows.first?.rootViewController!
+            coolVC!.present(alert, animated: true, completion: nil)
+        }
+    }
 }

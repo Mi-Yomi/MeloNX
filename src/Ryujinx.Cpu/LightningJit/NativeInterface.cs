@@ -66,9 +66,19 @@ namespace Ryujinx.Cpu.LightningJit
             return (ulong)Context.Translator.GetOrTranslatePointer(framePointer, address, GetContext().ExecutionMode);
         }
 
+        public static void InvalidateJitCacheRegion(ulong address, ulong size)
+        {
+            Context.Translator.InvalidateJitCacheRegion(address, size);
+        }
+
         public static void InvalidateCacheLine(ulong address)
         {
             Context.Translator.InvalidateJitCacheRegion(address, DczSizeInBytes);
+        }
+
+        public static void SetPageTablePointer() 
+        {
+            Context.Context.SetPageTablePointer(Context.Memory);
         }
 
         public static bool CheckSynchronization()

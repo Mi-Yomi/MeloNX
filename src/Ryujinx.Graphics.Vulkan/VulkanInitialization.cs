@@ -464,14 +464,19 @@ namespace Ryujinx.Graphics.Vulkan
                 pExtendedFeatures = &featuresRobustness2;
             }
 
-            var featuresExtendedDynamicState = new PhysicalDeviceExtendedDynamicStateFeaturesEXT
-            {
-                SType = StructureType.PhysicalDeviceExtendedDynamicStateFeaturesExt,
-                PNext = pExtendedFeatures,
-                ExtendedDynamicState = physicalDevice.IsDeviceExtensionPresent(ExtExtendedDynamicState.ExtensionName),
-            };
+            bool isDynamicStateSupported = OperatingSystem.IsIOSVersionAtLeast(17) || !OperatingSystem.IsIOS();
 
-            pExtendedFeatures = &featuresExtendedDynamicState;
+            if (isDynamicStateSupported)
+            {
+                var featuresExtendedDynamicState = new PhysicalDeviceExtendedDynamicStateFeaturesEXT
+                {
+                    SType = StructureType.PhysicalDeviceExtendedDynamicStateFeaturesExt,
+                    PNext = pExtendedFeatures,
+                    ExtendedDynamicState = physicalDevice.IsDeviceExtensionPresent(ExtExtendedDynamicState.ExtensionName),
+                };
+
+                pExtendedFeatures = &featuresExtendedDynamicState; 
+            }
 
             var featuresVk11 = new PhysicalDeviceVulkan11Features
             {

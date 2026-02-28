@@ -15,7 +15,7 @@ Before you begin, ensure you have the following installed:
 Open a terminal and run (your password will not be shown in the 2nd command):
 
 ```sh
-git clone https://git.743378673.xyz/MeloNX/MeloNX.git
+git clone https://git.ryujinx.app/melonx/emu.git
 sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 ```
 
@@ -36,8 +36,8 @@ Double-click to open it in **Xcode**.
 
 ### 3. Configure Signing & Capabilities
 
-- In **Xcode**, go to **Signing & Capabilities**.
-- Set the **Team** to your **Apple Developer account** (free or paid).
+> Please change the Bundle Identifier before setting the account.
+
 - Change the **Bundle Identifier** to:
 
   ```
@@ -45,6 +45,9 @@ Double-click to open it in **Xcode**.
   ```
 
   *(Replace `<your-name>` with your actual name or identifier.)*
+
+- In **Xcode**, go to **Signing & Capabilities**.
+- Set the **Team** to your **Apple Developer account** (free or paid).
 
 ### 4. Connect Your Device
 
@@ -57,8 +60,8 @@ Ensure your **iPhone/iPad** is **connected** and **selected** (Next to MeloNX wi
 
 ### 6. Configure the Project Settings
 
-Click the **Run (▶️) button** in Xcode to compile MeloNX and wait it will fail with Undefined Symbol(s) the first time, Thats normal.
-- When it fails the first time, do this:
+Click the **Run (▶️) button** in Xcode to compile MeloNX and wait.
+- If it fails with with Undefined Symbol(s) the first time, Thats normal, do this:
 - In **Xcode**, select the **MeloNX** project.
 - Under the **General** tab, find `Ryujinx.Headless.SDL2.dylib`.
 - Set its **Embed setting** to **"Embed & Sign"**.

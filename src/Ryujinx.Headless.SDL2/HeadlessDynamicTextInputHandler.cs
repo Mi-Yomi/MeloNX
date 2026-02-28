@@ -30,7 +30,7 @@ namespace Ryujinx.Headless.SDL2
                 Task.Run(() =>
                 {
                     Thread.Sleep(100);
-                    TextChangedEvent?.Invoke("Ryujinx", 7, 7, false);
+                    TextChangedEvent?.Invoke("MeloNX", 7, 7, false);
                 });
             }
         }

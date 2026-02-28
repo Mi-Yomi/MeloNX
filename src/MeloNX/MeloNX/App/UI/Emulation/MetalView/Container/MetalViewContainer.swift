@@ -8,11 +8,18 @@
 import SwiftUI
 
 struct MetalViewContainer: View {
+    var hudView: AnyView
+    
+    init(isPortrait: Binding<Bool>, @ViewBuilder hudView: @escaping () -> some View) {
+        self.hudView = AnyView(hudView())
+        _isPortrait = isPortrait
+    }
+    
     @EnvironmentObject var ryujinx: Ryujinx
     @EnvironmentObject var gameHandler: LaunchGameHandler
     
     @State private var targetSize1: CGSize = .zero
-    @State private var isPortrait: Bool = false
+    @Binding var isPortrait: Bool
     
     var body: some View {
         GeometryReader { geo in
@@ -28,6 +35,7 @@ struct MetalViewContainer: View {
                                          edges: !isPortrait ? .all : .horizontal)
                     
                     if isPortrait {
+                        hudView
                         Spacer()
                     }
                 }
@@ -45,15 +53,14 @@ struct MetalViewContainer: View {
         }
     }
     
+
+    
     func getSize() {
         targetSize1 = targetSize(ryujinx: ryujinx)
                                  
-        guard let window = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .flatMap({ $0.windows })
-            .first(where: { $0.isKeyWindow }) else { return }
-        
-        isPortrait = window.frame.width < window.frame.height
+        guard let window = AppDelegate.window else { return }
+        gameHandler.isPortrait = window.bounds.size.height > window.bounds.size.width
+        isPortrait = gameHandler.isPortrait
     }
 }
 
@@ -62,10 +69,7 @@ struct MetalViewContainer: View {
 func targetSize(for containerSize: CGSize? = nil, ryujinx: Ryujinx) -> CGSize {
     var targetAspect: CGFloat
     
-    guard let window = UIApplication.shared.connectedScenes
-        .compactMap({ $0 as? UIWindowScene })
-        .flatMap({ $0.windows })
-        .first(where: { $0.isKeyWindow }) else { return containerSize ?? CGSize.zero }
+    guard let window = AppDelegate.window else { return containerSize ?? .zero }
     
     let containerSize = containerSize ?? window.frame.size
     let ratio = ryujinx.aspectRatio
@@ -110,3 +114,5 @@ func isScreenAspectRatio(_ targetWidth: CGFloat, _ targetHeight: CGFloat, tolera
 
     return abs(actualRatio - targetRatio) < tolerance
 }
+
+

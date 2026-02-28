@@ -89,7 +89,7 @@ class Ryujinx : ObservableObject {
         var enableTextureRecompression: Bool = true
         var additionalArgs: [String] = []
         var maxAnisotropy: Double = 1.0
-        var macroHLE: Bool = true
+        var macroHLE: Bool = false
         var ignoreMissingServices: Bool = false
         var expandRam: Bool = false
         var dfsIntegrityChecks: Bool = false
@@ -373,7 +373,8 @@ class Ryujinx : ObservableObject {
                 }
             }
             
-            romsDirectory.stopAccessingSecurityScopedResource()
+            
+            // romsDirectory.stopAccessingSecurityScopedResource()
         }
         
         return games
@@ -649,8 +650,7 @@ class Ryujinx : ObservableObject {
     }
     
     public func updateOrientation() -> Bool {
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first {
+        if let window = AppDelegate.window {
             return (window.bounds.size.height > window.bounds.size.width)
         }
         return false

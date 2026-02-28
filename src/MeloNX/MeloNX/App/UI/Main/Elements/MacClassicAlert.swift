@@ -37,7 +37,7 @@ final class MacClassicAlertViewController: UIViewController {
         
         
         let effect: UIVisualEffect
-        if #available(iOS 19, *) {
+        if #available(iOS 19, *), !NativeSettingsManager.shared.disableLiquidGlass.value {
             effect = UIGlassEffect(style: .regular)
         } else {
             effect = UIBlurEffect(style: .systemMaterial)

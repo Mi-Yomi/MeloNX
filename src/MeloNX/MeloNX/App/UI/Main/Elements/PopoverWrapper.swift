@@ -264,10 +264,7 @@ struct PopoverUIKit<Content: View>: UIViewRepresentable {
     }
     
     func updateUIView(_ uiView: UIView, context: Context) {
-        guard let window = uiView.window ?? UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .flatMap({ $0.windows })
-            .first(where: { $0.isKeyWindow }) else { return }
+        guard let window = AppDelegate.window else { return }
         
         if isPresented {
             if context.coordinator.popover == nil {
@@ -314,25 +311,24 @@ extension View {
 
 fileprivate func dismissPopover() {
    Task { @MainActor in
-        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-           let window = windowScene.windows.first(where: { $0.isKeyWindow }) {
-            
-            func findPopover(in view: UIView) -> CenteredPopoverWrapper? {
-                if let popover = view as? CenteredPopoverWrapper {
-                    return popover
-                }
-                for subview in view.subviews {
-                    if let found = findPopover(in: subview) {
-                        return found
-                    }
-                }
-                return nil
-            }
-            
-            if let popover = findPopover(in: window) {
-                popover.dismiss()
-            }
-        }
+       if let window = AppDelegate.window {
+           
+           func findPopover(in view: UIView) -> CenteredPopoverWrapper? {
+               if let popover = view as? CenteredPopoverWrapper {
+                   return popover
+               }
+               for subview in view.subviews {
+                   if let found = findPopover(in: subview) {
+                       return found
+                   }
+               }
+               return nil
+           }
+           
+           if let popover = findPopover(in: window) {
+               popover.dismiss()
+           }
+       }
     }
 }
 

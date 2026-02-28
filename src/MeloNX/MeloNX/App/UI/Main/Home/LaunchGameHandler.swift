@@ -14,57 +14,57 @@ class LaunchGameHandler: ObservableObject {
     @Published var profileSelected = false
     @Published var showApp: Bool = true
     @Published var isPortrait: Bool = true
-    static var succeededJIT: Bool = true
-    @ObservedObject private var ryujinx = Ryujinx.shared
-    @ObservedObject private var nativeSettings = NativeSettingsManager.shared
-    @ObservedObject private var settingsManager = SettingsManager.shared
-    @ObservedObject private var persettings = PerGameSettingsManager.shared
-    @ObservedObject private var controllerManager = ControllerManager.shared
+    @AppStorage("gametorun") var gametorun: String = ""
+    @AppStorage("gametorun-date") var gametorunDate: String = ""
     
+    static var succeededJIT: Bool = true
+    
+    private static let jitEntitlement = "com.apple.developer.kernel.increased-memory-limit"
+    
+    private let ryujinx = Ryujinx.shared
+    private let nativeSettings = NativeSettingsManager.shared
+    private let settingsManager = SettingsManager.shared
+    private let persettings = PerGameSettingsManager.shared
+    private let controllerManager = ControllerManager.shared
     
     private var config: Ryujinx.Arguments {
         settingsManager.config
     }
     
-    var shouldLaunchGame: Binding<Bool> {
-        Binding(
-            get: { self.checkForGame() && checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit") },
-            set: { newValue in
-                print(newValue)
-            }
-        )
+    private var hasJITEntitlement: Bool {
+        ProcessInfo.processInfo.isiOSAppOnMac ? true : checkAppEntitlement(Self.jitEntitlement)
     }
     
-    var shouldShowEntitlement: Binding<Bool> {
-        Binding(
-            get: { self.checkForGame() && !checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit") },
-            set: { newValue in
-                print(newValue)
-            }
-        )
+    var isGameReady: Bool {
+        currentGame != nil
+            && (nativeSettings.ignoreJIT.value ? true : ryujinx.jitenabled)
+            && (nativeSettings.showProfileonGame.value ? profileSelected : true)
     }
     
-    var shouldShowPopover: Binding<Bool> {
-        Binding(
-            get: { self.currentGame != nil && self.ryujinx.jitenabled && !self.profileSelected && self.nativeSettings.showProfileonGame.value && checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit") },
-            set: { newValue in
-                print(newValue)
-            }
-        )
+    var shouldLaunchGame: Bool {
+        isGameReady && hasJITEntitlement
     }
     
-    var shouldCheckJIT: Binding<Bool> {
-        Binding(
-            get: { self.currentGame != nil && !self.ryujinx.jitenabled && !(self.nativeSettings.ignoreJIT.value as Bool) &&  checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit") },
-            set: { newValue in
-                print(newValue)
-            }
-        )
+    var shouldShowEntitlement: Bool {
+        isGameReady && !hasJITEntitlement
     }
     
-    func checkForGame() -> Bool {
-        self.currentGame != nil && (self.nativeSettings.ignoreJIT.value as Bool ? true : self.ryujinx.jitenabled) && (self.nativeSettings.showProfileonGame.value ? self.profileSelected : true)
+    var shouldShowPopover: Bool {
+        currentGame != nil
+            && ryujinx.jitenabled
+            && !profileSelected
+            && nativeSettings.showProfileonGame.value
+            && hasJITEntitlement
     }
+    
+    var shouldCheckJIT: Bool {
+        currentGame != nil
+            && !ryujinx.jitenabled
+            && !(nativeSettings.ignoreJIT.value as Bool)
+            && hasJITEntitlement
+    }
+    
+    
     
     func enableJIT() {
         ryujinx.checkForJIT()
@@ -72,71 +72,58 @@ class LaunchGameHandler: ObservableObject {
         
         if !ryujinx.jitenabled {
             if nativeSettings.useTrollStore.value {
-                let setting = nativeSettings.setting(forKey: "gametorun", default: "")
-                nativeSettings.setting(forKey: "gametorun-date", default: "").value = "\(Date().timeIntervalSince1970)"
-                setting.value = currentGame?.titleId ?? ""
+                gametorunDate = "\(Date().timeIntervalSince1970)"
+                gametorun = currentGame?.titleId ?? ""
                 askForJIT()
             } else if nativeSettings.stikJIT.value {
-                let setting = nativeSettings.setting(forKey: "gametorun", default: "")
-                nativeSettings.setting(forKey: "gametorun-date", default: "").value = "\(Date().timeIntervalSince1970)"
-                setting.value = currentGame?.titleId ?? ""
-                
+                gametorunDate = "\(Date().timeIntervalSince1970)"
+                gametorun = currentGame?.titleId ?? ""
                 enableJITStik()
             } else {
                 // nothing
             }
         }
-        
     }
-    
     
     func startGame() {
         enableJIT()
         MusicSelectorView.stopMusic()
-        
         nativeSettings.isVirtualController.value = controllerManager.hasVirtualController()
-        
         MetalView.createView()
         
         guard let currentGame else { return }
-        var config = self.config
         
         persettings.loadSettings()
         
-        if let customgame = persettings.config[currentGame.titleId] {
-            config = customgame
-        }
+        var config = persettings.config[currentGame.titleId] ?? self.config
         
         controllerManager.registerControllerTypeForMatchingControllers()
-        
         config.gamepath = currentGame.fileURL.path
         config.inputids = Array(Set(controllerManager.selectedControllers))
         
+        if config.inputids.isEmpty {
+            config.inputids.append("0")
+        }
+        
         print(config.inputids)
-        
         configureEnvironmentVariables()
-        
-        config.inputids.isEmpty ? config.inputids.append("0") : ()
-        
-        // LogCapture.shared.startCapturing()
         
         do {
             try ryujinx.start(with: config)
         } catch {
-            
+            print("Failed to start game '\(currentGame.titleId)': \(error)")
         }
     }
     
     private func configureEnvironmentVariables() {
-        // this in case you set the Dual Mapped JIT option after app launched
-        let cool: Bool
+        let useDualMappedJIT: Bool
         if #available(iOS 19, *) {
-            cool = nativeSettings.setting(forKey: "DUAL_MAPPED_JIT", default: true).value
+            useDualMappedJIT = nativeSettings.setting(forKey: "DUAL_MAPPED_JIT", default: true).value
         } else {
-            cool = nativeSettings.setting(forKey: "DUAL_MAPPED_JIT", default: false).value
+            useDualMappedJIT = nativeSettings.setting(forKey: "DUAL_MAPPED_JIT", default: false).value
         }
         
-        if cool {
+        if useDualMappedJIT {
             setenv("DUAL_MAPPED_JIT", "1", 1)
             Self.succeededJIT = RyujinxBridge.initialize_dualmapped()
         } else {
@@ -148,11 +135,7 @@ class LaunchGameHandler: ObservableObject {
             return
         }
         
-        let tier = device.argumentBuffersSupport
-        if tier.rawValue >= MTLArgumentBuffersTier.tier2.rawValue {
-            setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "1", 1)
-        } else {
-            setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "0", 1)
-        }
+        let supportsArgumentBuffersTier2 = device.argumentBuffersSupport.rawValue >= MTLArgumentBuffersTier.tier2.rawValue
+        setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", supportsArgumentBuffersTier2 ? "1" : "0", 1)
     }
 }

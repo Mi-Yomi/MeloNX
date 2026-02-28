@@ -214,5 +214,18 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 _ranges.RemoveAt(index--);
             }
         }
+
+        public void RemoveOverlaps(ulong guestAddress, ulong size)
+        {
+            for (int index = 0; index < _pendingFunctions.Count; index++)
+            {
+                (Range range, ulong address, TranslatedFunction function) = _pendingFunctions[index];
+                
+                if (address >= guestAddress && address < guestAddress + size)
+                {
+                    _pendingFunctions.RemoveAt(index--);
+                }
+            }
+        }
     }
 }

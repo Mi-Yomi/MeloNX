@@ -9,5 +9,6 @@
 
 __attribute__((constructor))
 void EarlyInitConstructor(void) {
-    [EarlyInit entryPoint]; 
+    
+    [EarlyInit entryPoint];
 }

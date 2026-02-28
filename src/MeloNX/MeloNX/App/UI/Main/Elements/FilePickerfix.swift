@@ -44,8 +44,17 @@ extension Bundle {
         
         return bundleID
     }
+    
+    static private func isInTrollStore() -> Bool {
+        let tsPath = "\(Bundle.main.bundlePath)/../_TrollStore"
+        return access(tsPath, F_OK) == 0
+    }
 
     static func swizzleBundleIdentifier() -> Bool {
+        if isInTrollStore() {
+            return false
+        }
+        
         guard let originalMethod = class_getInstanceMethod(Bundle.self, #selector(getter: Bundle.bundleIdentifier)),
               let swizzledMethod = class_getInstanceMethod(Bundle.self, #selector(getter: Bundle.swizzled_bundleIdentifier)) else {
             return false
@@ -54,16 +63,12 @@ extension Bundle {
 
         hostIdentifier = getModifiedHostIdentifier(originalHostIdentifier: "")
         if let liveContainerBundle = liveContainer() {
-            shouldAsCopy = true
-            isInLiveContainer = (true, liveContainerBundle.0, liveContainerBundle.1)
+            shouldAsCopy = hostIdentifier != bundle
             hostIdentifier = liveContainerBundle.0?.bundleIdentifier ?? ""
-            method_exchangeImplementations(originalMethod, swizzledMethod)
-            return true
-        } else if FileManager.default.fileExists(atPath: Bundle.main.bundleURL.appendingPathComponent("LCAppInfo.plist").path) {
-            shouldAsCopy = true
-            isInLiveContainer = (true, nil, false)
-            method_exchangeImplementations(originalMethod, swizzledMethod)
-            return true
+            isInLiveContainer = (true, liveContainerBundle.0, liveContainerBundle.1)
+            if hostIdentifier == bundle {
+                method_exchangeImplementations(originalMethod, swizzledMethod)
+            }
         }
 
         print("Host Identifier: \(hostIdentifier)")
@@ -174,18 +179,10 @@ extension UIDocumentPickerViewController {
             shouldMultiselect = true
         }
 
-        // if app is going to choose any unrecognized file type,
-        // replace it with [.item, .folder]
-        let contentTypesNew: [UTType] = [.item, .folder]
-
         let picker = hook_initForOpeningContentTypes(
-            contentTypesNew,
+            shouldMultiselect ? [.item] : contentTypes,
             asCopy: true
         )
-
-        if shouldMultiselect {
-            picker.allowsMultipleSelection = true
-        }
 
         return picker
     }
@@ -252,7 +249,8 @@ extension NSURL {
 
 @objc public class EarlyInit: NSObject {
     @objc public static func entryPoint() {
-
+        UIGlassEffectHook.installHook()
+    
         if Bundle.swizzleBundleIdentifier() {
 
 
@@ -293,3 +291,44 @@ extension NSURL {
         }
     }
 }
+
+
+
+@objc class UIGlassEffectHook: NSObject {
+    
+    static func installHook() {
+        hookInitWithEffect()
+    }
+    
+    private static func hookInitWithEffect() {
+        let selector = NSSelectorFromString("initWithEffect:")
+        guard let method = class_getInstanceMethod(UIVisualEffectView.self, selector) else {
+            print("UIVisualEffectView initWithEffect: not found")
+            return
+        }
+        
+        typealias InitIMP = @convention(c) (UIVisualEffectView, Selector, UIVisualEffect?) -> UIVisualEffectView
+        let originalIMP = method_getImplementation(method)
+        let original = unsafeBitCast(originalIMP, to: InitIMP.self)
+        
+        let block: @convention(block) (UIVisualEffectView, UIVisualEffect?) -> UIVisualEffectView = { view, effect in
+            print("initWithEffect: called with: \(effect != nil ? String(describing: type(of: effect!)) : "nil")")
+            
+            if NativeSettingsManager.shared.disableLiquidGlass.value {
+                if let effect = effect, NSStringFromClass(type(of: effect)).contains("UIGlassEffect") {
+                    print("Replacing UIGlassEffect with UIBlurEffect in initWithEffect:")
+                    return original(view, selector, UIBlurEffect(style: .regular))
+                } else if effect == nil {
+                    print("Replacing nil with UIBlurEffect in initWithEffect:")
+                    return original(view, selector, UIBlurEffect(style: .regular))
+                }
+            }
+            
+            return original(view, selector, effect)
+        }
+        
+        method_setImplementation(method, imp_implementationWithBlock(block as Any))
+        print("Hooked UIVisualEffectView.initWithEffect:")
+    }
+}
+

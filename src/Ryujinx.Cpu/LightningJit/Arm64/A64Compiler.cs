@@ -18,7 +18,7 @@ namespace Ryujinx.Cpu.LightningJit.Arm64
         {
             if (targetArch == Architecture.Arm64)
             {
-                return Compiler.Compile(cpuPreset, memoryManager, address, funcTable, dispatchStubPtr);
+                return CompilerPass.Compile(cpuPreset, memoryManager, address, funcTable, dispatchStubPtr);
             }
             else
             {

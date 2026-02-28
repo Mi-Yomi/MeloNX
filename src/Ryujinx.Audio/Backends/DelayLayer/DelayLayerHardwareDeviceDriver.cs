@@ -16,7 +16,11 @@ namespace Ryujinx.Audio.Backends.DelayLayer
 
         public ulong SampleDelay48k;
 
-        public float Volume { get; set; }
+        public float Volume
+        {
+            get => _realDriver.Volume;
+            set => _realDriver.Volume = value;
+        }
 
         public DelayLayerHardwareDeviceDriver(IHardwareDeviceDriver realDevice, ulong sampleDelay48k)
         {

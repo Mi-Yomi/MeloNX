@@ -106,6 +106,7 @@
     <ProjectReference Include="..\Ryujinx.Graphics.Gpu\Ryujinx.Graphics.Gpu.csproj" />
     <ProjectReference Include="..\Ryujinx.Ui.Common\Ryujinx.Ui.Common.csproj" />
     <ProjectReference Include="..\Ryujinx.Audio.Backends.OpenAL\Ryujinx.Audio.Backends.OpenAL.csproj" />
+    <ProjectReference Include="..\Ryujinx.Audio.Backends.Apple\Ryujinx.Audio.Backends.Apple.csproj" />
   </ItemGroup>
 
   <ItemGroup>

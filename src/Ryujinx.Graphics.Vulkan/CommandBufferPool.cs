@@ -311,7 +311,11 @@ namespace Ryujinx.Graphics.Vulkan
 
                         lock (_queueLock)
                         {
-                            _api.QueueSubmit(_queue, 1, in sInfo, entry.Fence.GetUnsafe()).ThrowOnError();
+                            Fence? fence = entry.Fence.Get();
+                            if (fence != null)
+                            {
+                                _api.QueueSubmit(_queue, 1, in sInfo, entry.Fence.GetUnsafe()).ThrowOnError();
+                            }
                         }
                     }
                 }

@@ -35,6 +35,15 @@ enum VirtualControllerButton: Int, Codable {
         }
     }
     
+    var isDPad: Bool {
+        switch self {
+        case .dPadUp, .dPadDown, .dPadLeft, .dPadRight:
+            return true
+        default:
+            return false
+        }
+    }
+    
     var isSmall: Bool {
         switch self {
         case .back, .start, .guide:
