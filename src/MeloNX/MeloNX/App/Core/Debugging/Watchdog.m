@@ -162,7 +162,13 @@ static void *watchdogThreadEntry(void *arg) {
 }
 
 - (void)writeTrace:(NSString *)trace {
-    NSString *logPath = [NSTemporaryDirectory()
+    NSURL *documentsURL = [[[NSFileManager defaultManager]
+        URLsForDirectory:NSDocumentDirectory
+               inDomains:NSUserDomainMask] firstObject];
+
+    NSString *documentsPath = [documentsURL path];
+    
+    NSString *logPath = [documentsPath
                          stringByAppendingPathComponent:@"main_hang.log"];
     int fd = open(logPath.fileSystemRepresentation,
                   O_WRONLY | O_CREAT | O_APPEND, 0644);

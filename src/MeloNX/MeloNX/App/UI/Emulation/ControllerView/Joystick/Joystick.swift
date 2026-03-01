@@ -15,7 +15,7 @@ final class JoystickView: UIView {
     var sensitivity: CGFloat = 1.2
     
     private var dragDiameter: CGFloat {
-        var base: CGFloat = 160
+        let base: CGFloat = 160
         if UIDevice.current.systemName.contains("iPadOS") {
             return base * 1.2
         }
@@ -73,15 +73,12 @@ final class JoystickView: UIView {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
         joystickView.addGestureRecognizer(pan)
         
-        updateScale()
     }
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        
-        let size = boundarySize
-        frame.size = CGSize(width: size, height: size)
-        
+
+        let size = bounds.width
         boundaryView.frame = CGRect(origin: .zero, size: frame.size)
         boundaryView.layer.cornerRadius = size / 2
         
@@ -106,11 +103,6 @@ final class JoystickView: UIView {
         
     }
     
-    private func updateScale() {
-        let scale = CGFloat(UserDefaults.standard.double(forKey: "On-ScreenControllerScale"))
-        transform = CGAffineTransform(scaleX: scale == 0 ? 1.0 : scale,
-                                      y: scale == 0 ? 1.0 : scale)
-    }
     
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
         let translation = gesture.translation(in: self)

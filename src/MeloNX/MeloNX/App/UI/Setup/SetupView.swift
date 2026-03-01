@@ -45,21 +45,9 @@ struct SetupView: View {
         iOSNav {
             ZStack {
                 if UIDevice.current.systemName.contains("iPadOS") {
-                    iPadSetupView(
-                        inSetup: $isInSetup,
-                        isImportingKeys: $isImportingKeys,
-                        isImportingFirmware: $isImportingFirmware,
-                        keysImported: keysImported,
-                        firmImported: firmImported
-                    )
+                    iPadSetupView()
                 } else {
-                    iPhoneSetupView(
-                        inSetup: $isInSetup,
-                        isImportingKeys: $isImportingKeys,
-                        isImportingFirmware: $isImportingFirmware,
-                        keysImported: keysImported,
-                        firmImported: firmImported
-                    )
+                    iPhoneSetupView()
                 }
             }
         }
@@ -105,13 +93,7 @@ struct SetupView: View {
     }
     
     @ViewBuilder
-    private func iPadSetupView(
-        inSetup: Binding<Bool>,
-        isImportingKeys: Binding<Bool>,
-        isImportingFirmware: Binding<Bool>,
-        keysImported: Bool,
-        firmImported: Bool
-    ) -> some View {
+    private func iPadSetupView() -> some View {
         GeometryReader { geometry in
             ZStack {
                 LinearGradient(
@@ -207,7 +189,7 @@ struct SetupView: View {
                             description: "Add your encryption keys",
                             systemImage: "key.fill",
                             isCompleted: keysImported,
-                            action: { isImportingKeys.wrappedValue = true }
+                            action: { isImportingKeys = true }
                         )
                         
                         setupStep(
@@ -216,10 +198,10 @@ struct SetupView: View {
                             systemImage: "square.and.arrow.down",
                             isCompleted: firmImported,
                             isEnabled: keysImported,
-                            action: { isImportingFirmware.wrappedValue = true }
+                            action: { isImportingFirmware = true }
                         )
                         
-                        Button(action: { inSetup.wrappedValue = false }) {
+                        Button(action: { isInSetup = false }) {
                             HStack {
                                 Text("Finish Setup")
                                     .fontWeight(.semibold)
@@ -248,13 +230,7 @@ struct SetupView: View {
     }
     
     @ViewBuilder
-    private func iPhoneSetupView(
-        inSetup: Binding<Bool>,
-        isImportingKeys: Binding<Bool>,
-        isImportingFirmware: Binding<Bool>,
-        keysImported: Bool,
-        firmImported: Bool
-    ) -> some View {
+    private func iPhoneSetupView() -> some View {
         ZStack {
             LinearGradient(
                 gradient: Gradient(colors: [
@@ -331,7 +307,7 @@ struct SetupView: View {
                             description: "Add your encryption keys",
                             systemImage: "key.fill",
                             isCompleted: keysImported,
-                            action: { isImportingKeys.wrappedValue = true }
+                            action: { isImportingKeys = true }
                         )
                         
                         setupStep(
@@ -340,7 +316,7 @@ struct SetupView: View {
                             systemImage: "square.and.arrow.down",
                             isCompleted: firmImported,
                             isEnabled: keysImported,
-                            action: { isImportingFirmware.wrappedValue = true }
+                            action: { isImportingFirmware = true }
                         )
                     }
                     .padding()
@@ -348,7 +324,7 @@ struct SetupView: View {
                 
                 // Finish Button
                 VStack {
-                    Button(action: { inSetup.wrappedValue = false }) {
+                    Button(action: { isInSetup = false }) {
                         HStack {
                             Text("Finish Setup")
                                 .fontWeight(.semibold)

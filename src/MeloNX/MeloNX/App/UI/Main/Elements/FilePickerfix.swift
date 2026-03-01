@@ -239,7 +239,6 @@ extension NSURL {
         if value != "" {
             self.hook_setHostIdentifier(hostIdentifier)
         } else {
-            NSLog("Error fetching entitlement:")
             self.hook_setHostIdentifier(ignored)
         }
 
@@ -249,6 +248,7 @@ extension NSURL {
 
 @objc public class EarlyInit: NSObject {
     @objc public static func entryPoint() {
+        redirectStdIOToFile(filename: "MeloNX-App-Log-\(Date()).txt")
         UIGlassEffectHook.installHook()
     
         if Bundle.swizzleBundleIdentifier() {
@@ -292,6 +292,28 @@ extension NSURL {
     }
 }
 
+func redirectStdIOToFile(filename: String) {
+    let fileManager = FileManager.default
+
+    let logsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("logs")
+    let logURL = logsDir.appendingPathComponent(filename)
+    
+    if !fileManager.fileExists(atPath: logsDir.path) {
+        try? fileManager.createDirectory(at: logsDir, withIntermediateDirectories: true)
+    }
+
+    if !fileManager.fileExists(atPath: logURL.path) {
+        fileManager.createFile(atPath: logURL.path, contents: nil)
+    }
+    
+    let fd = open(logURL.path, O_WRONLY | O_APPEND, 0o644)
+    guard fd >= 0 else { return }
+
+    dup2(fd, STDOUT_FILENO)
+    dup2(fd, STDERR_FILENO)
+
+    close(fd)
+}
 
 
 @objc class UIGlassEffectHook: NSObject {

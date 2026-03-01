@@ -1541,11 +1541,11 @@ namespace Ryujinx.Headless.SDL2
 
                 if (logFile != null)
                 {
-                    Logger.AddTarget(new AsyncLogTargetWrapper(
-                        new FileLogTarget("file", logFile),
-                        1000,
-                        AsyncLogTargetOverflowAction.Block
-                    ));
+                    //Logger.AddTarget(new AsyncLogTargetWrapper(
+                    //    new FileLogTarget("file", logFile),
+                    //    1000,
+                    //    AsyncLogTargetOverflowAction.Block
+                    // ));
                 }
                 else
                 {
