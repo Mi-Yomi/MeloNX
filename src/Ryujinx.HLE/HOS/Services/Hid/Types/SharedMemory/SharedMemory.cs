@@ -61,23 +61,24 @@ namespace Ryujinx.HLE.HOS.Services.Hid.Types.SharedMemory
 
         public static SharedMemory Create()
         {
-            SharedMemory result = new()
-            {
-                DebugPad = RingLifo<DebugPadState>.Create(),
-                TouchScreen = RingLifo<TouchScreenState>.Create(),
-                Mouse = RingLifo<MouseState>.Create(),
-                Keyboard = RingLifo<KeyboardState>.Create(),
-                Condition = NpadCondition.Create(),
-            };
-            
-            Span<NpadState> npadsSpan = result.Npads.AsSpan();
+            SharedMemory result = default;
+            Initialize(ref result);
+            return result;
+        }
 
+        public static void Initialize(ref SharedMemory mem)
+        {
+            mem.DebugPad    = RingLifo<DebugPadState>.Create();
+            mem.TouchScreen = RingLifo<TouchScreenState>.Create();
+            mem.Mouse       = RingLifo<MouseState>.Create();
+            mem.Keyboard    = RingLifo<KeyboardState>.Create();
+            mem.Condition   = NpadCondition.Create();
+
+            Span<NpadState> npadsSpan = mem.Npads.AsSpan();
             for (int i = 0; i < npadsSpan.Length; i++)
             {
                 npadsSpan[i] = NpadState.Create();
             }
-
-            return result;
         }
     }
 }

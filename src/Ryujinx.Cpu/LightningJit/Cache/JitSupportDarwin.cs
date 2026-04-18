@@ -4,6 +4,7 @@ using System.Runtime.Versioning;
 namespace Ryujinx.Cpu.LightningJit.Cache
 {
     [SupportedOSPlatform("macos")]
+    [SupportedOSPlatform("ios")]
     static partial class JitSupportDarwin
     {
         [LibraryImport("libarmeilleure-jitsupport", EntryPoint = "armeilleure_jit_memcpy")]

@@ -14,7 +14,6 @@ namespace Ryujinx.HLE.HOS.Services.Sm
 {
     partial class IUserInterface : IpcService
     {
-        private static readonly Dictionary<string, Type> _services;
 
         private readonly SmRegistry _registry;
         private ServerBase _commonServer;
@@ -24,14 +23,6 @@ namespace Ryujinx.HLE.HOS.Services.Sm
         public IUserInterface(KernelContext context, SmRegistry registry) : base(registerTipc: true)
         {
             _registry = registry;
-        }
-
-        static IUserInterface()
-        {
-            _services = typeof(IUserInterface).Assembly.GetTypes()
-                .SelectMany(type => type.GetCustomAttributes(typeof(ServiceAttribute), true)
-                .Select(service => (((ServiceAttribute)service).Name, type)))
-                .ToDictionary(service => service.Name, service => service.type);
         }
 
         [CommandCmif(0)]
@@ -90,17 +81,12 @@ namespace Ryujinx.HLE.HOS.Services.Sm
             }
             else
             {
-                if (_services.TryGetValue(name, out Type type))
+                if (GetServiceInstance(name, context) is { } service)
                 {
-                    ServiceAttribute serviceAttribute = type.GetCustomAttributes<ServiceAttribute>().First(service => service.Name == name);
-
-                    IpcService service = GetServiceInstance(type, context, serviceAttribute.Parameter);
-
                     if (_commonServer is null)
                     {
                         _commonServer = new ServerBase(context.Device.System.KernelContext, "Common");
                     }
-                    
                     service.TrySetServer(_commonServer);
                     service.Server.AddSessionObj(session.ServerSession, service);
                 }

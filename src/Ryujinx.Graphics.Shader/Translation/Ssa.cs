@@ -1,6 +1,7 @@
 using Ryujinx.Graphics.Shader.Decoders;
 using Ryujinx.Graphics.Shader.IntermediateRepresentation;
 using System.Collections.Generic;
+using System;
 using static Ryujinx.Graphics.Shader.IntermediateRepresentation.OperandHelper;
 
 namespace Ryujinx.Graphics.Shader.Translation
@@ -81,6 +82,12 @@ namespace Ryujinx.Graphics.Shader.Translation
 
             public void Add(int key, Operand operand)
             {
+                if ((uint)key >= (uint)_map.Length)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(key), 
+                        $"Register key {key} is out of range (max {_map.Length - 1})");
+                }
+
                 if (_map[key] == null)
                 {
                     _uses[UseCount++] = key;
@@ -165,10 +172,20 @@ namespace Ryujinx.Graphics.Shader.Translation
 
                             if (dest != null && dest.Type == OperandType.Register)
                             {
+                                Register reg = dest.GetRegister();
+                                int regKey = GetKeyFromRegister(reg);
+
+                                if ((uint)regKey >= RegisterConsts.TotalCount)
+                                {
+                                    Console.WriteLine(
+                                        $"[SSA] Skipping out-of-range register key {regKey} " +
+                                        $"(type={reg.Type}, index={reg.Index}, max={RegisterConsts.TotalCount - 1}) " +
+                                        $"in block {block.Index}, operation={operation.Inst}");
+                                    continue;
+                                }
+
                                 Operand local = Local();
-
-                                localDefs.Add(GetKeyFromRegister(dest.GetRegister()), local);
-
+                                localDefs.Add(regKey, local);
                                 operation.SetDest(index, local);
                             }
                         }

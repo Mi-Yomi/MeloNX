@@ -8,6 +8,7 @@ namespace Ryujinx.Memory
 {
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
+    [SupportedOSPlatform("ios")]
     static class MemoryManagementUnix
     {
         private static readonly ConcurrentDictionary<nint, ulong> _allocations = new();
@@ -50,12 +51,19 @@ namespace Ryujinx.Memory
                 }
             }
 
+
             nint ptr = Mmap(nint.Zero, size, prot, flags, -1, 0);
 
             if (ptr == MAP_FAILED)
             {
                 throw new SystemException(Marshal.GetLastPInvokeErrorMessage());
             }
+
+            if (OperatingSystem.IsIOS() && forJit)
+            {
+                MachJitWorkaround.ReallocateAreaWithOwnership(ptr, (int)size);
+            }
+
 
             if (!_allocations.TryAdd(ptr, size))
             {
@@ -134,11 +142,21 @@ namespace Ryujinx.Memory
             return munmap(address, size) == 0;
         }
 
+        private static ConcurrentDictionary<IntPtr, ulong> _sharedMemorySizes = new ConcurrentDictionary<nint, ulong>();
+
+
         public unsafe static nint CreateSharedMemory(ulong size, bool reserve)
         {
             int fd;
 
-            if (OperatingSystem.IsMacOS())
+            if (OperatingSystem.IsIOS()) {
+                IntPtr baseAddress = MachJitWorkaround.AllocateSharedMemory(size, reserve);
+
+                _sharedMemorySizes.TryAdd(baseAddress, size);
+
+                return baseAddress;
+            } 
+            else if (OperatingSystem.IsMacOS())
             {
                 byte[] memName = "Ryujinx-XXXXXX"u8.ToArray();
 
@@ -185,22 +203,52 @@ namespace Ryujinx.Memory
 
         public static void DestroySharedMemory(nint handle)
         {
-            close(handle.ToInt32());
+           if (OperatingSystem.IsIOS())
+            {
+                if (_sharedMemorySizes.TryRemove(handle, out ulong size))
+                {
+                    MachJitWorkaround.DestroySharedMemory(handle, size);
+                }
+            }
+            else
+            {
+                close(handle.ToInt32());
+            }
         }
 
         public static nint MapSharedMemory(nint handle, ulong size)
         {
-            return Mmap(nint.Zero, size, MmapProts.PROT_READ | MmapProts.PROT_WRITE, MmapFlags.MAP_SHARED, handle.ToInt32(), 0);
+            if (OperatingSystem.IsIOS())
+            {
+                // The base of the shared memory is already mapped - it's the handle.
+                // Views are remapped from it.
+
+                return handle;
+            }
+            else
+            {
+                return Mmap(nint.Zero, size, MmapProts.PROT_READ | MmapProts.PROT_WRITE, MmapFlags.MAP_SHARED, handle.ToInt32(), 0);
+            }
         }
 
         public static void UnmapSharedMemory(nint address, ulong size)
         {
-            munmap(address, size);
+            if (!OperatingSystem.IsIOS())
+            {
+                munmap(address, size);
+            }
         }
 
         public static void MapView(nint sharedMemory, ulong srcOffset, nint location, ulong size)
         {
-            Mmap(location, size, MmapProts.PROT_READ | MmapProts.PROT_WRITE, MmapFlags.MAP_FIXED | MmapFlags.MAP_SHARED, sharedMemory.ToInt32(), (long)srcOffset);
+            if (OperatingSystem.IsIOS())
+            {
+                MachJitWorkaround.MapView(sharedMemory, srcOffset, location, size);
+            }
+            else
+            {
+                Mmap(location, size, MmapProts.PROT_READ | MmapProts.PROT_WRITE, MmapFlags.MAP_FIXED | MmapFlags.MAP_SHARED, sharedMemory.ToInt32(), (long)srcOffset);
+            }
         }
 
         public static void UnmapView(nint location, ulong size)

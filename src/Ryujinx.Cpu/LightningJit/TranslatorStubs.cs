@@ -25,6 +25,7 @@ namespace Ryujinx.Cpu.LightningJit
 
         private readonly IAddressTable<ulong> _functionTable;
         private readonly NoWxCache _noWxCache;
+        private readonly DualMappedNoWxCache _dualMappedNoWxCache;
         private readonly GetFunctionAddressDelegate _getFunctionAddressRef;
         private readonly nint _getFunctionAddress;
         private readonly Lazy<nint> _dispatchStub;
@@ -93,6 +94,26 @@ namespace Ryujinx.Cpu.LightningJit
         }
 
         /// <summary>
+        /// Initializes a new instance of the <see cref="TranslatorStubs"/> class with the specified
+        /// <see cref="Translator"/> instance.
+        /// </summary>
+        /// <param name="functionTable">Function table used to store pointers to the functions that the guest code will call</param>
+        /// <param name="noWxCache">Cache used on platforms that enforce W^X, otherwise should be null</param>
+        /// <exception cref="ArgumentNullException"><paramref name="translator"/> is null</exception>
+        public TranslatorStubs(IAddressTable<ulong> functionTable, DualMappedNoWxCache dualMappedNoWxCache)
+        {
+            ArgumentNullException.ThrowIfNull(functionTable);
+
+            _functionTable = functionTable;
+            _dualMappedNoWxCache = dualMappedNoWxCache;
+            _getFunctionAddressRef = NativeInterface.GetFunctionAddress;
+            _getFunctionAddress = Marshal.GetFunctionPointerForDelegate(_getFunctionAddressRef);
+            _slowDispatchStub = new(GenerateSlowDispatchStub, isThreadSafe: true);
+            _dispatchStub = new(GenerateDispatchStub, isThreadSafe: true);
+            _dispatchLoop = new(GenerateDispatchLoop, isThreadSafe: true);
+        }
+
+        /// <summary>
         /// Releases all resources used by the <see cref="TranslatorStubs"/> instance.
         /// </summary>
         public void Dispose()
@@ -109,7 +130,7 @@ namespace Ryujinx.Cpu.LightningJit
         {
             if (!_disposed)
             {
-                if (_noWxCache == null)
+                if (_noWxCache == null || _dualMappedNoWxCache == null)
                 {
                     if (_dispatchStub.IsValueCreated)
                     {
@@ -360,6 +381,10 @@ namespace Ryujinx.Cpu.LightningJit
             if (_noWxCache != null)
             {
                 return _noWxCache.MapPageAligned(code);
+            }
+            if (_dualMappedNoWxCache != null && OperatingSystem.IsIOS())
+            {
+                return _dualMappedNoWxCache.MapPageAligned(code);
             }
             else
             {

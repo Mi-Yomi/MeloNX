@@ -17,6 +17,7 @@ namespace Ryujinx.Common.SystemInterop
         private CancellationTokenSource _cancellationTokenSource;
         private Task _worker;
 
+        // iOS eventually...?
         public StdErrAdapter()
         {
             if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())

@@ -120,8 +120,10 @@ namespace Ryujinx.Graphics.Vulkan
             Textures = [];
             Samplers = [];
 
-            // Any device running on MacOS is using MoltenVK, even Intel and AMD vendors.
-            if (IsMoltenVk = OperatingSystem.IsMacOS())
+            IsMoltenVk = OperatingSystem.IsMacOS() || OperatingSystem.IsIOS();
+
+            // Any device running on macOS (even Intel and AMD vendors) & iOS is using MoltenVK.
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
                 MVKInitialization.Initialize();
         }
 
@@ -369,7 +371,7 @@ namespace Ryujinx.Graphics.Vulkan
                 Vendor.ImgTec;
 
             GpuVendor = VendorUtils.GetNameFromId(properties.VendorID);
-            GpuDriver = hasDriverProperties && !OperatingSystem.IsMacOS() ?
+            GpuDriver = hasDriverProperties && !(OperatingSystem.IsMacOS() || OperatingSystem.IsIOS()) ?
                 VendorUtils.GetFriendlyDriverName(driverProperties.DriverID) : GpuVendor; // Fallback to vendor name if driver is unavailable or on MacOS where vendor is preferred.
 
             fixed (byte* deviceName = properties.DeviceName)
@@ -417,8 +419,10 @@ namespace Ryujinx.Graphics.Vulkan
                 properties.Limits.FramebufferDepthSampleCounts &
                 properties.Limits.FramebufferStencilSampleCounts;
 
+            bool supportsExtendedDynamicState = _physicalDevice.IsDeviceExtensionPresent(ExtExtendedDynamicState.ExtensionName);
+
             Capabilities = new HardwareCapabilities(
-                _physicalDevice.IsDeviceExtensionPresent("VK_EXT_index_type_uint8"),
+                _physicalDevice.IsDeviceExtensionPresent("VK_EXT_index_type_uint8") && !IsMoltenVk,
                 supportsCustomBorderColor,
                 supportsBlendOperationAdvanced,
                 propertiesBlendOperationAdvanced.AdvancedBlendCorrelatedOverlap,
@@ -432,11 +436,11 @@ namespace Ryujinx.Graphics.Vulkan
                 _physicalDevice.IsDeviceExtensionPresent("VK_EXT_shader_stencil_export"),
                 features2.Features.ShaderStorageImageMultisample,
                 _physicalDevice.IsDeviceExtensionPresent(ExtConditionalRendering.ExtensionName),
-                _physicalDevice.IsDeviceExtensionPresent(ExtExtendedDynamicState.ExtensionName),
+                OperatingSystem.IsIOS() ? OperatingSystem.IsIOSVersionAtLeast(17) && supportsExtendedDynamicState : supportsExtendedDynamicState,
                 features2.Features.MultiViewport && !(IsMoltenVk && Vendor == Vendor.Amd), // Workaround for AMD on MoltenVK issue
                 featuresRobustness2.NullDescriptor || IsMoltenVk,
-                supportsPushDescriptors && !IsMoltenVk,
-                propertiesPushDescriptor.MaxPushDescriptors,
+                supportsPushDescriptors,
+                IsMoltenVk ? 8 : propertiesPushDescriptor.MaxPushDescriptors,
                 featuresPrimitiveTopologyListRestart.PrimitiveTopologyListRestart,
                 featuresPrimitiveTopologyListRestart.PrimitiveTopologyPatchListRestart,
                 supportsTransformFeedback,

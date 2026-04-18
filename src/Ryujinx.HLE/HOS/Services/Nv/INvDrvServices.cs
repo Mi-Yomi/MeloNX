@@ -16,7 +16,6 @@ using Ryujinx.Memory;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
-using System.Reflection;
 
 namespace Ryujinx.HLE.HOS.Services.Nv
 {
@@ -24,7 +23,7 @@ namespace Ryujinx.HLE.HOS.Services.Nv
     [Service("nvdrv:a")]
     [Service("nvdrv:s")]
     [Service("nvdrv:t")]
-    class INvDrvServices : IpcService
+    partial class INvDrvServices : IpcService
     {
         private static readonly List<string> _deviceFileDebugRegistry =
         [
@@ -32,20 +31,20 @@ namespace Ryujinx.HLE.HOS.Services.Nv
             "/dev/nvhost-prof-gpu"
         ];
 
-        private static readonly Dictionary<string, Type> _deviceFileRegistry = new()
+        private static readonly Dictionary<string, Func<ServiceCtx, IVirtualMemoryManager, ulong, NvDeviceFile>> _deviceFileRegistry = new()
         {
-            { "/dev/nvmap",           typeof(NvMapDeviceFile)         },
-            { "/dev/nvhost-ctrl",     typeof(NvHostCtrlDeviceFile)    },
-            { "/dev/nvhost-ctrl-gpu", typeof(NvHostCtrlGpuDeviceFile) },
-            { "/dev/nvhost-as-gpu",   typeof(NvHostAsGpuDeviceFile)   },
-            { "/dev/nvhost-gpu",      typeof(NvHostGpuDeviceFile)     },
-            //{ "/dev/nvhost-msenc",    typeof(NvHostChannelDeviceFile) },
-            { "/dev/nvhost-nvdec",    typeof(NvHostChannelDeviceFile) },
-            //{ "/dev/nvhost-nvjpg",    typeof(NvHostChannelDeviceFile) },
-            { "/dev/nvhost-vic",      typeof(NvHostChannelDeviceFile) },
-            //{ "/dev/nvhost-display",  typeof(NvHostChannelDeviceFile) },
-            { "/dev/nvhost-dbg-gpu",  typeof(NvHostDbgGpuDeviceFile)  },
-            { "/dev/nvhost-prof-gpu", typeof(NvHostProfGpuDeviceFile) },
+            { "/dev/nvmap",           (c, m, o) => new NvMapDeviceFile(c, m, o)         },
+            { "/dev/nvhost-ctrl",     (c, m, o) => new NvHostCtrlDeviceFile(c, m, o)    },
+            { "/dev/nvhost-ctrl-gpu", (c, m, o) => new NvHostCtrlGpuDeviceFile(c, m, o) },
+            { "/dev/nvhost-as-gpu",   (c, m, o) => new NvHostAsGpuDeviceFile(c, m, o)   },
+            { "/dev/nvhost-gpu",      (c, m, o) => new NvHostGpuDeviceFile(c, m, o)     },
+            //{ "/dev/nvhost-msenc",    (c, m, o) => new NvHostChannelDeviceFile(c, m, o) },
+            { "/dev/nvhost-nvdec",    (c, m, o) => new NvHostChannelDeviceFile(c, m, o) },
+            //{ "/dev/nvhost-nvjpg",    (c, m, o) => new NvHostChannelDeviceFile(c, m, o) },
+            { "/dev/nvhost-vic",      (c, m, o) => new NvHostChannelDeviceFile(c, m, o) },
+            //{ "/dev/nvhost-display",  (c, m, o) => new NvHostChannelDeviceFile(c, m, o) },
+            { "/dev/nvhost-dbg-gpu",  (c, m, o) => new NvHostDbgGpuDeviceFile(c, m, o)  },
+            { "/dev/nvhost-prof-gpu", (c, m, o) => new NvHostProfGpuDeviceFile(c, m, o) },
         };
         
         private static readonly ArrayPool<byte> _byteArrayPool = ArrayPool<byte>.Create();
@@ -78,12 +77,9 @@ namespace Ryujinx.HLE.HOS.Services.Nv
                 return NvResult.NotSupported;
             }
 
-            if (_deviceFileRegistry.TryGetValue(path, out Type deviceFileClass))
+            if (_deviceFileRegistry.TryGetValue(path, out Func<ServiceCtx, IVirtualMemoryManager, ulong, NvDeviceFile> deviceFileFactory))
             {
-                ConstructorInfo constructor = deviceFileClass.GetConstructor([typeof(ServiceCtx), typeof(IVirtualMemoryManager), typeof(ulong)
-                ]);
-
-                NvDeviceFile deviceFile = (NvDeviceFile)constructor.Invoke([context, _clientMemory, _owner]);
+                NvDeviceFile deviceFile = deviceFileFactory(context, _clientMemory, _owner);
 
                 deviceFile.Path = path;
 

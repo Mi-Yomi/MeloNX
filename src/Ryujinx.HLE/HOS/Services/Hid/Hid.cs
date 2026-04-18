@@ -57,7 +57,7 @@ namespace Ryujinx.HLE.HOS.Services.Hid
             _device = device;
             _storage = storage;
 
-            SharedMemory = SharedMemory.Create();
+            SharedMemory.Initialize(ref SharedMemory);
 
             InitDevices();
         }

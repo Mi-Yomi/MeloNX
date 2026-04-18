@@ -49,6 +49,20 @@ namespace Ryujinx.Common.Configuration
 
         public static void Initialize(string baseDirPath)
         {
+            if (OperatingSystem.IsIOS()) 
+            {
+                BaseDirPath = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
+                Mode = LaunchMode.UserProfile;
+
+                if (IsPathSymlink(BaseDirPath))
+                {
+                    Logger.Warning?.Print(LogClass.Application, "Application data directory is a symlink. This may be unintended.");
+                }
+
+                SetupBasePaths();
+                return;
+            }
+
             string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
             if (appDataPath.Length == 0)
@@ -137,7 +151,22 @@ namespace Ryujinx.Common.Configuration
             }
             else
             {
-                if (OperatingSystem.IsMacOS())
+                if (OperatingSystem.IsIOS())
+                {
+                    logDir = Path.Combine(BaseDirPath, "Logs");
+
+                    try
+                    {
+                        Directory.CreateDirectory(logDir);
+                    }
+                    catch
+                    {   
+                        Logger.Warning?.Print(LogClass.Application, $"Logging directory could not be created '{logDir}'");
+
+                        return null;
+                    }
+                }
+                else if (OperatingSystem.IsMacOS())
                 {
                     // NOTE: Should evaluate to "~/Library/Logs/Ryujinx/".
                     logDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Library", "Logs", DefaultBaseDir);

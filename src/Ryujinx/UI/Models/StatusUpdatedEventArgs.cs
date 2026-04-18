@@ -2,7 +2,7 @@ using System;
 
 namespace Ryujinx.Ava.UI.Models
 {
-    internal class StatusUpdatedEventArgs : EventArgs
+    public class StatusUpdatedEventArgs : EventArgs
     {
         public string VSyncMode { get; }
         public string VolumeStatus { get; }

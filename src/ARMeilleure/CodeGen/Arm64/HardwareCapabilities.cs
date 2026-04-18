@@ -20,7 +20,7 @@ namespace ARMeilleure.CodeGen.Arm64
                 LinuxFeatureInfoHwCap2 = (LinuxFeatureFlagsHwCap2)getauxval(AT_HWCAP2);
             }
 
-            if (OperatingSystem.IsMacOS())
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
             {
                 for (int i = 0; i < _sysctlNames.Length; i++)
                 {

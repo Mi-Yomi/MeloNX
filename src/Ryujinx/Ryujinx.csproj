@@ -18,9 +18,6 @@
     </MSBuild>
   </Target>
 
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="$([MSBuild]::IsOSPlatform('OSX'))">
-    <Exec Command="codesign --entitlements '$(ProjectDir)..\..\distribution\macos\entitlements.xml' -f -s $(SigningCertificate) '$(TargetDir)$(TargetName)'" />
-  </Target>
 
   <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
     <PublishSingleFile>true</PublishSingleFile>

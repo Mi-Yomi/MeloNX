@@ -55,7 +55,10 @@ namespace Ryujinx.Headless
             // Make process DPI aware for proper window sizing on high-res screens.
             ForceDpiAware.Windows();
 
-            Console.Title = $"HeadlessRyujinx Console {Program.Version}";
+            if (!OperatingSystem.IsIOS()) 
+            {
+                Console.Title = $"HeadlessRyujinx Console {Program.Version}";
+            }
 
             if (OperatingSystem.IsMacOS() || OperatingSystem.IsLinux())
             {
@@ -185,12 +188,12 @@ namespace Ryujinx.Headless
 
             GraphicsConfig.EnableShaderCache = !option.DisableShaderCache;
 
-            if (OperatingSystem.IsMacOS())
+            if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
             {
                 if (option.GraphicsBackend == GraphicsBackend.OpenGl)
                 {
                     option.GraphicsBackend = GraphicsBackend.Vulkan;
-                    Logger.Warning?.Print(LogClass.Application, "OpenGL is not supported on macOS, switching to Vulkan!");
+                    Logger.Warning?.Print(LogClass.Application, "OpenGL is not supported on Apple Platforms, switching to Vulkan!");
                 }
             }
 

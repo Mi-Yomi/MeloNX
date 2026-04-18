@@ -6,6 +6,7 @@ namespace Ryujinx.Memory
 {
     [SupportedOSPlatform("linux")]
     [SupportedOSPlatform("macos")]
+    [SupportedOSPlatform("ios")]
     public static partial class MemoryManagerUnixHelper
     {
         [Flags]
@@ -114,7 +115,7 @@ namespace Ryujinx.Memory
                 {
                     result |= MAP_ANONYMOUS_LINUX_GENERIC;
                 }
-                else if (OperatingSystem.IsMacOS())
+                else if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
                 {
                     result |= MAP_ANONYMOUS_DARWIN;
                 }
@@ -130,7 +131,7 @@ namespace Ryujinx.Memory
                 {
                     result |= MAP_NORESERVE_LINUX_GENERIC;
                 }
-                else if (OperatingSystem.IsMacOS())
+                else if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
                 {
                     result |= MAP_NORESERVE_DARWIN;
                 }
@@ -146,7 +147,7 @@ namespace Ryujinx.Memory
                 {
                     result |= MAP_UNLOCKED_LINUX_GENERIC;
                 }
-                else if (OperatingSystem.IsMacOS())
+                else if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
                 {
                     // FIXME: Doesn't exist on Darwin
                 }

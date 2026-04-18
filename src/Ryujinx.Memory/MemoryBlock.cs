@@ -13,13 +13,20 @@ namespace Ryujinx.Memory
         private readonly bool _isMirror;
         private readonly bool _viewCompatible;
         private readonly bool _forJit;
+        private DualMappedJitAllocator _dualMappedAllocator;
         private nint _sharedMemory;
         private nint _pointer;
+        private IntPtr _rxPointer;
 
         /// <summary>
         /// Pointer to the memory block data.
         /// </summary>
         public nint Pointer => _pointer;
+
+        /// <summary>
+        /// Pointer to the RX mapping, or returning _pointer if not dual-mapped.
+        /// </summary>
+        public IntPtr RxPointer => _rxPointer;
 
         /// <summary>
         /// Size of the memory block.
@@ -35,7 +42,14 @@ namespace Ryujinx.Memory
         /// <exception cref="PlatformNotSupportedException">Throw when the current platform is not supported</exception>
         public MemoryBlock(ulong size, MemoryAllocationFlags flags = MemoryAllocationFlags.None)
         {
-            if (flags.HasFlag(MemoryAllocationFlags.Mirrorable))
+            if (flags.HasFlag(MemoryAllocationFlags.DualMapping) && OperatingSystem.IsIOS())
+            {
+                _dualMappedAllocator = new DualMappedJitAllocator(size);
+                _pointer = _dualMappedAllocator.RwPtr;
+                _rxPointer = _dualMappedAllocator.RxPtr;
+                _forJit = true;
+            }
+            else if (flags.HasFlag(MemoryAllocationFlags.Mirrorable))
             {
                 _sharedMemory = MemoryManagement.CreateSharedMemory(size, flags.HasFlag(MemoryAllocationFlags.Reserve));
 
@@ -59,6 +73,9 @@ namespace Ryujinx.Memory
             }
 
             Size = size;
+
+            if (_dualMappedAllocator == null)
+                _rxPointer = _pointer;
         }
 
         /// <summary>
@@ -92,6 +109,20 @@ namespace Ryujinx.Memory
             }
 
             return new MemoryBlock(Size, _sharedMemory);
+        }
+
+        /// <summary>
+        /// Detaches StikDebug from the app, Indicating that the JIT regions have been mapped.
+        /// AFter this is called, We will not be able to map any more JIT memory for iOS 26+ (TXM)
+        /// </summary>
+        public void Detach()
+        {
+            if (!OperatingSystem.IsIOS()) { return; }
+
+            if (_dualMappedAllocator != null && DualMappedJitAllocator.hasTXM)
+            {
+                DualMappedJitAllocator.BreakJITDetach();
+            }
         }
 
         /// <summary>
@@ -165,7 +196,9 @@ namespace Ryujinx.Memory
         /// <exception cref="MemoryProtectionException">Throw when <paramref name="permission"/> is invalid</exception>
         public void Reprotect(ulong offset, ulong size, MemoryPermission permission, bool throwOnFail = true)
         {
-            MemoryManagement.Reprotect(GetPointerInternal(offset, size), size, permission, _viewCompatible, throwOnFail);
+            if (_rxPointer == _pointer) {
+                MemoryManagement.Reprotect(GetPointerInternal(offset, size), size, permission, _viewCompatible, throwOnFail);
+            }
         }
 
         /// <summary>
@@ -389,7 +422,13 @@ namespace Ryujinx.Memory
             nint ptr = Interlocked.Exchange(ref _pointer, nint.Zero);
 
             // If pointer is null, the memory was already freed or never allocated.
-            if (ptr != nint.Zero)
+            if (_dualMappedAllocator != null && OperatingSystem.IsIOS())
+            {
+                _dualMappedAllocator.Dispose();
+                _dualMappedAllocator = null;
+                _rxPointer = IntPtr.Zero;
+            }
+            else if (ptr != nint.Zero)
             {
                 if (_usesSharedMemory)
                 {
@@ -426,7 +465,7 @@ namespace Ryujinx.Memory
                     return OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17134);
                 }
 
-                return OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
+                return OperatingSystem.IsLinux() || OperatingSystem.IsMacOS()  || OperatingSystem.IsIOS();
             }
 
             return true;
@@ -435,6 +474,11 @@ namespace Ryujinx.Memory
         public static ulong GetPageSize()
         {
             return (ulong)Environment.SystemPageSize;
+        }
+
+        public static bool DualMappedEnabled()
+        {
+            return OperatingSystem.IsIOS() ? DualMappedJitAllocator.dualMappingEnabled : false;
         }
 
         private static void ThrowInvalidMemoryRegionException() => throw new InvalidMemoryRegionException();

@@ -425,7 +425,10 @@ namespace Ryujinx.HLE.FileSystem
 
         private LocationEntry GetLocation(ulong titleId, NcaContentType contentType, StorageId storageId)
         {
-            LinkedList<LocationEntry> locationList = _locationEntries[storageId];
+            if (!_locationEntries.TryGetValue(storageId, out LinkedList<LocationEntry> locationList))
+            {
+                return default;
+            }
 
             return locationList.ToList().FirstOrDefault(x => x.TitleId == titleId && x.ContentType == contentType);
         }

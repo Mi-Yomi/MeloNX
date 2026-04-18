@@ -1,5 +1,6 @@
 using ARMeilleure.Common;
 using ARMeilleure.Memory;
+using Ryujinx.Memory;
 using Ryujinx.Cpu.Jit;
 using Ryujinx.Cpu.LightningJit.Cache;
 using Ryujinx.Cpu.LightningJit.CodeGen.Arm64;
@@ -16,10 +17,11 @@ namespace Ryujinx.Cpu.LightningJit
     class Translator : IDisposable
     {
         // Should be enabled on platforms that enforce W^X.
-        private static bool IsNoWxPlatform => false;
+        private static bool IsNoWxPlatform => OperatingSystem.IsIOS();
 
         private readonly ConcurrentQueue<KeyValuePair<ulong, TranslatedFunction>> _oldFuncs;
         private readonly NoWxCache _noWxCache;
+        private readonly DualMappedNoWxCache _dualMappedNoWxCache;
         private bool _disposed;
 
         internal TranslatorCache<TranslatedFunction> Functions { get; }
@@ -35,7 +37,17 @@ namespace Ryujinx.Cpu.LightningJit
 
             if (IsNoWxPlatform)
             {
-                _noWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
+                if (MemoryBlock.DualMappedEnabled())
+                { 
+#pragma warning disable CA1416 // iOS checking is handled in MemoryBlock.DualMappedEnabled() 
+                    _dualMappedNoWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
+                    DualMappedNoWxCache.InitMemoryCache();
+#pragma warning disable CA1416
+                }
+                else 
+                {
+                    _noWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
+                }
             }
             else
             {
@@ -44,7 +56,7 @@ namespace Ryujinx.Cpu.LightningJit
 
             Functions = new TranslatorCache<TranslatedFunction>();
             FunctionTable = functionTable;
-            Stubs = new TranslatorStubs(FunctionTable, _noWxCache);
+            Stubs = _dualMappedNoWxCache == null ? new TranslatorStubs(FunctionTable, _noWxCache) : new TranslatorStubs(FunctionTable, _dualMappedNoWxCache);
 
             FunctionTable.Fill = (ulong)Stubs.SlowDispatchStub;
 
@@ -85,6 +97,14 @@ namespace Ryujinx.Cpu.LightningJit
                 CompiledFunction func = Compile(address, mode);
 
                 return _noWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+            } 
+            else if (_dualMappedNoWxCache != null) 
+            {
+                CompiledFunction func = Compile(address, mode);
+
+#pragma warning disable CA1416
+                return _dualMappedNoWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+#pragma warning disable CA1416
             }
 
             return GetOrTranslate(address, mode).FuncPointer;
@@ -184,6 +204,12 @@ namespace Ryujinx.Cpu.LightningJit
                     if (_noWxCache != null)
                     {
                         _noWxCache.Dispose();
+                    }
+                    if (_dualMappedNoWxCache != null) 
+                    {
+#pragma warning disable CA1416
+                        _dualMappedNoWxCache.Dispose();
+#pragma warning disable CA1416
                     }
                     else
                     {

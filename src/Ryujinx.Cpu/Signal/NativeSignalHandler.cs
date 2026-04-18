@@ -89,7 +89,7 @@ namespace Ryujinx.Cpu.Signal
 
                 ref SignalHandlerConfig config = ref GetConfigRef();
 
-                if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+                if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
                 {
                     _signalHandlerPtr = MapCode(NativeSignalHandlerGenerator.GenerateUnixSignalHandler(_handlerConfig, rangeStructSize));
 
@@ -128,11 +128,16 @@ namespace Ryujinx.Cpu.Signal
 
             ulong codeSizeAligned = BitUtils.AlignUp((ulong)code.Length, MemoryBlock.GetPageSize());
 
-            _codeBlock = new MemoryBlock(codeSizeAligned);
+            _codeBlock = new MemoryBlock(codeSizeAligned, MemoryBlock.DualMappedEnabled() ? MemoryAllocationFlags.DualMapping : MemoryAllocationFlags.None);
+
+            Console.WriteLine($"Code length: {code.Length}, aligned: {codeSizeAligned}, memoryBlockSize: {_codeBlock.Size}");
+
             _codeBlock.Write(0, code);
             _codeBlock.Reprotect(0, codeSizeAligned, MemoryPermission.ReadAndExecute);
 
-            return _codeBlock.Pointer;
+            _codeBlock.Detach();
+
+            return _codeBlock.RxPointer;
         }
 
         private static unsafe ref SignalHandlerConfig GetConfigRef()

@@ -27,6 +27,7 @@ namespace Ryujinx.Memory
         public SparseMemoryBlock(ulong size, PageInitDelegate pageInit, MemoryBlock fill)
         {
             _pageSize = MemoryBlock.GetPageSize();
+            Console.WriteLine($"[SparseMemoryBlock] Reserving {size / (1024*1024)} MB");
             _reservedBlock = new MemoryBlock(size, MemoryAllocationFlags.Reserve | MemoryAllocationFlags.ViewCompatible);
             _mappedBlocks = [];
             _pageInit = pageInit;
