@@ -19,6 +19,7 @@ using System.Linq;
 using ApplicationId = LibHac.Ncm.ApplicationId;
 using ContentType = LibHac.Ncm.ContentType;
 using Path = System.IO.Path;
+using System;
 
 namespace Ryujinx.HLE.Loaders.Processes.Extensions
 {
@@ -115,6 +116,9 @@ namespace Ryujinx.HLE.Loaders.Processes.Extensions
             if (File.Exists(titleUpdateMetadataPath))
             {
                 updatePath = JsonHelper.DeserializeFromFile(titleUpdateMetadataPath, _applicationSerializerContext.TitleUpdateMetadata).Selected;
+                if (OperatingSystem.IsIOS())
+                    updatePath = Path.Combine(AppDataManager.BaseDirPath, updatePath);
+
                 if (File.Exists(updatePath))
                 {
                     IFileSystem updatePartitionFileSystem = PartitionFileSystemUtils.OpenApplicationFileSystem(updatePath, fileSystem);

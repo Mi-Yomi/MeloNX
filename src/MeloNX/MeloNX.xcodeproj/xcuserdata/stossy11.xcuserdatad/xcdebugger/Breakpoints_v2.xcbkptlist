@@ -7,17 +7,30 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "722965A7-D49A-4DD8-BE5E-C14F1D17E6B6"
+            uuid = "09F440F4-3AA2-4331-B1D3-7B469DF7F871"
             shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
-            filePath = "MeloNX/UI/ContentView.swift"
+            filePath = "MeloNX/UI/MeloNXApp.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "59"
-            endingLineNumber = "59"
-            landmarkName = "buildCommandLineArgs(path:)"
+            startingLineNumber = "74"
+            endingLineNumber = "74"
+            landmarkName = "init()"
             landmarkType = "7">
+         </BreakpointContent>
+      </BreakpointProxy>
+      <BreakpointProxy
+         BreakpointExtensionID = "Xcode.Breakpoint.SymbolicBreakpoint">
+         <BreakpointContent
+            uuid = "3F1067D7-1883-4A7E-AB59-D9B3E8552FA5"
+            shouldBeEnabled = "Yes"
+            ignoreCount = "0"
+            continueAfterRunningActions = "No"
+            symbolName = "BreakJITMapping"
+            moduleName = "">
+            <Locations>
+            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>

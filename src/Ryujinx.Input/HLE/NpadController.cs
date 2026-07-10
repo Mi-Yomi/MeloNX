@@ -246,7 +246,7 @@ namespace Ryujinx.Input.HLE
             if (config is StandardControllerInputConfig controllerConfig)
             {
                 bool needsMotionInputUpdate = _config is not StandardControllerInputConfig oldControllerConfig ||
-                    ((oldControllerConfig.Motion.EnableMotion != controllerConfig.Motion.EnableMotion) &&
+                    ((oldControllerConfig.Motion.EnableMotion != controllerConfig.Motion.EnableMotion) ||
                     (oldControllerConfig.Motion.MotionBackend != controllerConfig.Motion.MotionBackend));
 
                 if (needsMotionInputUpdate)
@@ -267,7 +267,12 @@ namespace Ryujinx.Input.HLE
 
         private void UpdateMotionInput(MotionConfigController motionConfig)
         {
-            if (motionConfig.MotionBackend != MotionInputBackendType.CemuHook)
+            if (!motionConfig.EnableMotion)
+            {
+                _leftMotionInput = null;
+                _rightMotionInput = null;
+            }
+            else if (motionConfig.MotionBackend != MotionInputBackendType.CemuHook)
             {
                 _leftMotionInput = new MotionInput();
                 _rightMotionInput = new MotionInput();
@@ -560,19 +565,50 @@ namespace Ryujinx.Input.HLE
                     VibrationValue leftVibrationValue = dualVibrationValue.Item1;
                     VibrationValue rightVibrationValue = dualVibrationValue.Item2;
 
-                    float low = Math.Min(1f, (float)((rightVibrationValue.AmplitudeLow * 0.85 + rightVibrationValue.AmplitudeHigh * 0.15) * controllerConfig.Rumble.StrongRumble));
-                    float high = Math.Min(1f, (float)((leftVibrationValue.AmplitudeLow * 0.15 + leftVibrationValue.AmplitudeHigh * 0.85) * controllerConfig.Rumble.WeakRumble));
-
-                    _gamepad.Rumble(low, high, uint.MaxValue);
+                    if (_gamepad is IHighDefinitionRumbleGamepad hdRumbleGamepad)
+                    {
+                        hdRumbleGamepad.Rumble(
+                            ToGamepadVibrationValue(leftVibrationValue, controllerConfig),
+                            ToGamepadVibrationValue(rightVibrationValue, controllerConfig),
+                            uint.MaxValue);
+                    }
+                    else
+                    {
+                        (float low, float high) = GetFallbackRumble(leftVibrationValue, rightVibrationValue, controllerConfig);
+                        _gamepad.Rumble(low, high, uint.MaxValue);
+                    }
 
                     Logger.Debug?.Print(LogClass.Hid, $"Effect for {controllerConfig.PlayerIndex} " +
                         $"L.low.amp={leftVibrationValue.AmplitudeLow}, " +
+                        $"L.low.freq={leftVibrationValue.FrequencyLow}, " +
                         $"L.high.amp={leftVibrationValue.AmplitudeHigh}, " +
+                        $"L.high.freq={leftVibrationValue.FrequencyHigh}, " +
                         $"R.low.amp={rightVibrationValue.AmplitudeLow}, " +
+                        $"R.low.freq={rightVibrationValue.FrequencyLow}, " +
                         $"R.high.amp={rightVibrationValue.AmplitudeHigh} " +
-                        $"--> ({low}, {high})");
+                        $"R.high.freq={rightVibrationValue.FrequencyHigh}");
                 }
             }
+        }
+
+        private static GamepadVibrationValue ToGamepadVibrationValue(VibrationValue vibrationValue, StandardControllerInputConfig controllerConfig)
+        {
+            return new GamepadVibrationValue(
+                Math.Clamp((float)(vibrationValue.AmplitudeLow * controllerConfig.Rumble.StrongRumble), 0f, 1f),
+                vibrationValue.FrequencyLow,
+                Math.Clamp((float)(vibrationValue.AmplitudeHigh * controllerConfig.Rumble.WeakRumble), 0f, 1f),
+                vibrationValue.FrequencyHigh);
+        }
+
+        private static (float Low, float High) GetFallbackRumble(
+            VibrationValue leftVibrationValue,
+            VibrationValue rightVibrationValue,
+            StandardControllerInputConfig controllerConfig)
+        {
+            float low = Math.Min(1f, (float)((rightVibrationValue.AmplitudeLow * 0.85 + rightVibrationValue.AmplitudeHigh * 0.15) * controllerConfig.Rumble.StrongRumble));
+            float high = Math.Min(1f, (float)((leftVibrationValue.AmplitudeLow * 0.15 + leftVibrationValue.AmplitudeHigh * 0.85) * controllerConfig.Rumble.WeakRumble));
+
+            return (low, high);
         }
     }
 }

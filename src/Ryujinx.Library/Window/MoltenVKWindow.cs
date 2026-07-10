@@ -10,7 +10,7 @@ using Silk.NET.Vulkan.Extensions.KHR;
 
 namespace Ryujinx.Library
 {
-    class MoltenVKWindow : WindowBase
+    class MoltenVKWindow: WindowBase
     {
         public IntPtr nativeMetalLayer = IntPtr.Zero;
         
@@ -52,6 +52,7 @@ namespace Ryujinx.Library
             {
                 return;
             }
+            
             nativeMetalLayer = IntPtr.Zero;
             nativeMetalLayer = metalLayer;
         }

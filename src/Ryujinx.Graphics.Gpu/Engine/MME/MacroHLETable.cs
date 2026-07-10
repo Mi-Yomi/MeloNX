@@ -11,7 +11,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
     static class MacroHLETable
     {
         /// <summary>
-        /// Macroo High-level implementation table entry.
+        /// Macro High-level implementation table entry.
         /// </summary>
         readonly struct TableEntry
         {
@@ -26,39 +26,86 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
             public Hash128 Hash { get; }
 
             /// <summary>
+            /// Creates a new table entry.
+            /// </summary>
+            /// <param name="name">Name of the Macro function</param>
+            /// <param name="hash">Hash of the original binary Macro function code</param>
+            public TableEntry(MacroHLEFunctionName name, Hash128 hash)
+            {
+                Name = name;
+                Hash = hash;
+            }
+        }
+
+        /// <summary>
+        /// Macro table entries with the same code length.
+        /// </summary>
+        readonly struct TableGroup
+        {
+            /// <summary>
             /// Size (in bytes) of the original binary Macro function code.
             /// </summary>
             public int Length { get; }
 
             /// <summary>
-            /// Creates a new table entry.
+            /// Entries with the given length.
             /// </summary>
-            /// <param name="name">Name of the Macro function</param>
-            /// <param name="hash">Hash of the original binary Macro function code</param>
+            public TableEntry[] Entries { get; }
+
+            /// <summary>
+            /// Creates a new table group.
+            /// </summary>
             /// <param name="length">Size (in bytes) of the original binary Macro function code</param>
-            public TableEntry(MacroHLEFunctionName name, Hash128 hash, int length)
+            /// <param name="entries">Entries with the given length</param>
+            public TableGroup(int length, TableEntry[] entries)
             {
-                Name = name;
-                Hash = hash;
                 Length = length;
+                Entries = entries;
             }
         }
 
-        private static readonly TableEntry[] _table =
+        private static readonly TableGroup[] _groups =
         [
-            new(MacroHLEFunctionName.BindShaderProgram, new Hash128(0x5d5efb912369f60b, 0x69131ed5019f08ef), 0x68),
-            new(MacroHLEFunctionName.ClearColor, new Hash128(0xA9FB28D1DC43645A, 0xB177E5D2EAE67FB0), 0x28),
-            new(MacroHLEFunctionName.ClearDepthStencil, new Hash128(0x1B96CB77D4879F4F, 0x8557032FE0C965FB), 0x24),
-            new(MacroHLEFunctionName.DrawArraysInstanced, new Hash128(0x197FB416269DBC26, 0x34288C01DDA82202), 0x48),
-            new(MacroHLEFunctionName.DrawElements, new Hash128(0x3D7F32AE6C2702A7, 0x9353C9F41C1A244D), 0x20),
-            new(MacroHLEFunctionName.DrawElementsInstanced, new Hash128(0x1A501FD3D54EC8E0, 0x6CF570CF79DA74D6), 0x5c),
-            new(MacroHLEFunctionName.DrawElementsIndirect, new Hash128(0x86A3E8E903AF8F45, 0xD35BBA07C23860A4), 0x7c),
-            new(MacroHLEFunctionName.MultiDrawElementsIndirectCount, new Hash128(0x890AF57ED3FB1C37, 0x35D0C95C61F5386F), 0x19C),
-            new(MacroHLEFunctionName.UpdateBlendState, new Hash128(0x40F6D4E7B08D7640, 0x82167BEEAECB959F), 0x28),
-            new(MacroHLEFunctionName.UpdateColorMasks, new Hash128(0x9EE32420B8441DFD, 0x6E7724759A57333E), 0x24),
-            new(MacroHLEFunctionName.UpdateUniformBufferState, new Hash128(0x8EE66706049CB0B0, 0x51C1CF906EC86F7C), 0x20),
-            new(MacroHLEFunctionName.UpdateUniformBufferStateCbu, new Hash128(0xA4592676A3E581A0, 0xA39E77FE19FE04AC), 0x18),
-            new(MacroHLEFunctionName.UpdateUniformBufferStateCbuV2, new Hash128(0x392FA750489983D4, 0x35BACE455155D2C3), 0x18)
+            new(0x68,
+            [
+                new(MacroHLEFunctionName.BindShaderProgram, new Hash128(0x5d5efb912369f60b, 0x69131ed5019f08ef)),
+            ]),
+            new(0x28,
+            [
+                new(MacroHLEFunctionName.ClearColor, new Hash128(0xA9FB28D1DC43645A, 0xB177E5D2EAE67FB0)),
+                new(MacroHLEFunctionName.UpdateBlendState, new Hash128(0x40F6D4E7B08D7640, 0x82167BEEAECB959F)),
+            ]),
+            new(0x24,
+            [
+                new(MacroHLEFunctionName.ClearDepthStencil, new Hash128(0x1B96CB77D4879F4F, 0x8557032FE0C965FB)),
+                new(MacroHLEFunctionName.UpdateColorMasks, new Hash128(0x9EE32420B8441DFD, 0x6E7724759A57333E)),
+            ]),
+            new(0x48,
+            [
+                new(MacroHLEFunctionName.DrawArraysInstanced, new Hash128(0x197FB416269DBC26, 0x34288C01DDA82202)),
+            ]),
+            new(0x20,
+            [
+                new(MacroHLEFunctionName.DrawElements, new Hash128(0x3D7F32AE6C2702A7, 0x9353C9F41C1A244D)),
+                new(MacroHLEFunctionName.UpdateUniformBufferState, new Hash128(0x8EE66706049CB0B0, 0x51C1CF906EC86F7C)),
+            ]),
+            new(0x5c,
+            [
+                new(MacroHLEFunctionName.DrawElementsInstanced, new Hash128(0x1A501FD3D54EC8E0, 0x6CF570CF79DA74D6)),
+            ]),
+            new(0x7c,
+            [
+                new(MacroHLEFunctionName.DrawElementsIndirect, new Hash128(0x86A3E8E903AF8F45, 0xD35BBA07C23860A4)),
+            ]),
+            new(0x19C,
+            [
+                new(MacroHLEFunctionName.MultiDrawElementsIndirectCount, new Hash128(0x890AF57ED3FB1C37, 0x35D0C95C61F5386F)),
+            ]),
+            new(0x18,
+            [
+                new(MacroHLEFunctionName.UpdateUniformBufferStateCbu, new Hash128(0xA4592676A3E581A0, 0xA39E77FE19FE04AC)),
+                new(MacroHLEFunctionName.UpdateUniformBufferStateCbuV2, new Hash128(0x392FA750489983D4, 0x35BACE455155D2C3)),
+            ]),
         ];
 
         /// <summary>
@@ -92,20 +139,32 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         {
             ReadOnlySpan<byte> mc = MemoryMarshal.Cast<int, byte>(code);
 
-            for (int i = 0; i < _table.Length; i++)
+            for (int i = 0; i < _groups.Length; i++)
             {
-                ref TableEntry entry = ref _table[i];
+                TableGroup group = _groups[i];
 
-                Hash128 hash = Hash128.ComputeHash(mc[..entry.Length]);
-                if (hash == entry.Hash)
+                if (mc.Length < group.Length)
                 {
-                    if (IsMacroHLESupported(caps, entry.Name))
-                    {
-                        name = entry.Name;
-                        return true;
-                    }
+                    continue;
+                }
 
-                    break;
+                Hash128 hash = Hash128.ComputeHash(mc[..group.Length]);
+                TableEntry[] entries = group.Entries;
+
+                for (int j = 0; j < entries.Length; j++)
+                {
+                    ref TableEntry entry = ref entries[j];
+
+                    if (hash == entry.Hash)
+                    {
+                        if (IsMacroHLESupported(caps, entry.Name))
+                        {
+                            name = entry.Name;
+                            return true;
+                        }
+
+                        break;
+                    }
                 }
             }
 

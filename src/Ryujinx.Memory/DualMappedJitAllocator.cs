@@ -38,22 +38,24 @@ namespace Ryujinx.Memory
 
         static public bool dualMappingEnabled => Environment.GetEnvironmentVariable("DUAL_MAPPED_JIT") == "1"; 
 
+        static private bool usingNewMapping = false;
+
         public DualMappedJitAllocator(ulong size)
         {
             var stackTrace = new StackTrace(1, false);
             var callingMethod = stackTrace.GetFrame(0)?.GetMethod();
 
             Logger.Info?.Print(LogClass.Cpu,
-                $"Allocating dual-mapped JIT memory of size {size} bytes, called by {callingMethod?.DeclaringType?.FullName}.{callingMethod?.Name}");
+                $"Allocating dual-mapped JIT memory of size {size} bytes, called by {callingMethod?.DeclaringType?.FullName}.{callingMethod?.Name} with {hasTXM}, {dualMappingEnabled}");
             Size = size;
             AllocateDualMapping();
         }
 
-        nint BreakGetJITMapping(nuint bytes)
+        nint? BreakGetJITMapping(nuint bytes)
         {
             unsafe
             {
-                byte* ptr = BreakMarkJITMapping(bytes);
+                byte* ptr = usingNewMapping ? (byte*)0 : (byte*)BreakMarkJITMapping(bytes);
                 Logger.Info?.Print(LogClass.Cpu, $"testing for BreakGetJITMapping, got {(ulong)ptr}");
                 if (ptr == null || ptr == (byte*)0 || ptr == (byte*)-1 || ptr == (byte*)14757395257293275360 || ptr == (byte*)1761607904)
                 {
@@ -62,8 +64,8 @@ namespace Ryujinx.Memory
                     if (ptr == null || ptr == (byte*)0 || ptr == (byte*)-1)
                     {
                         Logger.Info?.Print(LogClass.Cpu, "Failed to get JIT mapping from BreakGetJITMapping.");
-                        throw new Exception("Failed to get JIT, Are you using StikDebug and Picture in Picture is enabled?");
-                    }
+                        return null;
+                    } else { usingNewMapping = true; }
                 }
 
                 return (nint)ptr;
@@ -72,7 +74,7 @@ namespace Ryujinx.Memory
 
         private void AllocateDualMapping()
         {
-            nint _mmapPtr;
+            nint? _mmapPtr = null;
 
             if (hasTXM)
             {
@@ -81,10 +83,10 @@ namespace Ryujinx.Memory
             else
             {
                 _mmapPtr = Mmap(0, Size, MmapProts.PROT_READ | MmapProts.PROT_EXEC, MmapFlags.MAP_ANONYMOUS | MmapFlags.MAP_PRIVATE, -1, 0);
-
-                if (_mmapPtr == MAP_FAILED)
-                    throw new Exception("Failed to mmap memory");
             }
+
+             if (_mmapPtr == null || _mmapPtr == MAP_FAILED)
+                throw new Exception("Failed to mmap memory");
 
             var bufRX = (ulong)_mmapPtr;
             ulong bufRW = 0;
@@ -100,7 +102,7 @@ namespace Ryujinx.Memory
                 throw new Exception($"Failed to set RW protection: {protectRWResult}");
 
             RwPtr = (nint)bufRW;
-            RxPtr = _mmapPtr;
+            RxPtr = (nint)_mmapPtr;
         }
 
         public void Dispose()

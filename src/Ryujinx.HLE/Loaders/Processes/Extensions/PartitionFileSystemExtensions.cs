@@ -127,18 +127,19 @@ namespace Ryujinx.HLE.Loaders.Processes.Extensions
 
                     foreach (DownloadableContentContainer downloadableContentContainer in dlcContainerList)
                     {
+                        string containerPath = ResolveDlcContainerPath(downloadableContentContainer.ContainerPath);
+
+                        if (!File.Exists(containerPath))
+                        {
+                            Logger.Warning?.Print(LogClass.Application, $"Cannot find AddOnContent file {downloadableContentContainer.ContainerPath}. It may have been moved or renamed.");
+                            continue;
+                        }
+
                         foreach (DownloadableContentNca downloadableContentNca in downloadableContentContainer.DownloadableContentNcaList)
                         {
-                            if (File.Exists(downloadableContentContainer.ContainerPath))
+                            if (downloadableContentNca.Enabled)
                             {
-                                if (downloadableContentNca.Enabled)
-                                {
-                                    device.Configuration.ContentManager.AddAocItem(downloadableContentNca.TitleId, downloadableContentContainer.ContainerPath, downloadableContentNca.FullPath);
-                                }
-                            }
-                            else
-                            {
-                                Logger.Warning?.Print(LogClass.Application, $"Cannot find AddOnContent file {downloadableContentContainer.ContainerPath}. It may have been moved or renamed.");
+                                device.Configuration.ContentManager.AddAocItem(downloadableContentNca.TitleId, containerPath, downloadableContentNca.FullPath);
                             }
                         }
                     }
@@ -150,6 +151,16 @@ namespace Ryujinx.HLE.Loaders.Processes.Extensions
             errorMessage = $"Unable to load: Could not find Main NCA for title \"{applicationId:X16}\"";
 
             return (false, ProcessResult.Failed);
+        }
+
+        private static string ResolveDlcContainerPath(string containerPath)
+        {
+            if (string.IsNullOrWhiteSpace(containerPath) || File.Exists(containerPath) || System.IO.Path.IsPathRooted(containerPath))
+            {
+                return containerPath;
+            }
+
+            return System.IO.Path.Combine(AppDataManager.BaseDirPath, containerPath);
         }
     }
 }

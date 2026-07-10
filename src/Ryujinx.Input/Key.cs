@@ -3,7 +3,7 @@ namespace Ryujinx.Input
     /// <summary>
     /// Represent a key from a keyboard.
     /// </summary>
-    public enum Key
+    public enum Key : int
     {
         Unknown,
         ShiftLeft,

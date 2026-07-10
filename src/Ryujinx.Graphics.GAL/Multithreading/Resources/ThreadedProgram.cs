@@ -11,6 +11,8 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
 
         internal bool Compiled;
 
+        public bool CanBindWhileIncomplete => Base?.CanBindWhileIncomplete ?? false;
+
         public ThreadedProgram(ThreadedRenderer renderer)
         {
             _renderer = renderer;

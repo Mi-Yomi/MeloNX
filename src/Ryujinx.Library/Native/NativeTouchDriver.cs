@@ -41,6 +41,7 @@ namespace Ryujinx.Library
             _activeTouches[index] = position;
         }
 
+
         [UnmanagedCallersOnly(EntryPoint = "touch_moved")]
         public static void TouchMovedAtPoint(float x, float y, int index)
         {

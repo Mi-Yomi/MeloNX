@@ -172,7 +172,7 @@ namespace Ryujinx.Graphics.Gpu
                 throw new ArgumentException("The PID is invalid or the process was not registered", nameof(pid));
             }
 
-            return new MemoryManager(physicalMemory, cpuMemorySize);
+            return new MemoryManager(this, physicalMemory, cpuMemorySize);
         }
 
         /// <summary>

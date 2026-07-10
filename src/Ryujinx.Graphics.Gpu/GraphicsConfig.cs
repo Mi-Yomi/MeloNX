@@ -60,6 +60,11 @@ namespace Ryujinx.Graphics.Gpu
         public static bool EnableShaderCache { get; set; }
 
         /// <summary>
+        /// Enables or disables asynchronous shader pipeline compilation on supported backends.
+        /// </summary>
+        public static bool EnableAsyncShaderCompilation { get; set; } = true;
+
+        /// <summary>
         /// Enables or disables shader SPIR-V compilation.
         /// </summary>
         public static bool EnableSpirvCompilationOnVulkan { get; set; } = true;

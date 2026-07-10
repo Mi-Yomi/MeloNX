@@ -131,6 +131,12 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         [ThreadStatic]
         private static Dictionary<ulong, ThreadLocalCacheEntry> _threadLocalCache;
 
+        [ThreadStatic]
+        private static List<ulong> _threadCallStack;
+
+        [ThreadStatic]
+        private static List<(ulong Address, ThreadLocalCacheEntry Entry)> _threadLocalEntriesToDelete;
+
         public NoWxCache(IJitMemoryAllocator allocator, IStackWalker stackWalker, Translator translator)
         {
             _stackWalker = stackWalker;
@@ -142,14 +148,19 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
         public unsafe nint Map(nint framePointer, ReadOnlySpan<byte> code, ulong guestAddress, ulong guestSize)
         {
-            if (TryGetThreadLocalFunction(guestAddress, out nint funcPtr))
+            if (TryGetCachedFunction(guestAddress, out nint funcPtr))
             {
                 return funcPtr;
             }
 
             lock (_lock)
             {
-                if (!_pendingMap.Has(guestAddress) && !_translator.Functions.ContainsKey(guestAddress))
+                if (TryGetSharedFunction(guestAddress, out funcPtr))
+                {
+                    return funcPtr;
+                }
+
+                if (!_pendingMap.Has(guestAddress))
                 {
                     int funcOffset = _sharedCache.Allocate(code.Length);
 
@@ -188,11 +199,37 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             }
         }
 
+        internal bool TryGetCachedFunction(ulong guestAddress, out nint funcPtr)
+        {
+            if (TryGetThreadLocalFunction(guestAddress, out funcPtr))
+            {
+                return true;
+            }
+
+            return TryGetSharedFunction(guestAddress, out funcPtr);
+        }
+
+        private bool TryGetSharedFunction(ulong guestAddress, out nint funcPtr)
+        {
+            if (_translator.Functions.TryGetValue(guestAddress, out TranslatedFunction function))
+            {
+                funcPtr = function.FuncPointer;
+
+                return true;
+            }
+
+            funcPtr = nint.Zero;
+
+            return false;
+        }
+
         private bool TryGetThreadLocalFunction(ulong guestAddress, out nint funcPtr)
         {
-            if ((_threadLocalCache ??= new()).TryGetValue(guestAddress, out ThreadLocalCacheEntry entry))
+            Dictionary<ulong, ThreadLocalCacheEntry> threadLocalCache = _threadLocalCache;
+
+            if (threadLocalCache != null && threadLocalCache.TryGetValue(guestAddress, out ThreadLocalCacheEntry entry))
             {
-                if (entry.IncrementUseCount() >= MinCallsForPad)
+                if (entry.IncrementUseCount() == MinCallsForPad)
                 {
                     // Function is being called often, let's make it available in the shared cache so that the guest code
                     // can take the fast path and stop calling the emulator to get the function from the thread local cache.
@@ -219,21 +256,30 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             // Try to delete functions that are already on the shared cache
             // and no longer being executed.
 
-            if (_threadLocalCache == null)
+            Dictionary<ulong, ThreadLocalCacheEntry> threadLocalCache = _threadLocalCache;
+
+            if (threadLocalCache == null || threadLocalCache.Count == 0)
             {
                 return;
             }
 
-            IEnumerable<ulong> callStack = _stackWalker.GetCallStack(
+            List<ulong> callStack = _threadCallStack ??= [];
+            callStack.Clear();
+
+            foreach (ulong funcAddress in _stackWalker.GetCallStack(
                 framePointer,
                 _localCache.Pointer,
                 LocalCacheSize,
                 _sharedCache.Pointer,
-                SharedCacheSize);
+                SharedCacheSize))
+            {
+                callStack.Add(funcAddress);
+            }
 
-            List<(ulong, ThreadLocalCacheEntry)> toDelete = [];
+            List<(ulong Address, ThreadLocalCacheEntry Entry)> toDelete = _threadLocalEntriesToDelete ??= [];
+            toDelete.Clear();
 
-            foreach ((ulong address, ThreadLocalCacheEntry entry) in _threadLocalCache)
+            foreach ((ulong address, ThreadLocalCacheEntry entry) in threadLocalCache)
             {
                 // We only want to delete if the function is already on the shared cache,
                 // otherwise we will keep translating the same function over and over again.
@@ -264,27 +310,32 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
             foreach ((ulong address, ThreadLocalCacheEntry entry) in toDelete)
             {
-                _threadLocalCache.Remove(address);
+                threadLocalCache.Remove(address);
 
                 int sizeAligned = BitUtils.AlignUp(entry.Size, pageSize);
 
                 _localCache.Free(entry.Offset, sizeAligned);
                 _localCache.ReprotectAsRw(entry.Offset, sizeAligned);
             }
+
+            toDelete.Clear();
+            callStack.Clear();
         }
 
         public void ClearEntireThreadLocalCache()
         {
             // Thread is exiting, delete everything.
 
-            if (_threadLocalCache == null)
+            Dictionary<ulong, ThreadLocalCacheEntry> threadLocalCache = _threadLocalCache;
+
+            if (threadLocalCache == null)
             {
                 return;
             }
 
             int pageSize = (int)MemoryBlock.GetPageSize();
 
-            foreach ((_, ThreadLocalCacheEntry entry) in _threadLocalCache)
+            foreach ((_, ThreadLocalCacheEntry entry) in threadLocalCache)
             {
                 int sizeAligned = BitUtils.AlignUp(entry.Size, pageSize);
 
@@ -292,7 +343,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 _localCache.ReprotectAsRw(entry.Offset, sizeAligned);
             }
 
-            _threadLocalCache.Clear();
+            threadLocalCache.Clear();
             _threadLocalCache = null;
         }
 

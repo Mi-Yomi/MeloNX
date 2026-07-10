@@ -5,11 +5,12 @@ using System.Threading.Tasks;
 namespace Ryujinx.Library
 {
     /// <summary>
-    /// iOS text processing class, TODO: Implement this once callbacks are finished
+    /// iOS text processing class
     /// </summary>
     internal class NativeDynamicTextInputHandler : IDynamicTextInputHandler
     {
         private bool _canProcessInput;
+        private string _pendingPlaceholder = "";
 
         public event DynamicTextChangedHandler TextChangedEvent;
         public event KeyPressedHandler KeyPressedEvent { add { } remove { } }
@@ -23,26 +24,41 @@ namespace Ryujinx.Library
             {
                 Volatile.Write(ref _canProcessInput, value);
 
-                // Launch a task to update the text.
-                Task.Run(() =>
-                {
-                    Thread.Sleep(100);
-                    TextChangedEvent?.Invoke("MeloNX", 7, 7, false);
-                });
+                if (!value)
+                    return;
+
+                AlertHelper.ShowAlertWithTextInput(
+                    title: "Text Input",
+                    message: "",
+                    placeholder: _pendingPlaceholder,
+                    onTextEntered: result =>
+                    {
+                        if (!Volatile.Read(ref _canProcessInput))
+                            return;
+
+                        var text = result ?? "";
+                        int cursor = text.Length;
+                        TextChangedEvent?.Invoke(text, cursor, cursor, false);
+                    }
+                );
             }
         }
 
         public NativeDynamicTextInputHandler()
         {
-            // Start with input processing turned off so the text box won't accumulate text
-            // if the user is playing on the keyboard.
-            _canProcessInput = false;
+            _canProcessInput = true;
         }
 
-        public void SetText(string text, int cursorBegin) { }
+        public void SetText(string text, int cursorBegin)
+        {
+            _pendingPlaceholder = text ?? "";
+        }
 
-        public void SetText(string text, int cursorBegin, int cursorEnd) { }
-
+        public void SetText(string text, int cursorBegin, int cursorEnd)
+        {
+            _pendingPlaceholder = text ?? "";
+        }
+        
         public void Dispose() { }
     }
 }

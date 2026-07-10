@@ -34,6 +34,8 @@ namespace Ryujinx.Graphics.Vulkan
                 DeviceName = Marshal.PtrToStringAnsi((nint)physicalDeviceProperties.DeviceName);
             }
 
+            // Effects.MetalFxBridge.TryProbe();
+
             uint propertiesCount = 0;
 
             api.GetPhysicalDeviceQueueFamilyProperties(physicalDevice, SpanHelpers.AsSpan(ref propertiesCount), Span<QueueFamilyProperties>.Empty);

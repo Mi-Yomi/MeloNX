@@ -19,7 +19,16 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Commands.Program
 
         public static void Run(ref ProgramCheckLinkCommand command, ThreadedRenderer threaded, IRenderer renderer)
         {
-            ProgramLinkStatus result = command._program.Get(threaded).Base.CheckProgramLink(command._blocking);
+            ThreadedProgram program = command._program.Get(threaded);
+
+            threaded.Programs.EnsureProgramCreated(program);
+
+            ProgramLinkStatus result = program.Base.CheckProgramLink(command._blocking);
+
+            if (result != ProgramLinkStatus.Incomplete)
+            {
+                program.Compiled = true;
+            }
 
             command._result.Get(threaded).Result = result;
         }

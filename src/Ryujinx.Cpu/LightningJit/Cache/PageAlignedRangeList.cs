@@ -29,6 +29,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         private readonly Action<int, int> _alignedRangeAction;
         private readonly Action<ulong, TranslatedFunction> _alignedFunctionAction;
         private readonly List<(Range, ulong, TranslatedFunction)> _pendingFunctions;
+        private readonly HashSet<ulong> _pendingAddresses;
         private readonly List<Range> _ranges;
 
         public PageAlignedRangeList(Action<int, int> alignedRangeAction, Action<ulong, TranslatedFunction> alignedFunctionAction)
@@ -36,20 +37,13 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             _alignedRangeAction = alignedRangeAction;
             _alignedFunctionAction = alignedFunctionAction;
             _pendingFunctions = [];
+            _pendingAddresses = [];
             _ranges = [];
         }
 
         public bool Has(ulong address)
         {
-            foreach ((_, ulong guestAddress, _) in _pendingFunctions)
-            {
-                if (guestAddress == address)
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return _pendingAddresses.Contains(address);
         }
 
         public void Add(int offset, int size, ulong address, TranslatedFunction function)
@@ -58,6 +52,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
             Insert(range);
             _pendingFunctions.Add((range, address, function));
+            _pendingAddresses.Add(address);
             ProcessAlignedRanges();
         }
 
@@ -150,6 +145,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 {
                     _alignedFunctionAction(address, function);
                     _pendingFunctions.RemoveAt(index--);
+                    _pendingAddresses.Remove(address);
                 }
             }
         }

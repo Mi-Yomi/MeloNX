@@ -121,7 +121,7 @@
     <ProjectReference Include="..\Ryujinx.Graphics.Gpu\Ryujinx.Graphics.Gpu.csproj" />
     <ProjectReference Include="..\Ryujinx.Audio.Backends.OpenAL\Ryujinx.Audio.Backends.OpenAL.csproj" />
     <ProjectReference Include="..\Ryujinx.Audio.Backends.Apple\Ryujinx.Audio.Backends.Apple.csproj" />
-
+    <ProjectReference Include="..\Ryujinx.Input.Native\Ryujinx.Input.Native.csproj" />
   </ItemGroup>
 
   <ItemGroup>

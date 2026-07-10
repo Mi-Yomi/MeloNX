@@ -360,14 +360,27 @@ namespace Ryujinx.Graphics.Gpu.Shader
             }
 
             ResourceLayout resourceLayout = new(descriptors.AsReadOnly(), usages.AsReadOnly());
+            bool enableAsyncCompile = GraphicsConfig.EnableAsyncShaderCompilation && pipeline.HasValue;
+            bool allowAsyncCompileSkip = enableAsyncCompile;
 
             if (pipeline.HasValue)
             {
-                return new ShaderInfo(_fragmentOutputMap, resourceLayout, pipeline.Value, fromCache);
+                return new ShaderInfo(
+                    _fragmentOutputMap,
+                    resourceLayout,
+                    pipeline.Value,
+                    fromCache,
+                    enableAsyncCompile,
+                    allowAsyncCompileSkip);
             }
             else
             {
-                return new ShaderInfo(_fragmentOutputMap, resourceLayout, fromCache);
+                return new ShaderInfo(
+                    _fragmentOutputMap,
+                    resourceLayout,
+                    fromCache,
+                    enableAsyncCompile,
+                    allowAsyncCompileSkip);
             }
         }
 

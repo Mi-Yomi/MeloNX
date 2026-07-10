@@ -17,7 +17,12 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Commands
         {
             ThreadedProgram program = command._program.GetAs<ThreadedProgram>(threaded);
 
-            threaded.Programs.WaitForProgram(program);
+            threaded.Programs.EnsureProgramCreated(program);
+
+            if (!program.Base.CanBindWhileIncomplete)
+            {
+                threaded.Programs.WaitForProgram(program);
+            }
 
             renderer.Pipeline.SetProgram(program.Base);
         }

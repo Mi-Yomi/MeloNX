@@ -1,7 +1,6 @@
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.Device;
 using System;
-using System.Collections.Generic;
 
 namespace Ryujinx.Graphics.Gpu.Engine.MME
 {
@@ -13,7 +12,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         /// <summary>
         /// Arguments FIFO.
         /// </summary>
-        public Queue<FifoWord> Fifo { get; }
+        public MacroFifo Fifo { get; }
 
         private readonly int[] _gprs;
 
@@ -34,7 +33,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         /// </summary>
         public MacroInterpreter()
         {
-            Fifo = new Queue<FifoWord>();
+            Fifo = new MacroFifo();
 
             _gprs = new int[8];
         }

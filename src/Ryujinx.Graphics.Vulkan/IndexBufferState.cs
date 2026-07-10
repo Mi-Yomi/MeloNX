@@ -155,6 +155,11 @@ namespace Ryujinx.Graphics.Vulkan
             return _buffer == buffer;
         }
 
+        public readonly bool Matches(BufferHandle handle, int offset, int size, IndexType type)
+        {
+            return _handle == handle && _offset == offset && _size == size && _type == type;
+        }
+
         public void Swap(Auto<DisposableBuffer> from, Auto<DisposableBuffer> to)
         {
             if (_buffer == from)

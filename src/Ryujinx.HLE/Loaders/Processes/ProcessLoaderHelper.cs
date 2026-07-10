@@ -478,7 +478,7 @@ namespace Ryujinx.HLE.Loaders.Processes
             process.CpuMemory.Write(roStart, image.Ro);
             process.CpuMemory.Write(dataStart, image.Data);
 
-            process.CpuMemory.Fill(bssStart, image.BssSize, 0);
+            // process.CpuMemory.Fill(bssStart, image.BssSize, 0);
 
             Result SetProcessMemoryPermission(ulong address, ulong size, KMemoryPermission permission)
             {

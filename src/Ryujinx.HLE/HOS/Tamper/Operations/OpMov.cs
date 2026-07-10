@@ -1,6 +1,6 @@
 namespace Ryujinx.HLE.HOS.Tamper.Operations
 {
-    class OpMov<T> : IOperation where T : unmanaged
+    class OpMov<T> : IOperation where T : unmanaged, System.Numerics.IBinaryInteger<T>
     {
         readonly IOperand _destination;
         readonly IOperand _source;

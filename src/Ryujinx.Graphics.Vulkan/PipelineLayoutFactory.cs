@@ -1,5 +1,7 @@
+using Ryujinx.Common.Memory;
 using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
+using System;
 using System.Collections.ObjectModel;
 
 namespace Ryujinx.Graphics.Vulkan
@@ -17,7 +19,7 @@ namespace Ryujinx.Graphics.Vulkan
             DescriptorSetLayout[] layouts = new DescriptorSetLayout[setDescriptors.Count];
             bool[] updateAfterBindFlags = new bool[setDescriptors.Count];
 
-            bool isMoltenVk = gd.IsMoltenVk;
+            bool isMoltenVk = gd.IsMoltenVk && !OperatingSystem.IsIOSVersionAtLeast(17); 
 
             for (int setIndex = 0; setIndex < setDescriptors.Count; setIndex++)
             {

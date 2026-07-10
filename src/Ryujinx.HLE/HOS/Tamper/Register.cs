@@ -13,16 +13,16 @@ namespace Ryujinx.HLE.HOS.Tamper
             _alias = alias;
         }
 
-        public T Get<T>() where T : unmanaged
+        public T Get<T>() where T : unmanaged, System.Numerics.IBinaryInteger<T>
         {
-            return (T)(dynamic)_register;
+            return T.CreateTruncating(_register);
         }
 
-        public void Set<T>(T value) where T : unmanaged
+        public void Set<T>(T value) where T : unmanaged, System.Numerics.IBinaryInteger<T>
         {
             Logger.Debug?.Print(LogClass.TamperMachine, $"{_alias}: {value}");
 
-            _register = (ulong)(dynamic)value;
+            _register = ulong.CreateTruncating(value);
         }
     }
 }

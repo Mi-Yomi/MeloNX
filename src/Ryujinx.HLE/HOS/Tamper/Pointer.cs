@@ -15,12 +15,12 @@ namespace Ryujinx.HLE.HOS.Tamper
             _process = process;
         }
 
-        public T Get<T>() where T : unmanaged
+        public T Get<T>() where T : unmanaged, System.Numerics.IBinaryInteger<T>
         {
             return _process.ReadMemory<T>(_position.Get<ulong>());
         }
 
-        public void Set<T>(T value) where T : unmanaged
+        public void Set<T>(T value) where T : unmanaged, System.Numerics.IBinaryInteger<T>
         {
             ulong position = _position.Get<ulong>();
 

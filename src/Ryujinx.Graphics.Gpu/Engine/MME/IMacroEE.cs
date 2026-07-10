@@ -1,6 +1,5 @@
 using Ryujinx.Graphics.Device;
 using System;
-using System.Collections.Generic;
 
 namespace Ryujinx.Graphics.Gpu.Engine.MME
 {
@@ -39,7 +38,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         /// <summary>
         /// Arguments FIFO.
         /// </summary>
-        Queue<FifoWord> Fifo { get; }
+        MacroFifo Fifo { get; }
 
         /// <summary>
         /// Should execute the GPU Macro code being passed.

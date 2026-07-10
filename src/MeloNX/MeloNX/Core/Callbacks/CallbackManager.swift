@@ -18,13 +18,13 @@ class CallbackManager {
     }
     
     static func register(name: String, handler: @escaping (CallbackData) -> Void) {
-        let box      = CallbackBox(handler)
+        let box = CallbackBox(handler)
         let userData = Unmanaged.passRetained(box).toOpaque()
         registrations[name] = userData
         
         let fn: DataCallbackFn = { rawPtr, userData in
             guard let userData else { return }
-            let box  = Unmanaged<CallbackBox>.fromOpaque(userData).takeUnretainedValue()
+            let box = Unmanaged<CallbackBox>.fromOpaque(userData).takeUnretainedValue()
             let data = rawPtr.map { $0.load(as: CallbackData.self) } ?? CallbackData(ptr: nil, len: 0)
             box.body(data)
         }

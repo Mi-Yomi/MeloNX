@@ -56,6 +56,7 @@ namespace Ryujinx.Graphics.Vulkan
         public CommandBufferScoped CurrentCommandBuffer => Cbs;
 
         private ShaderCollection _program;
+        private bool _programStagesReady;
 
         protected FramebufferParams FramebufferParams;
         private Auto<DisposableFramebuffer> _framebuffer;
@@ -299,26 +300,24 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void DispatchCompute(int groupsX, int groupsY, int groupsZ)
         {
-            if (!_program.IsLinked)
+            EndRenderPass();
+
+            if (!RecreateComputePipelineIfNeeded(allowAsyncSkip: true))
             {
                 return;
             }
-
-            EndRenderPass();
-            RecreateComputePipelineIfNeeded();
 
             Gd.Api.CmdDispatch(CommandBuffer, (uint)groupsX, (uint)groupsY, (uint)groupsZ);
         }
 
         public void DispatchComputeIndirect(Auto<DisposableBuffer> indirectBuffer, int indirectBufferOffset)
         {
-            if (!_program.IsLinked)
+            EndRenderPass();
+
+            if (!RecreateComputePipelineIfNeeded(allowAsyncSkip: true))
             {
                 return;
             }
-
-            EndRenderPass();
-            RecreateComputePipelineIfNeeded();
 
             Gd.Api.CmdDispatchIndirect(CommandBuffer, indirectBuffer.Get(Cbs, indirectBufferOffset, 12).Value, (ulong)indirectBufferOffset);
         }
@@ -437,10 +436,6 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void DrawIndexedIndirect(BufferRange indirectBuffer)
         {
-            Buffer buffer = Gd.BufferManager
-                .GetBuffer(CommandBuffer, indirectBuffer.Handle, indirectBuffer.Offset, indirectBuffer.Size, false)
-                .Get(Cbs, indirectBuffer.Offset, indirectBuffer.Size).Value;
-
             UpdateIndexBufferPattern();
 
             if (!RecreateGraphicsPipelineIfNeeded())
@@ -448,13 +443,13 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
-            BeginRenderPass();
-            DrawCount++;
-
             if (_indexBufferPattern != null)
             {
                 // Convert the index buffer into a supported topology.
                 IndexBufferPattern pattern = _indexBufferPattern;
+
+                BeginRenderPass();
+                DrawCount++;
 
                 Auto<DisposableBuffer> indirectBufferAuto = _indexBuffer.BindConvertedIndexBufferIndirect(
                     Gd,
@@ -475,6 +470,12 @@ namespace Ryujinx.Graphics.Vulkan
             }
             else
             {
+                Buffer buffer = Gd.BufferManager
+                    .GetBuffer(CommandBuffer, indirectBuffer.Handle, indirectBuffer.Offset, indirectBuffer.Size, false)
+                    .Get(Cbs, indirectBuffer.Offset, indirectBuffer.Size).Value;
+
+                BeginRenderPass();
+                DrawCount++;
                 ResumeTransformFeedbackInternal();
 
                 Gd.Api.CmdDrawIndexedIndirect(CommandBuffer, buffer, (ulong)indirectBuffer.Offset, 1, (uint)indirectBuffer.Size);
@@ -483,14 +484,6 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void DrawIndexedIndirectCount(BufferRange indirectBuffer, BufferRange parameterBuffer, int maxDrawCount, int stride)
         {
-            Buffer countBuffer = Gd.BufferManager
-                .GetBuffer(CommandBuffer, parameterBuffer.Handle, parameterBuffer.Offset, parameterBuffer.Size, false)
-                .Get(Cbs, parameterBuffer.Offset, parameterBuffer.Size).Value;
-
-            Buffer buffer = Gd.BufferManager
-                .GetBuffer(CommandBuffer, indirectBuffer.Handle, indirectBuffer.Offset, indirectBuffer.Size, false)
-                .Get(Cbs, indirectBuffer.Offset, indirectBuffer.Size).Value;
-
             UpdateIndexBufferPattern();
 
             if (!RecreateGraphicsPipelineIfNeeded())
@@ -498,13 +491,21 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
-            BeginRenderPass();
-            DrawCount++;
-
             if (_indexBufferPattern != null)
             {
                 // Convert the index buffer into a supported topology.
                 IndexBufferPattern pattern = _indexBufferPattern;
+                Buffer countBuffer = default;
+
+                if (Gd.Capabilities.SupportsIndirectParameters)
+                {
+                    countBuffer = Gd.BufferManager
+                        .GetBuffer(CommandBuffer, parameterBuffer.Handle, parameterBuffer.Offset, parameterBuffer.Size, false)
+                        .Get(Cbs, parameterBuffer.Offset, parameterBuffer.Size).Value;
+                }
+
+                BeginRenderPass();
+                DrawCount++;
 
                 Auto<DisposableBuffer> indirectBufferAuto = _indexBuffer.BindConvertedIndexBufferIndirect(
                     Gd,
@@ -547,10 +548,20 @@ namespace Ryujinx.Graphics.Vulkan
             }
             else
             {
-                ResumeTransformFeedbackInternal();
-
                 if (Gd.Capabilities.SupportsIndirectParameters)
                 {
+                    Buffer buffer = Gd.BufferManager
+                        .GetBuffer(CommandBuffer, indirectBuffer.Handle, indirectBuffer.Offset, indirectBuffer.Size, false)
+                        .Get(Cbs, indirectBuffer.Offset, indirectBuffer.Size).Value;
+
+                    Buffer countBuffer = Gd.BufferManager
+                        .GetBuffer(CommandBuffer, parameterBuffer.Handle, parameterBuffer.Offset, parameterBuffer.Size, false)
+                        .Get(Cbs, parameterBuffer.Offset, parameterBuffer.Size).Value;
+
+                    BeginRenderPass();
+                    DrawCount++;
+                    ResumeTransformFeedbackInternal();
+
                     Gd.DrawIndirectCountApi.CmdDrawIndexedIndirectCount(
                         CommandBuffer,
                         buffer,
@@ -562,6 +573,14 @@ namespace Ryujinx.Graphics.Vulkan
                 }
                 else
                 {
+                    Buffer buffer = Gd.BufferManager
+                        .GetBuffer(CommandBuffer, indirectBuffer.Handle, indirectBuffer.Offset, indirectBuffer.Size, false)
+                        .Get(Cbs, indirectBuffer.Offset, indirectBuffer.Size).Value;
+
+                    BeginRenderPass();
+                    DrawCount++;
+                    ResumeTransformFeedbackInternal();
+
                     // Not fully correct, but we can't do much better if the host does not support indirect count.
                     Gd.Api.CmdDrawIndexedIndirect(
                         CommandBuffer,
@@ -577,14 +596,14 @@ namespace Ryujinx.Graphics.Vulkan
         {
             // TODO: Support quads and other unsupported topologies.
 
-            Buffer buffer = Gd.BufferManager
-                .GetBuffer(CommandBuffer, indirectBuffer.Handle, indirectBuffer.Offset, indirectBuffer.Size, false)
-                .Get(Cbs, indirectBuffer.Offset, indirectBuffer.Size, false).Value;
-
             if (!RecreateGraphicsPipelineIfNeeded())
             {
                 return;
             }
+
+            Buffer buffer = Gd.BufferManager
+                .GetBuffer(CommandBuffer, indirectBuffer.Handle, indirectBuffer.Offset, indirectBuffer.Size, false)
+                .Get(Cbs, indirectBuffer.Offset, indirectBuffer.Size, false).Value;
 
             BeginRenderPass();
             ResumeTransformFeedbackInternal();
@@ -601,6 +620,13 @@ namespace Ryujinx.Graphics.Vulkan
                 throw new NotSupportedException();
             }
 
+            // TODO: Support quads and other unsupported topologies.
+
+            if (!RecreateGraphicsPipelineIfNeeded())
+            {
+                return;
+            }
+
             Buffer buffer = Gd.BufferManager
                 .GetBuffer(CommandBuffer, indirectBuffer.Handle, indirectBuffer.Offset, indirectBuffer.Size, false)
                 .Get(Cbs, indirectBuffer.Offset, indirectBuffer.Size, false).Value;
@@ -608,13 +634,6 @@ namespace Ryujinx.Graphics.Vulkan
             Buffer countBuffer = Gd.BufferManager
                 .GetBuffer(CommandBuffer, parameterBuffer.Handle, parameterBuffer.Offset, parameterBuffer.Size, false)
                 .Get(Cbs, parameterBuffer.Offset, parameterBuffer.Size, false).Value;
-
-            // TODO: Support quads and other unsupported topologies.
-
-            if (!RecreateGraphicsPipelineIfNeeded())
-            {
-                return;
-            }
 
             BeginRenderPass();
             ResumeTransformFeedbackInternal();
@@ -933,7 +952,6 @@ namespace Ryujinx.Graphics.Vulkan
         public void SetProgram(IProgram program)
         {
             ShaderCollection internalProgram = (ShaderCollection)program;
-            PipelineShaderStageCreateInfo[] stages = internalProgram.GetInfos();
 
             _program = internalProgram;
 
@@ -942,9 +960,22 @@ namespace Ryujinx.Graphics.Vulkan
 
             _newState.PipelineLayout = internalProgram.PipelineLayout;
             _newState.HasTessellationControlShader = internalProgram.HasTessellationControlShader;
-            _newState.StagesCount = (uint)stages.Length;
 
-            stages.CopyTo(_newState.Stages.AsSpan()[..stages.Length]);
+            if (internalProgram.CompilesInBackground)
+            {
+                _programStagesReady = false;
+                _newState.StagesCount = 0;
+
+                UpdateProgramStagesIfReady(blocking: false);
+            }
+            else
+            {
+                PipelineShaderStageCreateInfo[] stages = internalProgram.GetInfos();
+
+                _programStagesReady = true;
+                _newState.StagesCount = (uint)stages.Length;
+                stages.CopyTo(_newState.Stages.AsSpan()[..stages.Length]);
+            }
 
             SignalStateChange();
 
@@ -1514,11 +1545,15 @@ namespace Ryujinx.Graphics.Vulkan
             _computeStateDirty = true;
         }
 
-        private void RecreateComputePipelineIfNeeded()
+        private bool RecreateComputePipelineIfNeeded(bool allowAsyncSkip = false)
         {
             if (_computeStateDirty || Pbp != PipelineBindPoint.Compute)
             {
-                CreatePipeline(PipelineBindPoint.Compute);
+                if (!CreatePipeline(PipelineBindPoint.Compute, allowAsyncSkip))
+                {
+                    return false;
+                }
+
                 _computeStateDirty = false;
                 Pbp = PipelineBindPoint.Compute;
 
@@ -1534,6 +1569,8 @@ namespace Ryujinx.Graphics.Vulkan
             Gd.Barriers.Flush(Cbs, _program, _feedbackLoop != 0, RenderPassActive, _rpHolder, EndRenderPassDelegate);
 
             _descriptorSetUpdater.UpdateAndBindDescriptorSets(Cbs, PipelineBindPoint.Compute);
+
+            return true;
         }
 
         private bool ChangeFeedbackLoop(FeedbackLoopAspects aspects)
@@ -1613,6 +1650,11 @@ namespace Ryujinx.Graphics.Vulkan
 
         private bool RecreateGraphicsPipelineIfNeeded()
         {
+            if (CanSkipForBackgroundCompile(allowAsyncSkip: true) && !UpdateProgramStagesIfReady(blocking: false))
+            {
+                return false;
+            }
+
             if (AutoFlush.ShouldFlushDraw(DrawCount))
             {
                 Gd.FlushAllCommands();
@@ -1662,7 +1704,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (UpdateFeedbackLoop() || _graphicsStateDirty || Pbp != PipelineBindPoint.Graphics)
             {
-                if (!CreatePipeline(PipelineBindPoint.Graphics))
+                if (!CreatePipeline(PipelineBindPoint.Graphics, allowAsyncSkip: true))
                 {
                     return false;
                 }
@@ -1678,10 +1720,14 @@ namespace Ryujinx.Graphics.Vulkan
             return true;
         }
 
-        private bool CreatePipeline(PipelineBindPoint pbp)
+        private bool CreatePipeline(PipelineBindPoint pbp, bool allowAsyncSkip = false)
         {
-            // We can only create a pipeline if the have the shader stages set.
-            if (_newState.Stages != null)
+            if (_program == null)
+            {
+                return false;
+            }
+
+            if (!_program.CompilesInBackground)
             {
                 if (pbp == PipelineBindPoint.Graphics && _renderPass == null)
                 {
@@ -1690,15 +1736,89 @@ namespace Ryujinx.Graphics.Vulkan
 
                 if (!_program.IsLinked)
                 {
+                    return false;
+                }
+
+                Auto<DisposablePipeline> legacyPipeline = pbp == PipelineBindPoint.Compute
+                    ? _newState.CreateComputePipeline(Gd, Device, _program, PipelineCache)
+                    : _newState.CreateGraphicsPipeline(Gd, Device, _program, PipelineCache, _renderPass.Get(Cbs).Value);
+
+                if (legacyPipeline == null)
+                {
+                    return false;
+                }
+
+                ulong legacyPipelineHandle = legacyPipeline.GetUnsafe().Value.Handle;
+
+                if (_currentPipelineHandle != legacyPipelineHandle)
+                {
+                    _currentPipelineHandle = legacyPipelineHandle;
+                    Pipeline = legacyPipeline;
+
+                    PauseTransformFeedbackInternal();
+                    Gd.Api.CmdBindPipeline(CommandBuffer, pbp, Pipeline.Get(Cbs).Value);
+                }
+
+                return true;
+            }
+
+            bool canSkipForBackgroundCompile = CanSkipForBackgroundCompile(allowAsyncSkip);
+
+            if (!UpdateProgramStagesIfReady(blocking: !canSkipForBackgroundCompile))
+            {
+                return false;
+            }
+
+            if (pbp == PipelineBindPoint.Graphics && _renderPass == null)
+            {
+                CreateRenderPass();
+            }
+
+            // We can only create a pipeline if we have the shader stages set.
+            if (_newState.Stages != null)
+            {
+                if (_program.LinkStatus == ProgramLinkStatus.Failure)
+                {
                     // Background compile failed, we likely can't create the pipeline because the shader is broken
                     // or the driver failed to compile it.
 
                     return false;
                 }
 
-                Auto<DisposablePipeline> pipeline = pbp == PipelineBindPoint.Compute
-                    ? _newState.CreateComputePipeline(Gd, Device, _program, PipelineCache)
-                    : _newState.CreateGraphicsPipeline(Gd, Device, _program, PipelineCache, _renderPass.Get(Cbs).Value);
+                Auto<DisposablePipeline> pipeline;
+
+                if (pbp == PipelineBindPoint.Compute)
+                {
+                    ref SpecData key = ref _newState.SpecializationData;
+
+                    if (!_program.TryGetComputePipeline(ref key, out pipeline))
+                    {
+                        if (canSkipForBackgroundCompile &&
+                            _program.QueueBackgroundComputePipeline(ref _newState, PipelineCache))
+                        {
+                            return false;
+                        }
+
+                        pipeline = _newState.CreateComputePipeline(Gd, Device, _program, PipelineCache);
+                    }
+                }
+                else
+                {
+                    ref PipelineUid key = ref _newState.Internal;
+
+                    if (!_program.TryGetGraphicsPipeline(ref key, out pipeline))
+                    {
+                        Auto<DisposableRenderPass> renderPass = _renderPass;
+
+                        if (canSkipForBackgroundCompile &&
+                            _program.QueueBackgroundGraphicsPipeline(ref _newState, PipelineCache, renderPass))
+                        {
+                            return false;
+                        }
+
+                        pipeline = _newState.CreateGraphicsPipeline(Gd, Device, _program, PipelineCache, renderPass.Get(Cbs).Value);
+                    }
+                }
 
                 if (pipeline == null)
                 {
@@ -1718,6 +1838,33 @@ namespace Ryujinx.Graphics.Vulkan
                     Gd.Api.CmdBindPipeline(CommandBuffer, pbp, Pipeline.Get(Cbs).Value);
                 }
             }
+
+            return true;
+        }
+
+        private bool CanSkipForBackgroundCompile(bool allowAsyncSkip)
+        {
+            return allowAsyncSkip &&
+                _program != null &&
+                _program.CompilesInBackground &&
+                _program.AllowAsyncCompileSkip;
+        }
+
+        private bool UpdateProgramStagesIfReady(bool blocking)
+        {
+            if (_programStagesReady)
+            {
+                return true;
+            }
+
+            if (!_program.TryGetInfos(out PipelineShaderStageCreateInfo[] stages, blocking))
+            {
+                return false;
+            }
+
+            _newState.StagesCount = (uint)stages.Length;
+            stages.CopyTo(_newState.Stages.AsSpan()[..stages.Length]);
+            _programStagesReady = true;
 
             return true;
         }

@@ -46,15 +46,7 @@ namespace Ryujinx.HLE.HOS.Tamper
 
         public static Object Create(Type instruction, byte width, params Object[] operands)
         {
-            Type realType = width switch
-            {
-                1 => instruction.MakeGenericType(typeof(byte)),
-                2 => instruction.MakeGenericType(typeof(ushort)),
-                4 => instruction.MakeGenericType(typeof(uint)),
-                8 => instruction.MakeGenericType(typeof(ulong)),
-                _ => throw new TamperCompilationException($"Invalid instruction width {width} in Atmosphere cheat"),
-            };
-            return Activator.CreateInstance(realType, operands);
+            return TamperOperationFactory.Create(instruction, width, operands);
         }
 
         public static ulong GetImmediate(byte[] instruction, int index, int nybbleCount)

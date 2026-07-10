@@ -9,5 +9,6 @@ namespace Ryujinx.Common.Configuration
         Nearest,
         Fsr,
         Area,
+        MetalFx
     }
 }

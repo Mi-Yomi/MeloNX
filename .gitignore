@@ -185,3 +185,5 @@ PublishProfiles/
 # Ignore distribution build files
 distribution/macos/temp/
 distribution/macos/output/
+
+src/MeloNX/MeloNX.xcodeproj/project.xcworkspace/xcuserdata/*

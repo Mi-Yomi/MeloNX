@@ -37,6 +37,7 @@ namespace Ryujinx.Graphics.Vulkan
         internal HardwareCapabilities Capabilities;
 
         internal Vk Api { get; private set; }
+        internal Instance VkInstance => _instance.Instance;
         internal KhrSurface SurfaceApi { get; private set; }
         internal KhrSwapchain SwapchainApi { get; private set; }
         internal ExtConditionalRendering ConditionalRenderingApi { get; private set; }
@@ -51,11 +52,13 @@ namespace Ryujinx.Graphics.Vulkan
         internal Queue BackgroundQueue { get; private set; }
         internal Lock BackgroundQueueLock { get; private set; }
         internal Lock QueueLock { get; private set; }
+        internal Lock PipelineCreationLock { get; private set; }
 
         internal MemoryAllocator MemoryAllocator { get; private set; }
         internal HostMemoryAllocator HostMemoryAllocator { get; private set; }
         internal CommandBufferPool CommandBufferPool { get; private set; }
         internal PipelineLayoutCache PipelineLayoutCache { get; private set; }
+        internal BackgroundCompilationScheduler BackgroundCompilationScheduler { get; private set; }
         internal BackgroundResources BackgroundResources { get; private set; }
         internal Action<Action> InterruptAction { get; private set; }
         internal SyncManager SyncManager { get; private set; }
@@ -79,6 +82,7 @@ namespace Ryujinx.Graphics.Vulkan
         public IPipeline Pipeline => _pipeline;
 
         public IWindow Window => _window;
+
 
         private readonly Func<Instance, Vk, SurfaceKHR> _getSurface;
         private readonly Func<string[]> _getRequiredExtensions;
@@ -438,7 +442,7 @@ namespace Ryujinx.Graphics.Vulkan
                 _physicalDevice.IsDeviceExtensionPresent(ExtConditionalRendering.ExtensionName),
                 OperatingSystem.IsIOS() ? OperatingSystem.IsIOSVersionAtLeast(17) && supportsExtendedDynamicState : supportsExtendedDynamicState,
                 features2.Features.MultiViewport && !(IsMoltenVk && Vendor == Vendor.Amd), // Workaround for AMD on MoltenVK issue
-                featuresRobustness2.NullDescriptor || IsMoltenVk,
+                featuresRobustness2.NullDescriptor,
                 supportsPushDescriptors,
                 IsMoltenVk ? 8 : propertiesPushDescriptor.MaxPushDescriptors,
                 featuresPrimitiveTopologyListRestart.PrimitiveTopologyListRestart,
@@ -512,6 +516,8 @@ namespace Ryujinx.Graphics.Vulkan
             Api.GetDeviceQueue(_device, queueFamilyIndex, 0, out Queue queue);
             Queue = queue;
             QueueLock = new();
+            PipelineCreationLock = new();
+            BackgroundCompilationScheduler = new();
 
             LoadFeatures(maxQueueCount, queueFamilyIndex);
 
@@ -566,18 +572,43 @@ namespace Ryujinx.Graphics.Vulkan
             ProgramCount++;
 
             bool isCompute = sources.Length == 1 && sources[0].Stage == ShaderStage.Compute;
+            bool compileInBackground = info.EnableAsyncCompile;
+            bool highPriorityBackgroundCompilation = info.AllowAsyncCompileSkip && !info.FromCache;
 
             if (info.State.HasValue || isCompute)
             {
-                return new ShaderCollection(this, _device, sources, info.ResourceLayout, info.State ?? default, info.FromCache);
+                return new ShaderCollection(
+                    this,
+                    _device,
+                    sources,
+                    info.ResourceLayout,
+                    info.State ?? default,
+                    info.FromCache,
+                    compileInBackground,
+                    info.AllowAsyncCompileSkip,
+                    highPriorityBackgroundCompilation);
             }
 
-            return new ShaderCollection(this, _device, sources, info.ResourceLayout);
+            return new ShaderCollection(
+                this,
+                _device,
+                sources,
+                info.ResourceLayout,
+                compileInBackground: compileInBackground,
+                allowAsyncCompileSkip: info.AllowAsyncCompileSkip,
+                highPriorityBackgroundCompilation: highPriorityBackgroundCompilation);
         }
 
         internal ShaderCollection CreateProgramWithMinimalLayout(ShaderSource[] sources, ResourceLayout resourceLayout, SpecDescription[] specDescription = null)
         {
-            return new ShaderCollection(this, _device, sources, resourceLayout, specDescription, isMinimal: true);
+            return new ShaderCollection(
+                this,
+                _device,
+                sources,
+                resourceLayout,
+                specDescription,
+                isMinimal: true,
+                compileInBackground: false);
         }
 
         public ISampler CreateSampler(SamplerCreateInfo info)
@@ -663,6 +694,18 @@ namespace Ryujinx.Graphics.Vulkan
                 Format.Bc6HUfloat,
                 Format.Bc7Srgb,
                 Format.Bc7Unorm);
+
+            // These are supported on M1 / A17+
+            // Anything below that doesn't support them.
+            // However moltenVK still tracks that the actual formats exist,
+            // so the app crashes with pixelFormat (140) is not a valid MTLPixelFormat.
+            if (!OperatingSystem.IsIOSVersionAtLeast(16, 4))
+            {
+                supportsBc123CompressionFormat = false;
+                supportsBc45CompressionFormat = false;
+                supportsBc67CompressionFormat = false;
+            }
+
 
             bool supportsEtc2CompressionFormat = FormatCapabilities.OptimalFormatsSupport(compressedFormatFeatureFlags,
                 Format.Etc2RgbaSrgb,
@@ -779,7 +822,7 @@ namespace Ryujinx.Graphics.Vulkan
                 supportsShaderBallot: false,
                 supportsShaderBarrierDivergence: Vendor != Vendor.Intel,
                 supportsShaderFloat64: Capabilities.SupportsShaderFloat64,
-                supportsTextureGatherOffsets: features2.Features.ShaderImageGatherExtended && !IsMoltenVk,
+                supportsTextureGatherOffsets: features2.Features.ShaderImageGatherExtended,
                 supportsTextureShadowLod: false,
                 supportsVertexStoreAndAtomics: features2.Features.VertexPipelineStoresAndAtomics,
                 supportsViewportIndexVertexTessellation: featuresVk12.ShaderOutputViewportIndex,
@@ -1031,6 +1074,14 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
+            ShaderCollection[] shaders = new ShaderCollection[Shaders.Count];
+            Shaders.CopyTo(shaders);
+
+            foreach (ShaderCollection shader in shaders)
+            {
+                shader.WaitForBackgroundCompilation();
+            }
+
             CommandBufferPool.Dispose();
             BackgroundResources.Dispose();
             _counters.Dispose();
@@ -1043,10 +1094,12 @@ namespace Ryujinx.Graphics.Vulkan
 
             MemoryAllocator.Dispose();
 
-            foreach (ShaderCollection shader in Shaders)
+            foreach (ShaderCollection shader in shaders)
             {
                 shader.Dispose();
             }
+
+            BackgroundCompilationScheduler.Dispose();
 
             foreach (ITexture texture in Textures)
             {

@@ -16,7 +16,10 @@ namespace Ryujinx.HLE.HOS.Services.Account.Acc.AccountService
     class ManagerServer
     {
         // TODO: Determine where and how NetworkServiceAccountId is set.
-        private const long NetworkServiceAccountId = 0xcafe;
+        private const long DefaultNetworkServiceAccountId = 0xcafe;
+
+        private long NetworkServiceAccountId => _userId == default ? DefaultNetworkServiceAccountId : DefaultNetworkServiceAccountId + _userId.High;
+
 
 #pragma warning disable IDE0052 // Remove unread private member
         private readonly UserId _userId;

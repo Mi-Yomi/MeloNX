@@ -269,6 +269,9 @@ namespace Ryujinx.Library
         [Option("backend-threading", Required = false, Default = BackendThreading.On, HelpText = "Whether or not backend threading is enabled. The \"Auto\" setting will determine whether threading should be enabled at runtime.")]
         public BackendThreading BackendThreading { get; set; }
 
+        [Option("enable-async-shader-compilation", Required = false, Default = true, HelpText = "Compiles shader pipelines asynchronously when supported.")]
+        public bool EnableAsyncShaderCompilation { get; set; }
+
         [Option("disable-macro-hle", Required = false, HelpText = "Disables high-level emulation of Macro code. Leaving this enabled improves performance but may cause graphical glitches in some games.")]
         public bool DisableMacroHLE { get; set; }
 
@@ -304,21 +307,52 @@ namespace Ryujinx.Library
         public string InputPath { get; set; }
     }
 
-      public unsafe struct OptionsNative
+    public unsafe struct ControllerOptions
+    {
+        public Common.Configuration.Hid.ControllerType ControllerType1;
+        public Common.Configuration.Hid.ControllerType ControllerType2;
+        public Common.Configuration.Hid.ControllerType ControllerType3;
+        public Common.Configuration.Hid.ControllerType ControllerType4;
+        public Common.Configuration.Hid.ControllerType ControllerType5;
+        public Common.Configuration.Hid.ControllerType ControllerType6;
+        public Common.Configuration.Hid.ControllerType ControllerType7;
+        public Common.Configuration.Hid.ControllerType ControllerType8;
+
+        public byte*  InputId1;
+        public byte*  InputId2;
+        public byte*  InputId3;
+        public byte*  InputId4;
+        public byte*  InputId5;
+        public byte*  InputId6;
+        public byte*  InputId7;
+        public byte*  InputId8;
+        public byte*  InputIdHandheld;
+
+        public static string FromUtf8(byte* ptr)
+        {
+            if (ptr == null) return null;
+            int len = 0;
+            while (ptr[len] != 0) len++;
+            return System.Text.Encoding.UTF8.GetString(ptr, len);
+        }
+    }
+
+
+    public unsafe struct OptionsNative
     {
         public byte*  BaseDataDir;
         public byte*  UserProfile;
         public int    DisplayId;
-        public byte   IsFullscreen;
-        public byte   IsExclusiveFullscreen;
+        public bool   IsFullscreen;
+        public bool   IsExclusiveFullscreen;
         public int    ExclusiveFullscreenWidth;
         public int    ExclusiveFullscreenHeight;
 
         public byte*  DeviceModel;
-        public byte   MemoryEnt;
+        public bool   MemoryEnt;
         public byte*  DisplayName;
 
-        public byte   OnScreenCorrespond;
+        public bool   OnScreenCorrespond;
 
         public byte*  InputProfile1Name;
         public byte*  InputProfile2Name;
@@ -359,185 +393,182 @@ namespace Ryujinx.Library
         public byte*  InputDSUServer8;
         public byte*  InputDSUServerHandheld;
 
-        public byte   EnableKeyboard;
-        public byte   EnableMouse;
+        public bool   EnableKeyboard;
+        public bool   EnableMouse;
         public HideCursorMode HideCursorMode;
-        public byte   ListInputProfiles;
-        public byte   ListInputIds;
+        public bool   ListInputProfiles;
+        public bool   ListInputIds;
 
-        public byte   DisablePTC;
-        public byte   EnableInternetAccess;
-        public byte   DisableFsIntegrityChecks;
+        public bool   DisablePTC;
+        public bool   EnableInternetAccess;
+        public bool   DisableFsIntegrityChecks;
         public int    FsGlobalAccessLogMode;
-        public byte   DisableVSync;
-        public byte   DisableShaderCache;
-        public byte   EnableTextureRecompression;
-        public byte   DisableDockedMode;
-        public SystemLanguage SystemLanguage;
-        public RegionCode     SystemRegion;
-        public byte*          SystemTimeZone;
-        public long           SystemTimeOffset;
+        public bool   DisableVSync;
+        public bool   DisableShaderCache;
+        public bool   EnableTextureRecompression;
+        public bool   DisableDockedMode;
+        public SystemLanguage    SystemLanguage;
+        public RegionCode        SystemRegion;
+        public byte*             SystemTimeZone;
+        public long              SystemTimeOffset;
         public MemoryManagerMode MemoryManagerMode;
         public float  AudioVolume;
-        public byte   UseHypervisor;
-        public byte   LdnMitm;
+        public bool   UseHypervisor;
+        public bool   LdnMitm;
         public byte*  MultiplayerLanInterfaceId;
 
-        public byte   DisableFileLog;
-        public byte   LoggingEnableDebug;
-        public byte   LoggingDisableStub;
-        public byte   LoggingDisableInfo;
-        public byte   LoggingDisableWarning;
-        public byte   LoggingEnableError;
-        public byte   LoggingEnableTrace;
-        public byte   LoggingDisableGuest;
-        public byte   LoggingEnableFsAccessLog;
+        public bool   DisableFileLog;
+        public bool   LoggingEnableDebug;
+        public bool   LoggingDisableStub;
+        public bool   LoggingDisableInfo;
+        public bool   LoggingDisableWarning;
+        public bool   LoggingEnableError;
+        public bool   LoggingEnableTrace;
+        public bool   LoggingDisableGuest;
+        public bool   LoggingEnableFsAccessLog;
         public GraphicsDebugLevel LoggingGraphicsDebugLevel;
 
         public float  ResScale;
         public float  MaxAnisotropy;
-        public AspectRatio       AspectRatio;
-        public BackendThreading  BackendThreading;
-        public byte   DisableMacroHLE;
+        public AspectRatio      AspectRatio;
+        public BackendThreading BackendThreading;
+        public bool   EnableAsyncShaderCompilation;
+        public bool   DisableMacroHLE;
         public byte*  GraphicsShadersDumpPath;
-        public GraphicsBackend   GraphicsBackend;
+        public GraphicsBackend  GraphicsBackend;
         public byte*  PreferredGPUVendor;
         public AntiAliasing  AntiAliasing;
         public ScalingFilter ScalingFilter;
         public int    ScalingFilterLevel;
 
-        public byte   ExpandRAM;
-        public byte   IgnoreMissingServices;
+        public bool   ExpandRAM;
+        public bool   IgnoreMissingServices;
 
         public byte*  InputPath;
     }
 
     public static unsafe class OptionsNativeHelper
     {
-        private static byte* AllocUtf8(string s)
+
+        private static string FromUtf8(byte* ptr)
         {
-            if (s == null) return null;
-            int byteCount = System.Text.Encoding.UTF8.GetByteCount(s) + 1;
-            byte* ptr = (byte*)System.Runtime.InteropServices.NativeMemory.Alloc((nuint)byteCount);
-            fixed (char* chars = s)
-            {
-                System.Text.Encoding.UTF8.GetBytes(chars, s.Length, ptr, byteCount);
-            }
-            ptr[byteCount - 1] = 0;
-            return ptr;
+            if (ptr == null) return null;
+            int len = 0;
+            while (ptr[len] != 0) len++;
+            return System.Text.Encoding.UTF8.GetString(ptr, len);
         }
 
-        private static byte B(bool b) => b ? (byte)1 : (byte)0;
-
-        public static OptionsNative* ToNative(Options opts)
+        public static Options FromNative(OptionsNative* n)
         {
-            OptionsNative* n = (OptionsNative*)System.Runtime.InteropServices.NativeMemory.AllocZeroed((nuint)sizeof(OptionsNative));
+            if (n == null) return null;
 
-            n->BaseDataDir              = AllocUtf8(opts.BaseDataDir);
-            n->UserProfile              = AllocUtf8(opts.UserProfile);
-            n->DisplayId                = opts.DisplayId;
-            n->IsFullscreen             = B(opts.IsFullscreen);
-            n->IsExclusiveFullscreen    = B(opts.IsExclusiveFullscreen);
-            n->ExclusiveFullscreenWidth = opts.ExclusiveFullscreenWidth;
-            n->ExclusiveFullscreenHeight= opts.ExclusiveFullscreenHeight;
+            return new Options
+            {
+                BaseDataDir               = FromUtf8(n->BaseDataDir),
+                UserProfile               = FromUtf8(n->UserProfile),
+                DisplayId                 = n->DisplayId,
+                IsFullscreen              = n->IsFullscreen,
+                IsExclusiveFullscreen     = n->IsExclusiveFullscreen,
+                ExclusiveFullscreenWidth  = n->ExclusiveFullscreenWidth,
+                ExclusiveFullscreenHeight = n->ExclusiveFullscreenHeight,
 
-            n->DeviceModel  = AllocUtf8(opts.DeviceModel);
-            n->MemoryEnt    = B(opts.MemoryEnt);
-            n->DisplayName  = AllocUtf8(opts.DisplayName);
+                DeviceModel  = FromUtf8(n->DeviceModel),
+                MemoryEnt    = n->MemoryEnt,
+                DisplayName  = FromUtf8(n->DisplayName),
 
-            n->OnScreenCorrespond       = B(opts.OnScreenCorrespond);
-            n->InputProfile1Name        = AllocUtf8(opts.InputProfile1Name);
-            n->InputProfile2Name        = AllocUtf8(opts.InputProfile2Name);
-            n->InputProfile3Name        = AllocUtf8(opts.InputProfile3Name);
-            n->InputProfile4Name        = AllocUtf8(opts.InputProfile4Name);
-            n->InputProfile5Name        = AllocUtf8(opts.InputProfile5Name);
-            n->InputProfile6Name        = AllocUtf8(opts.InputProfile6Name);
-            n->InputProfile7Name        = AllocUtf8(opts.InputProfile7Name);
-            n->InputProfile8Name        = AllocUtf8(opts.InputProfile8Name);
-            n->InputProfileHandheldName = AllocUtf8(opts.InputProfileHandheldName);
+                OnScreenCorrespond       = n->OnScreenCorrespond,
+                InputProfile1Name        = FromUtf8(n->InputProfile1Name),
+                InputProfile2Name        = FromUtf8(n->InputProfile2Name),
+                InputProfile3Name        = FromUtf8(n->InputProfile3Name),
+                InputProfile4Name        = FromUtf8(n->InputProfile4Name),
+                InputProfile5Name        = FromUtf8(n->InputProfile5Name),
+                InputProfile6Name        = FromUtf8(n->InputProfile6Name),
+                InputProfile7Name        = FromUtf8(n->InputProfile7Name),
+                InputProfile8Name        = FromUtf8(n->InputProfile8Name),
+                InputProfileHandheldName = FromUtf8(n->InputProfileHandheldName),
 
-            n->ControllerType1 = opts.controllerType1;
-            n->ControllerType2 = opts.controllerType2;
-            n->ControllerType3 = opts.controllerType3;
-            n->ControllerType4 = opts.controllerType4;
-            n->ControllerType5 = opts.controllerType5;
-            n->ControllerType6 = opts.controllerType6;
-            n->ControllerType7 = opts.controllerType7;
-            n->ControllerType8 = opts.controllerType8;
+                controllerType1 = n->ControllerType1,
+                controllerType2 = n->ControllerType2,
+                controllerType3 = n->ControllerType3,
+                controllerType4 = n->ControllerType4,
+                controllerType5 = n->ControllerType5,
+                controllerType6 = n->ControllerType6,
+                controllerType7 = n->ControllerType7,
+                controllerType8 = n->ControllerType8,
 
-            n->InputId1        = AllocUtf8(opts.InputId1);
-            n->InputId2        = AllocUtf8(opts.InputId2);
-            n->InputId3        = AllocUtf8(opts.InputId3);
-            n->InputId4        = AllocUtf8(opts.InputId4);
-            n->InputId5        = AllocUtf8(opts.InputId5);
-            n->InputId6        = AllocUtf8(opts.InputId6);
-            n->InputId7        = AllocUtf8(opts.InputId7);
-            n->InputId8        = AllocUtf8(opts.InputId8);
-            n->InputIdHandheld = AllocUtf8(opts.InputIdHandheld);
+                InputId1        = FromUtf8(n->InputId1),
+                InputId2        = FromUtf8(n->InputId2),
+                InputId3        = FromUtf8(n->InputId3),
+                InputId4        = FromUtf8(n->InputId4),
+                InputId5        = FromUtf8(n->InputId5),
+                InputId6        = FromUtf8(n->InputId6),
+                InputId7        = FromUtf8(n->InputId7),
+                InputId8        = FromUtf8(n->InputId8),
+                InputIdHandheld = FromUtf8(n->InputIdHandheld),
 
-            n->InputDSUServer1        = AllocUtf8(opts.InputDSUServer1);
-            n->InputDSUServer2        = AllocUtf8(opts.InputDSUServer2);
-            n->InputDSUServer3        = AllocUtf8(opts.InputDSUServer3);
-            n->InputDSUServer4        = AllocUtf8(opts.InputDSUServer4);
-            n->InputDSUServer5        = AllocUtf8(opts.InputDSUServer5);
-            n->InputDSUServer6        = AllocUtf8(opts.InputDSUServer6);
-            n->InputDSUServer7        = AllocUtf8(opts.InputDSUServer7);
-            n->InputDSUServer8        = AllocUtf8(opts.InputDSUServer8);
-            n->InputDSUServerHandheld = AllocUtf8(opts.InputDSUServerHandheld);
+                InputDSUServer1        = FromUtf8(n->InputDSUServer1),
+                InputDSUServer2        = FromUtf8(n->InputDSUServer2),
+                InputDSUServer3        = FromUtf8(n->InputDSUServer3),
+                InputDSUServer4        = FromUtf8(n->InputDSUServer4),
+                InputDSUServer5        = FromUtf8(n->InputDSUServer5),
+                InputDSUServer6        = FromUtf8(n->InputDSUServer6),
+                InputDSUServer7        = FromUtf8(n->InputDSUServer7),
+                InputDSUServer8        = FromUtf8(n->InputDSUServer8),
+                InputDSUServerHandheld = FromUtf8(n->InputDSUServerHandheld),
 
-            n->EnableKeyboard    = B(opts.EnableKeyboard);
-            n->EnableMouse       = B(opts.EnableMouse);
-            n->HideCursorMode    = opts.HideCursorMode;
-            n->ListInputProfiles = B(opts.ListInputProfiles);
-            n->ListInputIds      = B(opts.ListInputIds);
+                EnableKeyboard    = n->EnableKeyboard,
+                EnableMouse       = n->EnableMouse,
+                HideCursorMode    = n->HideCursorMode,
+                ListInputProfiles = n->ListInputProfiles,
+                ListInputIds      = n->ListInputIds,
 
-            n->DisablePTC               = B(opts.DisablePTC);
-            n->EnableInternetAccess     = B(opts.EnableInternetAccess);
-            n->DisableFsIntegrityChecks = B(opts.DisableFsIntegrityChecks);
-            n->FsGlobalAccessLogMode    = opts.FsGlobalAccessLogMode;
-            n->DisableVSync             = B(opts.DisableVSync);
-            n->DisableShaderCache       = B(opts.DisableShaderCache);
-            n->EnableTextureRecompression = B(opts.EnableTextureRecompression);
-            n->DisableDockedMode        = B(opts.DisableDockedMode);
-            n->SystemLanguage           = opts.SystemLanguage;
-            n->SystemRegion             = opts.SystemRegion;
-            n->SystemTimeZone           = AllocUtf8(opts.SystemTimeZone);
-            n->SystemTimeOffset         = opts.SystemTimeOffset;
-            n->MemoryManagerMode        = opts.MemoryManagerMode;
-            n->AudioVolume              = opts.AudioVolume;
-            n->UseHypervisor            = B(opts.UseHypervisor);
-            n->LdnMitm                  = B(opts.ldnMitm);
-            n->MultiplayerLanInterfaceId = AllocUtf8(opts.MultiplayerLanInterfaceId);
+                DisablePTC                 = n->DisablePTC,
+                EnableInternetAccess       = n->EnableInternetAccess,
+                DisableFsIntegrityChecks   = n->DisableFsIntegrityChecks,
+                FsGlobalAccessLogMode      = n->FsGlobalAccessLogMode,
+                DisableVSync               = n->DisableVSync,
+                DisableShaderCache         = n->DisableShaderCache,
+                EnableTextureRecompression = n->EnableTextureRecompression,
+                DisableDockedMode          = n->DisableDockedMode,
+                SystemLanguage             = n->SystemLanguage,
+                SystemRegion               = n->SystemRegion,
+                SystemTimeZone             = FromUtf8(n->SystemTimeZone),
+                SystemTimeOffset           = n->SystemTimeOffset,
+                MemoryManagerMode          = n->MemoryManagerMode,
+                AudioVolume                = n->AudioVolume,
+                UseHypervisor              = n->UseHypervisor,
+                ldnMitm                    = n->LdnMitm,
+                MultiplayerLanInterfaceId  = FromUtf8(n->MultiplayerLanInterfaceId),
 
-            n->DisableFileLog            = B(opts.DisableFileLog);
-            n->LoggingEnableDebug        = B(opts.LoggingEnableDebug);
-            n->LoggingDisableStub        = B(opts.LoggingDisableStub);
-            n->LoggingDisableInfo        = B(opts.LoggingDisableInfo);
-            n->LoggingDisableWarning     = B(opts.LoggingDisableWarning);
-            n->LoggingEnableError        = B(opts.LoggingEnableError);
-            n->LoggingEnableTrace        = B(opts.LoggingEnableTrace);
-            n->LoggingDisableGuest       = B(opts.LoggingDisableGuest);
-            n->LoggingEnableFsAccessLog  = B(opts.LoggingEnableFsAccessLog);
-            n->LoggingGraphicsDebugLevel = opts.LoggingGraphicsDebugLevel;
+                DisableFileLog            = n->DisableFileLog,
+                LoggingEnableDebug        = n->LoggingEnableDebug,
+                LoggingDisableStub        = n->LoggingDisableStub,
+                LoggingDisableInfo        = n->LoggingDisableInfo,
+                LoggingDisableWarning     = n->LoggingDisableWarning,
+                LoggingEnableError        = n->LoggingEnableError,
+                LoggingEnableTrace        = n->LoggingEnableTrace,
+                LoggingDisableGuest       = n->LoggingDisableGuest,
+                LoggingEnableFsAccessLog  = n->LoggingEnableFsAccessLog,
+                LoggingGraphicsDebugLevel = n->LoggingGraphicsDebugLevel,
 
-            n->ResScale               = opts.ResScale;
-            n->MaxAnisotropy          = opts.MaxAnisotropy;
-            n->AspectRatio            = opts.AspectRatio;
-            n->BackendThreading       = opts.BackendThreading;
-            n->DisableMacroHLE        = B(opts.DisableMacroHLE);
-            n->GraphicsShadersDumpPath= AllocUtf8(opts.GraphicsShadersDumpPath);
-            n->GraphicsBackend        = opts.GraphicsBackend;
-            n->PreferredGPUVendor     = AllocUtf8(opts.PreferredGPUVendor);
-            n->AntiAliasing           = opts.AntiAliasing;
-            n->ScalingFilter          = opts.ScalingFilter;
-            n->ScalingFilterLevel     = opts.ScalingFilterLevel;
+                ResScale                = n->ResScale,
+                MaxAnisotropy           = n->MaxAnisotropy,
+                AspectRatio             = n->AspectRatio,
+                BackendThreading        = n->BackendThreading,
+                EnableAsyncShaderCompilation = n->EnableAsyncShaderCompilation,
+                DisableMacroHLE         = n->DisableMacroHLE,
+                GraphicsShadersDumpPath = FromUtf8(n->GraphicsShadersDumpPath),
+                GraphicsBackend         = n->GraphicsBackend,
+                PreferredGPUVendor      = FromUtf8(n->PreferredGPUVendor),
+                AntiAliasing            = n->AntiAliasing,
+                ScalingFilter           = n->ScalingFilter,
+                ScalingFilterLevel      = n->ScalingFilterLevel,
 
-            n->ExpandRAM             = B(opts.ExpandRAM);
-            n->IgnoreMissingServices = B(opts.IgnoreMissingServices);
+                ExpandRAM             = n->ExpandRAM,
+                IgnoreMissingServices = n->IgnoreMissingServices,
 
-            n->InputPath = AllocUtf8(opts.InputPath);
-
-            return n;
+                InputPath = FromUtf8(n->InputPath),
+            };
         }
 
         public static void Free(OptionsNative* n)

@@ -8,7 +8,6 @@ using Ryujinx.Graphics.Gpu.Engine.Types;
 using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Memory.Range;
 using System;
-using System.Collections.Generic;
 
 namespace Ryujinx.Graphics.Gpu.Engine.MME
 {
@@ -38,7 +37,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
         /// <summary>
         /// Arguments FIFO.
         /// </summary>
-        public Queue<FifoWord> Fifo { get; }
+        public MacroFifo Fifo { get; }
 
         /// <summary>
         /// Creates a new instance of the HLE macro handler.
@@ -50,7 +49,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.MME
             _processor = processor;
             _functionName = functionName;
 
-            Fifo = new Queue<FifoWord>();
+            Fifo = new MacroFifo();
         }
 
         /// <summary>

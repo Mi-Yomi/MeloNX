@@ -7,9 +7,21 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		4E5FB8FA2F9612F7005969EC /* Melo-Controller in Frameworks */ = {isa = PBXBuildFile; productRef = 4E5FB8F92F9612F7005969EC /* Melo-Controller */; };
+		4EA6523B2FBD941E00D6FB52 /* NavigationStackBackport in Frameworks */ = {isa = PBXBuildFile; productRef = 4EA6523A2FBD941E00D6FB52 /* NavigationStackBackport */; };
 		4EC482D22F8D101B008C1955 /* Ryujinx.Library.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 4EC482D12F8D101B008C1955 /* Ryujinx.Library.dylib */; };
 		4EC482D32F8D101B008C1955 /* Ryujinx.Library.dylib in Embed Libraries */ = {isa = PBXBuildFile; fileRef = 4EC482D12F8D101B008C1955 /* Ryujinx.Library.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		4EA2CB232FD924E000BE964F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4ED5D5032F80DD02007DB057 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4EF06B692FA36B2400E56036;
+			remoteInfo = Ryujinx;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		4EC480C52F8CCA91008C1955 /* Embed Libraries */ = {
@@ -93,7 +105,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4E5FB8FA2F9612F7005969EC /* Melo-Controller in Frameworks */,
 				4EC482D22F8D101B008C1955 /* Ryujinx.Library.dylib in Frameworks */,
+				4EA6523B2FBD941E00D6FB52 /* NavigationStackBackport in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,6 +141,25 @@
 		};
 /* End PBXGroup section */
 
+/* Begin PBXLegacyTarget section */
+		4EF06B692FA36B2400E56036 /* Ryujinx */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = ./distribution/ios/build.sh;
+			buildConfigurationList = 4EF06B6C2FA36B2500E56036 /* Build configuration list for PBXLegacyTarget "Ryujinx" */;
+			buildPhases = (
+			);
+			buildToolPath = /bin/bash;
+			buildWorkingDirectory = "$(SRCROOT)/../../";
+			dependencies = (
+			);
+			name = Ryujinx;
+			packageProductDependencies = (
+			);
+			passBuildSettingsInEnvironment = 0;
+			productName = Ryujinx;
+		};
+/* End PBXLegacyTarget section */
+
 /* Begin PBXNativeTarget section */
 		4ED5D50A2F80DD02007DB057 /* MeloNX */ = {
 			isa = PBXNativeTarget;
@@ -140,12 +173,15 @@
 			buildRules = (
 			);
 			dependencies = (
+				4EA2CB242FD924E000BE964F /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				4ED5D50D2F80DD02007DB057 /* MeloNX */,
 			);
 			name = MeloNX;
 			packageProductDependencies = (
+				4E5FB8F92F9612F7005969EC /* Melo-Controller */,
+				4EA6523A2FBD941E00D6FB52 /* NavigationStackBackport */,
 			);
 			productName = MeloNX;
 			productReference = 4ED5D50B2F80DD02007DB057 /* MeloNX.app */;
@@ -165,6 +201,9 @@
 						CreatedOnToolsVersion = 26.2;
 						LastSwiftMigration = 2620;
 					};
+					4EF06B692FA36B2400E56036 = {
+						CreatedOnToolsVersion = 26.2;
+					};
 				};
 			};
 			buildConfigurationList = 4ED5D5062F80DD02007DB057 /* Build configuration list for PBXProject "MeloNX" */;
@@ -177,6 +216,8 @@
 			mainGroup = 4ED5D5022F80DD02007DB057;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				4E5FB8F82F9612F6005969EC /* XCRemoteSwiftPackageReference "Melo-Controller" */,
+				4EA652392FBD941E00D6FB52 /* XCRemoteSwiftPackageReference "navigation-stack-backport" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4ED5D50C2F80DD02007DB057 /* Products */;
@@ -184,6 +225,7 @@
 			projectRoot = "";
 			targets = (
 				4ED5D50A2F80DD02007DB057 /* MeloNX */,
+				4EF06B692FA36B2400E56036 /* Ryujinx */,
 			);
 		};
 /* End PBXProject section */
@@ -207,6 +249,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4EA2CB242FD924E000BE964F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4EF06B692FA36B2400E56036 /* Ryujinx */;
+			targetProxy = 4EA2CB232FD924E000BE964F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		4ED5D5142F80DD03007DB057 /* Debug */ = {
@@ -269,6 +319,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
@@ -326,6 +377,7 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -335,6 +387,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = MeloNX/MeloNX.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -348,12 +401,14 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MeloNX/Info.plist;
+				INFOPLIST_KEY_GCSupportsControllerUserInteraction = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "MeloNX needs local network access for LAN / Local Multiplaer";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -365,7 +420,7 @@
 					"$(PROJECT_DIR)/MeloNX/Frameworks",
 					"$(PROJECT_DIR)/MeloNX/Dependencies",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.wow.MeloNX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -385,6 +440,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = MeloNX/MeloNX.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -398,12 +454,14 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MeloNX/Info.plist;
+				INFOPLIST_KEY_GCSupportsControllerUserInteraction = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "MeloNX needs local network access for LAN / Local Multiplaer";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
-				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_UISupportsDocumentBrowser = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -415,7 +473,7 @@
 					"$(PROJECT_DIR)/MeloNX/Frameworks",
 					"$(PROJECT_DIR)/MeloNX/Dependencies",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 2.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.wow.MeloNX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -426,6 +484,33 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		4EF06B6A2FA36B2500E56036 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEBUGGING_SYMBOLS = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = 4D52P7Z7YN;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				OTHER_CFLAGS = "";
+				OTHER_LDFLAGS = "";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+			};
+			name = Debug;
+		};
+		4EF06B6B2FA36B2500E56036 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = 4D52P7Z7YN;
+				OTHER_CFLAGS = "";
+				OTHER_LDFLAGS = "";
+				PRODUCT_NAME = "$(TARGET_NAME)";
 			};
 			name = Release;
 		};
@@ -450,7 +535,48 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		4EF06B6C2FA36B2500E56036 /* Build configuration list for PBXLegacyTarget "Ryujinx" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4EF06B6A2FA36B2500E56036 /* Debug */,
+				4EF06B6B2FA36B2500E56036 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		4E5FB8F82F9612F6005969EC /* XCRemoteSwiftPackageReference "Melo-Controller" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stossy11/Melo-Controller";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		4EA652392FBD941E00D6FB52 /* XCRemoteSwiftPackageReference "navigation-stack-backport" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/lm/navigation-stack-backport";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4E5FB8F92F9612F7005969EC /* Melo-Controller */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4E5FB8F82F9612F6005969EC /* XCRemoteSwiftPackageReference "Melo-Controller" */;
+			productName = "Melo-Controller";
+		};
+		4EA6523A2FBD941E00D6FB52 /* NavigationStackBackport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4EA652392FBD941E00D6FB52 /* XCRemoteSwiftPackageReference "navigation-stack-backport" */;
+			productName = NavigationStackBackport;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 4ED5D5032F80DD02007DB057 /* Project object */;
 }

@@ -13,26 +13,28 @@ namespace Ryujinx.HLE.Generators
     {
         public void Initialize(IncrementalGeneratorInitializationContext context)
         {
-            IncrementalValuesProvider<INamedTypeSymbol> operations =
+            IncrementalValuesProvider<INamedTypeSymbol> tamperTypes =
                 context.SyntaxProvider.CreateSyntaxProvider(
-                    predicate: (node, _) =>
+                    predicate: static (node, _) =>
                     {
-                        if (node is ClassDeclarationSyntax classDecl && classDecl.BaseList != null)
-                        {
-                            return classDecl.BaseList.Types.Any(t => t.Type.ToString().Equals("IOperation"));
-                        }
-                        return false;
+                        return node is ClassDeclarationSyntax classDecl && classDecl.BaseList != null;
                     },
-                    transform: (ctx, _) => (INamedTypeSymbol)ctx.SemanticModel.GetDeclaredSymbol((ClassDeclarationSyntax)ctx.Node)
+                    transform: static (ctx, _) =>
+                    {
+                        INamedTypeSymbol symbol = (INamedTypeSymbol)ctx.SemanticModel.GetDeclaredSymbol((ClassDeclarationSyntax)ctx.Node);
+
+                        return symbol != null && IsTamperFactoryTarget(symbol) ? symbol : null;
+                    }
                 ).Where(symbol => symbol != null);
 
-            context.RegisterSourceOutput(operations.Collect(),
-                (ctx, operationsData) =>
+            context.RegisterSourceOutput(tamperTypes.Collect(),
+                (ctx, tamperTypesData) =>
                 {
                     var sourceBuilder = new StringBuilder();
 
                     sourceBuilder.AppendLine("#nullable enable");
                     sourceBuilder.AppendLine("using System;");
+                    sourceBuilder.AppendLine("using Ryujinx.HLE.Exceptions;");
                     sourceBuilder.AppendLine("using Ryujinx.HLE.HOS.Tamper.Operations;");
                     sourceBuilder.AppendLine("using Ryujinx.HLE.HOS.Tamper.Conditions;");
                     sourceBuilder.AppendLine();
@@ -43,26 +45,26 @@ namespace Ryujinx.HLE.Generators
 
                     HashSet<string> generatedMethods = new HashSet<string>();
 
-                    foreach (var operation in operationsData)
+                    foreach (var tamperType in tamperTypesData)
                     {
-                        string methodName = operation.Name;
+                        string methodName = tamperType.Name;
 
                         if (generatedMethods.Contains(methodName))
                             continue;
 
-                        if (operation.IsGenericType)
+                        if (tamperType.IsGenericType)
                         {
-                            GenerateGenericFactoryMethod(sourceBuilder, operation);
+                            GenerateGenericFactoryMethod(sourceBuilder, tamperType);
                         }
                         else
                         {
-                            GenerateNonGenericFactoryMethod(sourceBuilder, operation);
+                            GenerateNonGenericFactoryMethod(sourceBuilder, tamperType);
                         }
 
                         generatedMethods.Add(methodName);
                     }
 
-                    GenerateMainFactoryMethod(sourceBuilder, operationsData);
+                    GenerateMainFactoryMethod(sourceBuilder, tamperTypesData);
 
                     sourceBuilder.AppendLine("    }");
                     sourceBuilder.AppendLine("}");
@@ -71,19 +73,41 @@ namespace Ryujinx.HLE.Generators
                 });
         }
 
+        private static bool IsTamperFactoryTarget(INamedTypeSymbol symbol)
+        {
+            foreach (INamedTypeSymbol implementedInterface in symbol.AllInterfaces)
+            {
+                string containingNamespace = implementedInterface.ContainingNamespace.ToDisplayString();
+
+                if (implementedInterface.Name == "IOperation" && containingNamespace == "Ryujinx.HLE.HOS.Tamper.Operations")
+                {
+                    return true;
+                }
+
+                if (implementedInterface.Name == "ICondition" && containingNamespace == "Ryujinx.HLE.HOS.Tamper.Conditions")
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private void GenerateGenericFactoryMethod(StringBuilder sb, INamedTypeSymbol operationType)
         {
             string className = operationType.Name;
             
             var constructor = operationType.Constructors
-                .FirstOrDefault(c => !c.IsStatic && c.DeclaredAccessibility == Accessibility.Public);
+                .Where(c => !c.IsStatic && c.DeclaredAccessibility == Accessibility.Public)
+                .OrderBy(c => c.Parameters.Length > 0 && c.Parameters[c.Parameters.Length - 1].IsParams)
+                .FirstOrDefault();
 
             if (constructor == null)
                 return;
 
             var parameters = constructor.Parameters;
             
-            sb.AppendLine($"        public static object Create{className}<T>(byte width, params object[] operands)");
+            sb.AppendLine($"        public static object Create{className}(byte width, params object[] operands)");
             sb.AppendLine("        {");
             
             var paramCasts = new List<string>();
@@ -101,7 +125,7 @@ namespace Ryujinx.HLE.Generators
             sb.AppendLine($"                2 => new {className}<ushort>({paramList}),");
             sb.AppendLine($"                4 => new {className}<uint>({paramList}),");
             sb.AppendLine($"                8 => new {className}<ulong>({paramList}),");
-            sb.AppendLine("                _ => throw new ArgumentException($\"Invalid width: {width}\")");
+            sb.AppendLine("                _ => throw new TamperCompilationException($\"Invalid instruction width {width} in Atmosphere cheat\")");
             sb.AppendLine("            };");
             sb.AppendLine("        }");
             sb.AppendLine();
@@ -112,7 +136,9 @@ namespace Ryujinx.HLE.Generators
             string className = operationType.Name;
             
             var constructor = operationType.Constructors
-                .FirstOrDefault(c => !c.IsStatic && c.DeclaredAccessibility == Accessibility.Public);
+                .Where(c => !c.IsStatic && c.DeclaredAccessibility == Accessibility.Public)
+                .OrderBy(c => c.Parameters.Length > 0 && c.Parameters[c.Parameters.Length - 1].IsParams)
+                .FirstOrDefault();
 
             if (constructor == null)
                 return;
@@ -183,23 +209,23 @@ namespace Ryujinx.HLE.Generators
             }
         }
 
-        private void GenerateMainFactoryMethod(StringBuilder sb, IEnumerable<INamedTypeSymbol> operationsData)
+        private void GenerateMainFactoryMethod(StringBuilder sb, IEnumerable<INamedTypeSymbol> tamperTypesData)
         {
             sb.AppendLine("        public static object Create(Type instruction, byte width, params object[] operands)");
             sb.AppendLine("        {");
 
             bool first = true;
-            foreach (var operation in operationsData)
+            foreach (var tamperType in tamperTypesData)
             {
-                string className = operation.Name;
+                string className = tamperType.Name;
                 string conditional = first ? "if" : "else if";
                 first = false;
 
-                if (operation.IsGenericType)
+                if (tamperType.IsGenericType)
                 {
                     sb.AppendLine($"            {conditional} (instruction.IsGenericType && instruction.GetGenericTypeDefinition() == typeof({className}<>))");
                     sb.AppendLine("            {");
-                    sb.AppendLine($"                return Create{className}<object>(width, operands);");
+                    sb.AppendLine($"                return Create{className}(width, operands);");
                     sb.AppendLine("            }");
                 }
                 else
@@ -213,7 +239,7 @@ namespace Ryujinx.HLE.Generators
 
             sb.AppendLine("            else");
             sb.AppendLine("            {");
-            sb.AppendLine("                throw new ArgumentException($\"Unsupported instruction type: {instruction.Name}\");");
+            sb.AppendLine("                throw new TamperCompilationException($\"Unsupported instruction type: {instruction.Name}\");");
             sb.AppendLine("            }");
             sb.AppendLine("        }");
         }

@@ -14,6 +14,25 @@ using System.Threading;
 
 namespace Ryujinx.Cpu.LightningJit
 {
+    public class DualMappedMemory {
+        private static bool initialized = false;
+
+        public static bool InitMemoryCache()
+        {
+            if (initialized)
+                return true;
+
+            try 
+            {
+                DualMappedNoWxCache.InitMemoryCache();
+                NativeSignalHandler.InitializeSignalHandler();
+
+                initialized = true;
+                return true;
+            } catch { return initialized; } 
+        }
+    }
+
     class Translator : IDisposable
     {
         // Should be enabled on platforms that enforce W^X.
@@ -40,8 +59,8 @@ namespace Ryujinx.Cpu.LightningJit
                 if (MemoryBlock.DualMappedEnabled())
                 { 
 #pragma warning disable CA1416 // iOS checking is handled in MemoryBlock.DualMappedEnabled() 
-                    _dualMappedNoWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
                     DualMappedNoWxCache.InitMemoryCache();
+                    _dualMappedNoWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
 #pragma warning disable CA1416
                 }
                 else 
@@ -88,23 +107,38 @@ namespace Ryujinx.Cpu.LightningJit
 
             NativeInterface.UnregisterThread();
             _noWxCache?.ClearEntireThreadLocalCache();
+#pragma warning disable CA1416
+            _dualMappedNoWxCache?.ClearEntireThreadLocalCache();
+#pragma warning restore CA1416
         }
 
         internal nint GetOrTranslatePointer(nint framePointer, ulong address, ExecutionMode mode)
         {
             if (_noWxCache != null)
             {
+                if (_noWxCache.TryGetCachedFunction(address, out nint funcPtr))
+                {
+                    return funcPtr;
+                }
+
                 CompiledFunction func = Compile(address, mode);
 
                 return _noWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
             } 
             else if (_dualMappedNoWxCache != null) 
             {
+#pragma warning disable CA1416
+                if (_dualMappedNoWxCache.TryGetCachedFunction(address, out nint funcPtr))
+                {
+                    return funcPtr;
+                }
+#pragma warning restore CA1416
+
                 CompiledFunction func = Compile(address, mode);
 
 #pragma warning disable CA1416
                 return _dualMappedNoWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
-#pragma warning disable CA1416
+#pragma warning restore CA1416
             }
 
             return GetOrTranslate(address, mode).FuncPointer;

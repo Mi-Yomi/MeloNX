@@ -539,19 +539,34 @@ namespace Ryujinx.Graphics.Gpu.Image
         {
             int depthOrLayers = descriptor.UnpackDepth();
             int levels = descriptor.UnpackLevels();
+            int stride = descriptor.UnpackStride();
 
-            TextureMsaaMode msaaMode = descriptor.UnpackTextureMsaaMode();
+            TextureDescriptorType descriptorType =
+                descriptor.UnpackTextureDescriptorType();
+
+            bool isLinear = descriptorType == TextureDescriptorType.Linear;
+
+            TextureTarget textureTarget = descriptor.UnpackTextureTarget();
+
+            // Only 2D textures and 2D texture arrays may be multisampled.
+            // Linear textures must remain single-sampled for Metal compatibility.
+            bool canBeMultisample =
+                !isLinear &&
+                (textureTarget == TextureTarget.Texture2D ||
+                textureTarget == TextureTarget.Texture2DArray);
+
+            TextureMsaaMode msaaMode = canBeMultisample
+                ? descriptor.UnpackTextureMsaaMode()
+                : TextureMsaaMode.Ms1x1;
 
             int samplesInX = msaaMode.SamplesInX();
             int samplesInY = msaaMode.SamplesInY();
 
-            int stride = descriptor.UnpackStride();
+            bool isMultisample =
+                canBeMultisample &&
+                (samplesInX != 1 || samplesInY != 1);
 
-            TextureDescriptorType descriptorType = descriptor.UnpackTextureDescriptorType();
-
-            bool isLinear = descriptorType == TextureDescriptorType.Linear;
-
-            Target target = descriptor.UnpackTextureTarget().Convert((samplesInX | samplesInY) != 1);
+            Target target = textureTarget.Convert(isMultisample);
 
             int width = target == Target.TextureBuffer ? descriptor.UnpackBufferTextureWidth() : descriptor.UnpackWidth();
             int height = descriptor.UnpackHeight();

@@ -13,6 +13,7 @@ namespace Ryujinx.Graphics.OpenGL
         private const int MaxShaderLogLength = 2048;
 
         public int Handle { get; private set; }
+        public bool CanBindWhileIncomplete => false;
 
         public bool IsLinked
         {

@@ -2,7 +2,7 @@ using Ryujinx.Common.Logging;
 
 namespace Ryujinx.HLE.HOS.Tamper.Operations
 {
-    class OpLog<T> : IOperation where T : unmanaged
+    class OpLog<T> : IOperation where T : unmanaged, System.Numerics.IBinaryInteger<T>
     {
         readonly int _logId;
         readonly IOperand _source;
@@ -15,7 +15,7 @@ namespace Ryujinx.HLE.HOS.Tamper.Operations
 
         public void Execute()
         {
-            Logger.Debug?.Print(LogClass.TamperMachine, $"Tamper debug log id={_logId} value={(dynamic)_source.Get<T>():X}");
+            Logger.Debug?.Print(LogClass.TamperMachine, $"Tamper debug log id={_logId} value={_source.Get<T>():X}");
         }
     }
 }

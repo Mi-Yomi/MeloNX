@@ -173,7 +173,7 @@ namespace Ryujinx.Input.HLE
                 _enableKeyboard = enableKeyboard;
                 _enableMouse = enableMouse;
 
-                _device.Hid.RefreshInputConfig(validInputs);
+                _device?.Hid.RefreshInputConfig(validInputs);
             }
         }
 

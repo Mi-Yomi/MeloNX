@@ -45,6 +45,14 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void SetBlendConstants(float r, float g, float b, float a)
         {
+            if (_blendConstants[0] == r &&
+                _blendConstants[1] == g &&
+                _blendConstants[2] == b &&
+                _blendConstants[3] == a)
+            {
+                return;
+            }
+
             _blendConstants[0] = r;
             _blendConstants[1] = g;
             _blendConstants[2] = b;
@@ -55,6 +63,13 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void SetDepthBias(float slopeFactor, float constantFactor, float clamp)
         {
+            if (_depthBiasSlopeFactor == slopeFactor &&
+                _depthBiasConstantFactor == constantFactor &&
+                _depthBiasClamp == clamp)
+            {
+                return;
+            }
+
             _depthBiasSlopeFactor = slopeFactor;
             _depthBiasConstantFactor = constantFactor;
             _depthBiasClamp = clamp;
@@ -64,8 +79,24 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void SetScissor(int index, Rect2D scissor)
         {
+            if (ScissorEquals(_scissors[index], scissor))
+            {
+                return;
+            }
+
             _scissors[index] = scissor;
 
+            _dirty |= DirtyFlags.Scissor;
+        }
+
+        public void SetScissorsCount(int count)
+        {
+            if (ScissorsCount == count)
+            {
+                return;
+            }
+
+            ScissorsCount = count;
             _dirty |= DirtyFlags.Scissor;
         }
 
@@ -77,6 +108,16 @@ namespace Ryujinx.Graphics.Vulkan
             uint frontWriteMask,
             uint frontReference)
         {
+            if (_backCompareMask == backCompareMask &&
+                _backWriteMask == backWriteMask &&
+                _backReference == backReference &&
+                _frontCompareMask == frontCompareMask &&
+                _frontWriteMask == frontWriteMask &&
+                _frontReference == frontReference)
+            {
+                return;
+            }
+
             _backCompareMask = backCompareMask;
             _backWriteMask = backWriteMask;
             _backReference = backReference;
@@ -89,8 +130,24 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void SetViewport(int index, Viewport viewport)
         {
+            if (ViewportEquals(Viewports[index], viewport))
+            {
+                return;
+            }
+
             Viewports[index] = viewport;
 
+            _dirty |= DirtyFlags.Viewport;
+        }
+
+        public void SetViewportsCount(uint count)
+        {
+            if (ViewportsCount == count)
+            {
+                return;
+            }
+
+            ViewportsCount = count;
             _dirty |= DirtyFlags.Viewport;
         }
 
@@ -200,6 +257,24 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             api.CmdSetAttachmentFeedbackLoopEnable(commandBuffer, aspects);
+        }
+
+        private static bool ScissorEquals(Rect2D lhs, Rect2D rhs)
+        {
+            return lhs.Offset.X == rhs.Offset.X &&
+                lhs.Offset.Y == rhs.Offset.Y &&
+                lhs.Extent.Width == rhs.Extent.Width &&
+                lhs.Extent.Height == rhs.Extent.Height;
+        }
+
+        private static bool ViewportEquals(Viewport lhs, Viewport rhs)
+        {
+            return lhs.X == rhs.X &&
+                lhs.Y == rhs.Y &&
+                lhs.Width == rhs.Width &&
+                lhs.Height == rhs.Height &&
+                lhs.MinDepth == rhs.MinDepth &&
+                lhs.MaxDepth == rhs.MaxDepth;
         }
     }
 }

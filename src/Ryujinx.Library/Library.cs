@@ -62,8 +62,9 @@ using System.Text.RegularExpressions;
 using System.Runtime;
 using System.Linq;
 using System.Threading.Tasks;
-// using Ryujinx.Input.Native;
-
+using Ryujinx.Common.Callbacks;
+using Ryujinx.Input.Native;
+using Ryujinx.HLE.Utilities;
 
 namespace Ryujinx.Library 
 {
@@ -83,26 +84,16 @@ namespace Ryujinx.Library
         private static bool _enableMouse;
         private static nint nativeMetalLayer = nint.Zero;
         private static readonly Lock metalLayerLock = new();
-
-        void wow() {
-            // :3
-        }
+        private static KeyboardConfigNative? _keyboardConfig = null;
 
         [UnmanagedCallersOnly(EntryPoint = "main_ryujinx_sdl")]
-        public static unsafe int MainExternal(int argCount, IntPtr* pArgs)
+        public static unsafe int MainExternal(OptionsNative* nativeOptions)
         {
-            string[] args = new string[argCount];
-
             try
             {
-                for (int i = 0; i < argCount; i++)
-                {
-                    args[i] = Marshal.PtrToStringAnsi(pArgs[i]);
-
-                    Console.WriteLine(args[i]);
-                }
-
-                Main(args);
+                Options managed = OptionsNativeHelper.FromNative(nativeOptions);
+                OptionsNativeHelper.Free(nativeOptions);
+                Load(managed);
             }
             catch (Exception e)
             {
@@ -113,12 +104,6 @@ namespace Ryujinx.Library
             return 0;
         }
 
-        static void Main(string[] args)
-        {
-            Parser.Default.ParseArguments<Options>(args)
-            .WithParsed(Load)
-            .WithNotParsed(errors => errors.Output());
-        }
 
         [UnmanagedCallersOnly(EntryPoint = "initialize")]
         public static unsafe void Initialize()
@@ -154,42 +139,11 @@ namespace Ryujinx.Library
             // :3
             NativeLibrary.SetDllImportResolver(typeof(SDL3Type).Assembly, (_, assembly, path) => NativeLibrary.Load("@rpath/SDL3.framework/SDL3", assembly, path));
 
-            _inputManager = new InputManager(new SDL3KeyboardDriver(), new SDL3GamepadDriver());
+            _inputManager = new InputManager(new SDL3KeyboardDriver(), new NativeGamepadDriver());
             _inputConfiguration = new List<InputConfig>();
             _enableKeyboard = true;
             _enableMouse = false;
-
-            var config = new StandardKeyboardInputConfig
-            {
-                Version = InputConfig.CurrentVersion,
-                Backend = InputBackendType.WindowKeyboard,
-                Id = "0",
-                ControllerType = ControllerType.JoyconPair,
-                LeftJoycon = new LeftJoyconCommonConfig<Key>
-                {
-                    DpadUp = Key.Up, DpadDown = Key.Down, DpadLeft = Key.Left, DpadRight = Key.Right,
-                    ButtonMinus = Key.BracketLeft, ButtonL = Key.E, ButtonZl = Key.Q,
-                    ButtonSl = Key.Unbound, ButtonSr = Key.Unbound,
-                },
-                LeftJoyconStick = new JoyconConfigKeyboardStick<Key>
-                {
-                    StickUp = Key.W, StickDown = Key.S, StickLeft = Key.A, StickRight = Key.D, StickButton = Key.F,
-                },
-                RightJoycon = new RightJoyconCommonConfig<Key>
-                {
-                    ButtonA = Key.Z, ButtonB = Key.X, ButtonX = Key.C, ButtonY = Key.V,
-                    ButtonPlus = Key.BracketRight, ButtonR = Key.U, ButtonZr = Key.O,
-                    ButtonSl = Key.Unbound, ButtonSr = Key.Unbound,
-                },
-                RightJoyconStick = new JoyconConfigKeyboardStick<Key>
-                {
-                    StickUp = Key.I, StickDown = Key.K, StickLeft = Key.J, StickRight = Key.L, StickButton = Key.H,
-                },
-            };
-
-            config.PlayerIndex = PlayerIndex.Player1;
-            _inputConfiguration.Add(config);
-
+            
             AutoResetEvent invoked = new(false);
 
             SDL3Driver.MainThreadDispatcher = action =>
@@ -209,8 +163,18 @@ namespace Ryujinx.Library
 
         [UnmanagedCallersOnly(EntryPoint = "set_native_window")]
         public static unsafe void SetNativeWindow(nint layer) {
-            lock (metalLayerLock) {
+            lock (metalLayerLock) 
+            {
                 nativeMetalLayer = layer;
+            }
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "stop_emulation")]
+        public static void StopEmulation()
+        {
+            if (_window != null)
+            {
+                _window.Exit();
             }
         }
 
@@ -222,6 +186,567 @@ namespace Ryujinx.Library
             }
         }
 
+        [UnmanagedCallersOnly(EntryPoint = "toggle_pause_emulation")]
+        public static void TogglePauseEmulation(bool shouldPause)
+        {
+            if (_emulationContext != null && _emulationContext.System != null)
+            {
+                _emulationContext.System.TogglePauseEmulation(shouldPause);
+            }
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "load_keyset")]
+        public static void ReloadKeySet() 
+        {
+            _virtualFileSystem.ReloadKeySet();
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "installed_firmware_version")]
+        public static nint GetInstalledFirmwareVersionNative()
+        {
+            var result = GetInstalledFirmwareVersion();
+            return Marshal.StringToHGlobalAnsi(result);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "free_firmware_version")]
+        public static void FreeFirmwareVersion(nint versionPtr)
+        {
+            if (versionPtr != nint.Zero)
+            {
+                Marshal.FreeHGlobal(versionPtr);
+            }
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "install_firmware")]
+        public static unsafe nint? InstallFirmwareNative(nint pathPtr)
+        {
+            var firmwarePath = Marshal.PtrToStringAnsi(pathPtr);
+
+            try 
+            {
+                _contentManager.InstallFirmware(firmwarePath);
+            } 
+            catch (Exception exception)
+            {
+                return Marshal.StringToHGlobalAnsi(exception.ToString());
+            }
+
+            return null;
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "create_account")]
+        public static void CreateAccount(IntPtr namePtr, IntPtr imagePtr, int imageLength)
+        {
+            string name = Marshal.PtrToStringAnsi(namePtr);
+            byte[] image = null;
+
+            if (imagePtr != IntPtr.Zero && imageLength > 0)
+            {
+                image = new byte[imageLength];
+
+                Marshal.Copy(imagePtr, image, 0, imageLength);
+            }
+
+            _accountManager.AddUser(name, image);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "delete_account")]
+        public static void DeleteAccount(IntPtr userId)
+        {
+            string name = Marshal.PtrToStringAnsi(userId);
+
+            HLE.HOS.Services.Account.Acc.UserId userIdObj = new HLE.HOS.Services.Account.Acc.UserId(name);
+            _accountManager.DeleteUser(userIdObj);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "open_user")]
+        public static void OpenUser(IntPtr userId)
+        {
+            string name = Marshal.PtrToStringAnsi(userId);
+
+            HLE.HOS.Services.Account.Acc.UserId userIdObj = new HLE.HOS.Services.Account.Acc.UserId(name);
+            _accountManager.OpenUser(userIdObj);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "close_user")]
+        public static void CloseUser(IntPtr userId)
+        {
+            string name = Marshal.PtrToStringAnsi(userId);
+
+            HLE.HOS.Services.Account.Acc.UserId userIdObj = new HLE.HOS.Services.Account.Acc.UserId(name);
+            _accountManager.OpenUser(userIdObj);
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "free_avatars")]
+        public static unsafe void FreeAvatars(AvatarArray avatarArray)
+        {
+            if (avatarArray.Avatars != null)
+            {
+                for (int i = 0; i < avatarArray.Count; i++)
+                {
+                    if (avatarArray.Avatars[i].ImageData != null)
+                        Marshal.FreeHGlobal((IntPtr)avatarArray.Avatars[i].ImageData);
+                    
+                    if (avatarArray.Avatars[i].FileName != null)
+                        Marshal.FreeHGlobal((IntPtr)avatarArray.Avatars[i].FileName);
+                }
+
+                Marshal.FreeHGlobal((IntPtr)avatarArray.Avatars);
+            }
+        }
+
+
+        [UnmanagedCallersOnly(EntryPoint = "get_avatars")]
+        public static unsafe AvatarArray GetAvatars()
+        {
+            var avatars = AvatarLoader.LoadAvatars(_contentManager, _virtualFileSystem);
+            int count = avatars.Count;
+
+            AvatarInfo* avatarInfos = (AvatarInfo*)Marshal.AllocHGlobal(sizeof(AvatarInfo) * count);
+
+            int index = 0;
+            foreach (var kvp in avatars)
+            {
+                string fileName = kvp.Key;
+                byte[] imageData = kvp.Value;
+
+                byte* imagePtr = (byte*)Marshal.AllocHGlobal(imageData.Length);
+                Marshal.Copy(imageData, 0, (IntPtr)imagePtr, imageData.Length);
+
+                byte[] utf8FileName = Encoding.UTF8.GetBytes(fileName);
+                sbyte* fileNamePtr = (sbyte*)Marshal.AllocHGlobal(utf8FileName.Length + 1);
+                for (int i = 0; i < utf8FileName.Length; i++)
+                {
+                    fileNamePtr[i] = (sbyte)utf8FileName[i];
+                }
+                fileNamePtr[utf8FileName.Length] = 0; 
+
+                avatarInfos[index] = new AvatarInfo
+                {
+                    ImageData = imagePtr,
+                    ImageSize = imageData.Length,
+                    FileName = fileNamePtr
+                };
+
+                index++;
+            }
+
+            return new AvatarArray
+            {
+                Count = count,
+                Avatars = avatarInfos
+            };
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "refresh_account_manager")]
+        public static void RefreshAccountManager()
+        {
+            _accountManager.Refresh();
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "get_dlc_nca_list")]
+        public static unsafe DlcNcaList GetDlcNcaList(nint titleIdPtr, nint pathPtr) 
+        {
+            var titleId = Marshal.PtrToStringAnsi(titleIdPtr);
+            var containerPath = Marshal.PtrToStringAnsi(pathPtr);
+
+            if (string.IsNullOrWhiteSpace(titleId) ||
+                string.IsNullOrWhiteSpace(containerPath) ||
+                !File.Exists(containerPath) ||
+                !ulong.TryParse(titleId, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out ulong titleIdBase))
+            {
+                return new DlcNcaList { success = false };
+            }
+
+            titleIdBase &= ~0x1FFFUL;
+
+            try
+            {
+                _virtualFileSystem ??= VirtualFileSystem.CreateInstance();
+
+                using IFileSystem pfs = PartitionFileSystemUtils.OpenApplicationFileSystem(containerPath, _virtualFileSystem);
+                _virtualFileSystem.ImportTickets(pfs);
+
+                List<DlcNcaListItem> listItems = new();
+
+                foreach (DirectoryEntryEx fileEntry in pfs.EnumerateEntries("/", "*.nca"))
+                {
+                    using var ncaFile = new UniqueRef<IFile>();
+
+                    pfs.OpenFile(ref ncaFile.Ref, fileEntry.FullPath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
+
+                    Nca nca = TryCreateNca(ncaFile.Get.AsStorage(), containerPath);
+
+                    if (nca == null ||
+                        nca.Header.ContentType != NcaContentType.PublicData ||
+                        (nca.Header.TitleId & ~0x1FFFUL) != titleIdBase)
+                    {
+                        continue;
+                    }
+
+                    DlcNcaListItem item = new();
+                    GameInfoLoader.CopyStringToFixedArray(fileEntry.FullPath, item.Path, 256);
+                    item.TitleId = nca.Header.TitleId;
+                    listItems.Add(item);
+                }
+
+                if (listItems.Count == 0)
+                {
+                    Console.WriteLine("The specified file does not contain DLC for the selected title!");
+                    return new DlcNcaList { success = false };
+                }
+
+                return CreateDlcNcaList(listItems);
+            }
+            catch (MissingKeyException exception)
+            {
+                Logger.Warning?.Print(LogClass.Application, $"Your key set is missing a key with the name: {exception.Name}");
+            }
+            catch (InvalidDataException)
+            {
+                Logger.Warning?.Print(LogClass.Application, $"The header key is incorrect or missing and therefore the NCA header content type check has failed. Errored File: {containerPath}");
+            }
+            catch (Exception exception)
+            {
+                Logger.Warning?.Print(LogClass.Application, exception.Message);
+            }
+            
+            return new DlcNcaList { success = false };
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "free_dlc_nca_list")]
+        public static unsafe void FreeDlcNcaList(DlcNcaList list)
+        {
+            if (list.items != null)
+            {
+                NativeMemory.Free(list.items);
+            }
+        }
+
+        private static unsafe DlcNcaList CreateDlcNcaList(List<DlcNcaListItem> listItems)
+        {
+            DlcNcaListItem* items = (DlcNcaListItem*)NativeMemory.AllocZeroed(
+                (nuint)listItems.Count,
+                (nuint)sizeof(DlcNcaListItem));
+
+            for (int index = 0; index < listItems.Count; index++)
+            {
+                items[index] = listItems[index];
+            }
+
+            return new DlcNcaList
+            {
+                success = true,
+                size = (uint)listItems.Count,
+                items = items,
+            };
+        }
+
+        private static Nca TryCreateNca(IStorage ncaStorage, string containerPath)
+        {
+            try
+            {
+                return new Nca(_virtualFileSystem.KeySet, ncaStorage);
+            }
+            catch (Exception)
+            {
+                // ignored
+            }
+
+            return null;
+        }
+
+        public static string GetInstalledFirmwareVersion()
+        {
+            try
+            {
+                var version = _contentManager.GetCurrentFirmwareVersion();
+
+                if (version != null)
+                {
+                    return version.VersionString;
+                }
+
+                return String.Empty;
+            } catch
+            {
+                return String.Empty;
+            }
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "set_keyboard_config")]
+        public static void SetKeyboardConfig(KeyboardConfigNative config) 
+        {
+            _keyboardConfig = config;
+        }
+        
+        [UnmanagedCallersOnly(EntryPoint = "attach_gamepad")]
+        public static nint AttachGamepad(nint namePtr, nint idPtr, int playerIndex, ControllerType controllerType)
+        {
+            if (namePtr == nint.Zero)
+                return nint.Zero;
+            
+            string name = Marshal.PtrToStringAnsi(namePtr);
+            string inputId = idPtr.ToInt64().ToString("X");
+
+            nint result = 0;
+            if (idPtr != nint.Zero)
+            {
+                result = NativeGamepadDriver.AttachGamepad(name, idPtr);
+                if (result == nint.Zero)
+                    return nint.Zero;
+            }
+
+            if (playerIndex < 0 || playerIndex > 7)
+            {
+                Logger.Warning?.Print(LogClass.Application, $"AttachGamepad: invalid playerIndex {playerIndex} for \"{inputId}\"");
+                return result;
+            }
+
+            var assignedIndex = (PlayerIndex)playerIndex;
+            InputConfig config = HandlePlayerConfiguration(inputId, assignedIndex, controllerType);
+            
+            if (config != null)
+            {
+                _inputConfiguration ??= new List<InputConfig>();
+                _inputConfiguration.RemoveAll(c => c.PlayerIndex == assignedIndex || c.Id == inputId);
+                _inputConfiguration.Add(config);
+                
+                Logger.Info?.Print(LogClass.Application,
+                    $"AttachGamepad: assigned \"{inputId}\" to {assignedIndex} as {controllerType}. " +
+                    $"Total configs: {_inputConfiguration.Count}");
+
+                EnsureKeyboardFallback();
+                
+                _window?.NpadManager.ReloadConfiguration(_inputConfiguration, _enableKeyboard, _enableMouse);
+            }
+
+            return result;
+        }
+
+        [UnmanagedCallersOnly(EntryPoint = "detach_gamepad")]
+        public static void DetachGamepad(nint idPtr)
+        {
+            NativeGamepadDriver.DetachGamepad(idPtr);
+
+            if (idPtr == nint.Zero)
+                return;
+            
+            string inputId = idPtr.ToInt64().ToString("X");
+            if (inputId == null)
+                return;
+
+            int removed = _inputConfiguration?.RemoveAll(c => c.Id == inputId) ?? 0;
+
+            if (removed > 0)
+            {
+                Logger.Info?.Print(LogClass.Application,
+                    $"DetachGamepad: removed \"{inputId}\". " +
+                    $"Remaining configs: {_inputConfiguration?.Count ?? 0}");
+
+                EnsureKeyboardFallback();
+
+                _window?.NpadManager.ReloadConfiguration(
+                    _inputConfiguration ?? new List<InputConfig>(),
+                    _enableKeyboard,
+                    _enableMouse);
+            }
+        }
+        
+
+        public static Common.Configuration.Hid.Keyboard.StandardKeyboardInputConfig KeyboardInputConfig() 
+        {
+            return new StandardKeyboardInputConfig
+            {
+                Version        = InputConfig.CurrentVersion,
+                Backend        = InputBackendType.WindowKeyboard,
+                Id             = "0",
+                PlayerIndex    = PlayerIndex.Player1,
+                ControllerType = ControllerType.JoyconPair,
+                LeftJoycon = new LeftJoyconCommonConfig<Key>
+                {
+                    DpadUp      = ((Key?)_keyboardConfig?.LeftJoycon.DpadUp)      ?? Key.Up,
+                    DpadDown    = ((Key?)_keyboardConfig?.LeftJoycon.DpadDown)    ?? Key.Down,
+                    DpadLeft    = ((Key?)_keyboardConfig?.LeftJoycon.DpadLeft)    ?? Key.Left,
+                    DpadRight   = ((Key?)_keyboardConfig?.LeftJoycon.DpadRight)   ?? Key.Right,
+                    ButtonMinus = ((Key?)_keyboardConfig?.LeftJoycon.ButtonMinus) ?? Key.Minus,
+                    ButtonL     = ((Key?)_keyboardConfig?.LeftJoycon.ButtonL)     ?? Key.E,
+                    ButtonZl    = ((Key?)_keyboardConfig?.LeftJoycon.ButtonZl)    ?? Key.Q,
+                    ButtonSl    = ((Key?)_keyboardConfig?.LeftJoycon.ButtonSl)    ?? Key.Unbound,
+                    ButtonSr    = ((Key?)_keyboardConfig?.LeftJoycon.ButtonSr)    ?? Key.Unbound,
+                },
+                LeftJoyconStick = new JoyconConfigKeyboardStick<Key>
+                {
+                    StickUp     = ((Key?)_keyboardConfig?.LeftJoyconStick.StickUp)     ?? Key.W,
+                    StickDown   = ((Key?)_keyboardConfig?.LeftJoyconStick.StickDown)   ?? Key.S,
+                    StickLeft   = ((Key?)_keyboardConfig?.LeftJoyconStick.StickLeft)   ?? Key.A,
+                    StickRight  = ((Key?)_keyboardConfig?.LeftJoyconStick.StickRight)  ?? Key.D,
+                    StickButton = ((Key?)_keyboardConfig?.LeftJoyconStick.StickButton) ?? Key.F,
+                },
+                RightJoycon = new RightJoyconCommonConfig<Key>
+                {
+                    ButtonA     = ((Key?)_keyboardConfig?.RightJoycon.ButtonA) ?? Key.Z,
+                    ButtonB     = ((Key?)_keyboardConfig?.RightJoycon.ButtonB) ?? Key.X,
+                    ButtonX     = ((Key?)_keyboardConfig?.RightJoycon.ButtonX) ?? Key.C,
+                    ButtonY     = ((Key?)_keyboardConfig?.RightJoycon.ButtonY) ?? Key.V,
+                    ButtonPlus  = ((Key?)_keyboardConfig?.RightJoycon.ButtonPlus) ?? Key.Plus,
+                    ButtonR     = ((Key?)_keyboardConfig?.RightJoycon.ButtonR) ?? Key.U,
+                    ButtonZr    = ((Key?)_keyboardConfig?.RightJoycon.ButtonZr)   ?? Key.O,
+                    ButtonSl    = ((Key?)_keyboardConfig?.RightJoycon.ButtonSl)   ?? Key.Unbound,
+                    ButtonSr    = ((Key?)_keyboardConfig?.RightJoycon.ButtonSr)   ?? Key.Unbound,
+                },
+                RightJoyconStick = new JoyconConfigKeyboardStick<Key>
+                {
+                    StickUp     = ((Key?)_keyboardConfig?.RightJoyconStick.StickUp)     ?? Key.I,
+                    StickDown   = ((Key?)_keyboardConfig?.RightJoyconStick.StickDown)   ?? Key.K,
+                    StickLeft   = ((Key?)_keyboardConfig?.RightJoyconStick.StickLeft)   ?? Key.J,
+                    StickRight  = ((Key?)_keyboardConfig?.RightJoyconStick.StickRight)  ?? Key.L,
+                    StickButton = ((Key?)_keyboardConfig?.RightJoyconStick.StickButton) ?? Key.H,
+                },
+            };
+        }
+
+        private static void EnsureKeyboardFallback()
+        {
+            if (_inputConfiguration != null && _inputConfiguration.Count > 0)
+                return;
+
+            _inputConfiguration ??= new List<InputConfig>();
+
+            var keyboardConfig = KeyboardInputConfig();
+
+            _inputConfiguration.Add(keyboardConfig);
+            Logger.Info?.Print(LogClass.Application, "No input configs, fallback keyboard for Player1.");
+        }
+
+        private static InputConfig HandlePlayerConfiguration(
+            string inputId,
+            PlayerIndex index,
+            ControllerType controllerType)
+        {
+            if (inputId == null)
+            {
+                Logger.Info?.Print(LogClass.Application, $"{index} not configured");
+                return null;
+            }
+
+            IGamepad gamepad = _inputManager.KeyboardDriver.GetGamepad(inputId);
+            bool isKeyboard = true;
+
+            if (gamepad == null)
+            {
+                gamepad = _inputManager.GamepadDriver.GetGamepad(inputId);
+                isKeyboard = false;
+
+                if (gamepad == null)
+                {
+                    Logger.Error?.Print(LogClass.Application, $"{index} gamepad not found (\"{inputId}\")");
+
+                    inputId = "0";
+                    gamepad = _inputManager.KeyboardDriver.GetGamepad(inputId);
+                    isKeyboard = true;
+                }
+            }
+
+            gamepad.Dispose();
+
+            InputConfig config;
+
+            if (isKeyboard)
+            {
+                config = KeyboardInputConfig();
+            }
+            else
+            {
+                Console.WriteLine($"Configuring {inputId} as {controllerType} ({index})");
+
+                config = new StandardControllerInputConfig
+                {
+                    Version          = InputConfig.CurrentVersion,
+                    Backend          = InputBackendType.GamepadSDL2,
+                    Id               = null,
+                    ControllerType   = controllerType,
+                    DeadzoneLeft     = 0.1f,
+                    DeadzoneRight    = 0.1f,
+                    RangeLeft        = 1.0f,
+                    RangeRight       = 1.0f,
+                    TriggerThreshold = 0.5f,
+                    LeftJoycon = new LeftJoyconCommonConfig<ConfigGamepadInputId>
+                    {
+                        DpadUp      = ConfigGamepadInputId.DpadUp,
+                        DpadDown    = ConfigGamepadInputId.DpadDown,
+                        DpadLeft    = ConfigGamepadInputId.DpadLeft,
+                        DpadRight   = ConfigGamepadInputId.DpadRight,
+                        ButtonMinus = ConfigGamepadInputId.Minus,
+                        ButtonL     = ConfigGamepadInputId.LeftShoulder,
+                        ButtonZl    = ConfigGamepadInputId.LeftTrigger,
+                        ButtonSl    = ConfigGamepadInputId.Unbound,
+                        ButtonSr    = ConfigGamepadInputId.Unbound,
+                    },
+                    LeftJoyconStick = new JoyconConfigControllerStick<ConfigGamepadInputId, ConfigStickInputId>
+                    {
+                        Joystick      = ConfigStickInputId.Left,
+                        StickButton   = ConfigGamepadInputId.LeftStick,
+                        InvertStickX  = false,
+                        InvertStickY  = false,
+                        Rotate90CW    = false,
+                    },
+                    RightJoycon = new RightJoyconCommonConfig<ConfigGamepadInputId>
+                    {
+                        ButtonA     = ConfigGamepadInputId.A,
+                        ButtonB     = ConfigGamepadInputId.B,
+                        ButtonX     = ConfigGamepadInputId.X,
+                        ButtonY     = ConfigGamepadInputId.Y,
+                        ButtonPlus  = ConfigGamepadInputId.Plus,
+                        ButtonR     = ConfigGamepadInputId.RightShoulder,
+                        ButtonZr    = ConfigGamepadInputId.RightTrigger,
+                        ButtonSl    = ConfigGamepadInputId.Unbound,
+                        ButtonSr    = ConfigGamepadInputId.Unbound,
+                    },
+                    RightJoyconStick = new JoyconConfigControllerStick<ConfigGamepadInputId, ConfigStickInputId>
+                    {
+                        Joystick      = ConfigStickInputId.Right,
+                        StickButton   = ConfigGamepadInputId.RightStick,
+                        InvertStickX  = false,
+                        InvertStickY  = false,
+                        Rotate90CW    = false,
+                    },
+                    Motion = new StandardMotionConfigController
+                    {
+                        MotionBackend = MotionInputBackendType.GamepadDriver,
+                        EnableMotion  = true,
+                        Sensitivity   = 100,
+                        GyroDeadzone  = 1,
+                    },
+                    Rumble = new RumbleConfigController
+                    {
+                        StrongRumble  = 1f,
+                        WeakRumble    = 1f,
+                        EnableRumble  = true,
+                    },
+                };
+            }
+
+            if (config is StandardControllerInputConfig controllerConfig)
+            {
+                if (controllerConfig.RangeLeft <= 0.0f && controllerConfig.RangeRight <= 0.0f)
+                {
+                    controllerConfig.RangeLeft  = 1.0f;
+                    controllerConfig.RangeRight = 1.0f;
+
+                    Logger.Info?.Print(LogClass.Application, $"{config.PlayerIndex} stick range reset. Save the profile now to update your configuration");
+                }
+            }
+            
+            config.Id = inputId;
+            config.PlayerIndex = index;
+
+            string inputTypeName = isKeyboard ? "Keyboard" : "Gamepad";
+            Logger.Info?.Print(LogClass.Application, $"{config.PlayerIndex} configured with {inputTypeName} \"{config.Id}\"");
+
+            return config;
+        }
+        
         static void Load(Options option)
         {
             _libHacHorizonManager = new LibHacHorizonManager();
@@ -233,9 +758,17 @@ namespace Ryujinx.Library
             _accountManager = new AccountManager(_libHacHorizonManager.RyujinxClient, option.UserProfile);
             _userChannelPersistence = new UserChannelPersistence();
 
-            GraphicsConfig.EnableShaderCache = !option.DisableShaderCache;
             GraphicsConfig.EnableMacroJit = false;
-            GraphicsConfig.EnableMacroHLE = option.DisableMacroHLE;
+            GraphicsConfig.EnableShaderCache = !option.DisableShaderCache;
+            GraphicsConfig.EnableAsyncShaderCompilation = option.EnableAsyncShaderCompilation;
+            GraphicsConfig.EnableTextureRecompression = option.EnableTextureRecompression;
+            GraphicsConfig.ResScale = option.ResScale;
+            GraphicsConfig.MaxAnisotropy = option.MaxAnisotropy;
+            GraphicsConfig.ShadersDumpPath = option.GraphicsShadersDumpPath;
+            GraphicsConfig.EnableMacroHLE = !option.DisableMacroHLE;
+            GraphicsConfig.EnableColorSpacePassthrough = true;
+
+            EnsureKeyboardFallback();
 
             Logger.SetEnable(LogLevel.Debug, option.LoggingEnableDebug);
             Logger.SetEnable(LogLevel.Stub, !option.LoggingDisableStub);
@@ -245,6 +778,20 @@ namespace Ryujinx.Library
             Logger.SetEnable(LogLevel.Trace, option.LoggingEnableTrace);
             Logger.SetEnable(LogLevel.Guest, !option.LoggingDisableGuest);
             Logger.SetEnable(LogLevel.AccessLog, option.LoggingEnableFsAccessLog);
+
+
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+            {
+                var ex = e.ExceptionObject as Exception;
+                var trace = new System.Diagnostics.StackTrace(ex, true);
+                var frame = trace.GetFrame(0);
+                var file = frame?.GetFileName();
+                var line = frame?.GetFileLineNumber();
+
+                Logger.Info?.Print(LogClass.Application,
+                    $"Unhandled exception: {ex}\nFile: {file}\nLine: {line}");
+
+            };
 
             if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
             {
@@ -270,12 +817,12 @@ namespace Ryujinx.Library
 
             _inputManager.Dispose();
         }
-
+        
         private static WindowBase CreateWindow(Options options)
         {
             return new MoltenVKWindow(_inputManager, options.LoggingGraphicsDebugLevel, options.AspectRatio, options.EnableMouse, options.HideCursorMode);
         }
-
+        
         private static IRenderer CreateRenderer(Options options, WindowBase window)
         {
             if (options.GraphicsBackend == GraphicsBackend.Vulkan)
@@ -305,7 +852,7 @@ namespace Ryujinx.Library
 
             return new OpenGLRenderer();
         }
-
+        
         private static Switch InitializeEmulationContext(WindowBase window, IRenderer renderer, Options options)
         {
             renderer = renderer.TryMakeThreaded(options.BackendThreading);
@@ -358,7 +905,7 @@ namespace Ryujinx.Library
 
             return new Switch(configuration);
         }
-
+        
         private static void SetupProgressHandler()
         {
             if (_emulationContext.Processes.ActiveApplication.DiskCacheLoadState != null)
@@ -370,7 +917,7 @@ namespace Ryujinx.Library
             _emulationContext.Gpu.ShaderCacheStateChanged -= ProgressHandler;
             _emulationContext.Gpu.ShaderCacheStateChanged += ProgressHandler;
         }
-
+        
         private static void ProgressHandler<T>(T state, int current, int total) where T : Enum
         {
             string jsonData = state switch
@@ -379,13 +926,14 @@ namespace Ryujinx.Library
                 ShaderCacheState => $"[\"Shaders\",{current},{total}]",
                 _ => throw new ArgumentException($"Unknown Progress Handler type {typeof(T)}"),
             };
-
+            
             byte[] jsonBytes = Encoding.UTF8.GetBytes(jsonData);
             nint unmanagedPointer = Marshal.AllocHGlobal(jsonBytes.Length);
+
             try
             {
                 Marshal.Copy(jsonBytes, 0, unmanagedPointer, jsonBytes.Length);
-
+                
                 CallbackRegistry.Invoke("ProgressWithPTCorShaderCache", unmanagedPointer, (int)jsonBytes.Length);
             }
             finally
@@ -393,7 +941,7 @@ namespace Ryujinx.Library
                 Marshal.FreeHGlobal(unmanagedPointer);
             }
         }
-
+        
         private static void ExecutionEntrypoint()
         {
             if (OperatingSystem.IsWindows())
@@ -413,7 +961,7 @@ namespace Ryujinx.Library
                 _windowsMultimediaTimerResolution = null;
             }
         }
-
+        
         private static bool LoadApplication(Options options)
         {
             string path = options.InputPath;
@@ -442,6 +990,13 @@ namespace Ryujinx.Library
 
             SystemVersion firmwareVersion = _contentManager.GetCurrentFirmwareVersion();
             Logger.Notice.Print(LogClass.Application, $"Using Firmware Version: {firmwareVersion?.VersionString}");
+
+            if (path.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                ulong id = Convert.ToUInt64(path, 16);
+                string contentPath = _contentManager.GetInstalledContentPath(id, StorageId.BuiltInSystem, NcaContentType.Program);
+                path = contentPath;
+            }
 
             bool isFirmwareTitle = false;
             if (path.StartsWith("@SystemContent"))
@@ -518,7 +1073,55 @@ namespace Ryujinx.Library
             ExecutionEntrypoint();
             return true;
         }
+        
+        
+        // GameInfo
+        [UnmanagedCallersOnly(EntryPoint = "get_game_info")]
+        public static GameInfoNative GetGameInfoNative(int descriptor, nint extensionPtr)
+        {
+            if (_virtualFileSystem == null)
+                _virtualFileSystem = VirtualFileSystem.CreateInstance();
+
+            var extension = Marshal.PtrToStringAnsi(extensionPtr);
+            var stream = OpenFile(descriptor);
+
+            return GameInfoLoader.GetGameInfoNative(_virtualFileSystem, stream, extension);
+        }
+
+        private static FileStream OpenFile(int descriptor)
+        {
+            var safeHandle = new SafeFileHandle(descriptor, false);
+
+            return new FileStream(safeHandle, FileAccess.ReadWrite);
+        }
+
+
+        public unsafe struct DlcNcaListItem 
+        {
+            public fixed byte Path[256];
+            public ulong TitleId;
+        }
+
+        public unsafe struct DlcNcaList
+        {
+            public bool success;
+            public uint size;
+            public unsafe DlcNcaListItem* items;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public unsafe struct AvatarInfo
+        {
+            public byte* ImageData;    
+            public int ImageSize;     
+            public sbyte* FileName;  
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public unsafe struct AvatarArray
+        {
+            public int Count;          
+            public AvatarInfo* Avatars; 
+        }
     }
-
-
 }

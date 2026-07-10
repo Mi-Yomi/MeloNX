@@ -1,6 +1,7 @@
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Configuration.Hid;
 using Ryujinx.Common.Logging;
+using Ryujinx.Common.Callbacks;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.GAL.Multithreading;
 using Ryujinx.Graphics.Gpu;
@@ -10,6 +11,7 @@ using Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.ApplicationPr
 using Ryujinx.HLE.UI;
 using Ryujinx.Input;
 using Ryujinx.Input.HLE;
+using Ryujinx.Input.Native;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -19,12 +21,19 @@ using System.Threading;
 using AntiAliasing = Ryujinx.Common.Configuration.AntiAliasing;
 using ScalingFilter = Ryujinx.Common.Configuration.ScalingFilter;
 using Switch = Ryujinx.HLE.Switch;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
+using System.Buffers.Binary;
 // using Ryujinx.Ava.UI.Models;
 
 
 namespace Ryujinx.Library
 {
-    abstract partial class WindowBase : IHostUIHandler, IDisposable
+    abstract partial class WindowBase: IHostUIHandler, IDisposable
     {
         protected const int DefaultWidth = 1280;
         protected const int DefaultHeight = 720;
@@ -68,15 +77,22 @@ namespace Ryujinx.Library
         private readonly CancellationTokenSource _gpuCancellationTokenSource;
         public ManualResetEvent _exitEvent;
         public ManualResetEvent _gpuDoneEvent;
+        private readonly AutoResetEvent _inputUpdatedEvent;
+        private volatile StatisticsRequest? _latestStatistics;
+        private CancellationTokenSource? _statisticsCts;
+
 
         private long _ticks;
         public bool _isActive;
         private bool _isStopped;
 
+        public bool _ranFirstFrame;
+
         private string _gpuDriverName;
 
         public AspectRatio _aspectRatio;
         private readonly bool _enableMouse;
+
 
         public WindowBase(
             InputManager inputManager,
@@ -97,13 +113,20 @@ namespace Ryujinx.Library
             _gpuCancellationTokenSource = new CancellationTokenSource();
             _exitEvent = new ManualResetEvent(false);
             _gpuDoneEvent = new ManualResetEvent(false);
+            _inputUpdatedEvent = new AutoResetEvent(false);
             _pauseEvent = new ManualResetEvent(true);
             _aspectRatio = aspectRatio;
             _enableMouse = enableMouse;
             HostUITheme = new NativeHostUiTheme();
+            NativeGamepadDriver.OnInputUpdated += SignalInputUpdated;
 
             Width = DefaultWidth;
             Height = DefaultHeight;
+        }
+
+        private void SignalInputUpdated()
+        {
+            _inputUpdatedEvent.Set();
         }
 
         public void Initialize(Switch device, List<InputConfig> inputConfigs, bool enableKeyboard, bool enableMouse)
@@ -128,6 +151,8 @@ namespace Ryujinx.Library
         {
             Width = width;
             Height = height;
+
+
         }
 
         private void InitializeWindow()
@@ -176,7 +201,7 @@ namespace Ryujinx.Library
 
             _gpuDriverName = GetGpuDriverName();
 
-            bool firstFrame = true;
+            _ranFirstFrame = false;
 
             Device.Gpu.Renderer.RunLoop(() =>
             {
@@ -207,11 +232,12 @@ namespace Ryujinx.Library
                     {
                         Device.PresentFrame(SwapBuffers);
 
-                        if (firstFrame)
-                        {
-                            firstFrame = false;
-                            // Program.TriggerCallback("ran-first-frame");
-                        }
+                        if (!_ranFirstFrame)
+                        { 
+                            _ranFirstFrame = true;
+                            SendStatistics(false);
+                         }
+                        
                     }
 
                     if (_ticks >= _ticksPerFrame)
@@ -222,6 +248,9 @@ namespace Ryujinx.Library
                         {
                             dockedMode += $" ({scale}x)";
                         }
+
+                        
+                        SendStatistics();
 
                         /*
                             Device.EnableDeviceVsync,
@@ -261,9 +290,11 @@ namespace Ryujinx.Library
 
             _isStopped = true;
             _isActive = false;
+            _inputUpdatedEvent.Set();
 
             _exitEvent.WaitOne();
             _exitEvent.Dispose();
+            NativeGamepadDriver.OnInputUpdated -= SignalInputUpdated;
         }
 
         public static void ProcessMainThreadQueue()
@@ -282,7 +313,7 @@ namespace Ryujinx.Library
 
                 ProcessMainThreadQueue();
 
-                Thread.Sleep(1);
+                _inputUpdatedEvent.WaitOne(1);
             }
 
             _exitEvent.Set();
@@ -363,16 +394,42 @@ namespace Ryujinx.Library
             return true;
         }
 
+        public void SendStatistics(bool before = true)
+        {
+            static double Sanitize(double v) =>
+                double.IsFinite(v) ? Math.Round(v, 2) : 0.0;
+
+            Span<byte> bytes = stackalloc byte[33];
+
+            double fps = before ? Sanitize(Device.Statistics.GetGameFrameRate()) : 0d;
+            double frameTime = before ? Sanitize(Device.Statistics.GetGameFrameTime()) : 0d;
+            double fifo = before ? Sanitize(Device.Statistics.GetFifoPercent())   : 0d;
+
+            BinaryPrimitives.WriteDoubleLittleEndian(bytes[0..],  fps);
+            BinaryPrimitives.WriteDoubleLittleEndian(bytes[8..],  frameTime);
+            bytes[16] = (byte)(_ranFirstFrame ? 1 : 0);
+            BinaryPrimitives.WriteDoubleLittleEndian(bytes[17..], fifo);
+
+            unsafe {
+                fixed (byte* ptr = bytes)
+                {
+                    CallbackRegistry.Invoke("push_statistics", ptr, bytes.Length);
+                }
+            }
+        }
+
         public bool DisplayMessageDialog(string title, string message)
         {
             if (OperatingSystem.IsIOS())
             {
                 Console.WriteLine($"Alert: {title}, message: {message}");
+
+                AlertHelper.ShowAlert(title, message, false);
             }
 
             return true;
         }
-
+    
         public bool DisplayMessageDialog(ControllerAppletUIArgs args)
         {
             string playerCount = args.PlayerCountMin == args.PlayerCountMax
@@ -462,9 +519,19 @@ namespace Ryujinx.Library
             if (disposing)
             {
                 _isActive = false;
+                _inputUpdatedEvent.Set();
+                NativeGamepadDriver.OnInputUpdated -= SignalInputUpdated;
                 TouchScreenManager?.Dispose();
                 NpadManager.Dispose();
             }
+        }
+
+        internal sealed class StatisticsRequest
+        {
+            public double FPS { get; set; } = 0d;
+            public double FrameTime { get; set; } = 0d;
+            public bool Started { get; set; } = false;
+            public double FIFO { get; set; } = 0d;
         }
     }
 }

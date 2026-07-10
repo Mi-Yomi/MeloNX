@@ -19,6 +19,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         private static readonly nint _ptrMainEntryPointName = Marshal.StringToHGlobalAnsi("main");
 
+        private readonly VulkanRenderer _gd;
         private readonly Vk _api;
         private readonly Device _device;
         private readonly ShaderStageFlags _stage;
@@ -71,6 +72,70 @@ namespace Ryujinx.Graphics.Vulkan
 
                 CompileStatus = ProgramLinkStatus.Success;
             });
+        }
+
+        public unsafe Shader(VulkanRenderer gd, Device device, ShaderSource shaderSource, bool compileAsync = true, bool highPriorityBackgroundCompilation = false)
+        {
+            _gd = gd;
+            _api = gd.Api;
+            _device = device;
+
+            CompileStatus = ProgramLinkStatus.Incomplete;
+
+            _stage = shaderSource.Stage.Convert();
+
+            if (compileAsync)
+            {
+                CompileTask = _gd.BackgroundCompilationScheduler.ScheduleShaderCompile(() => Compile(shaderSource), highPriorityBackgroundCompilation);
+            }
+            else
+            {
+                Compile(shaderSource);
+                CompileTask = Task.CompletedTask;
+            }
+        }
+
+        private unsafe void Compile(ShaderSource shaderSource)
+        {
+            try
+            {
+                byte[] spirv = shaderSource.BinaryCode;
+
+                if (spirv == null)
+                {
+                    spirv = GlslToSpirv(shaderSource.Code, shaderSource.Stage);
+
+                    if (spirv == null)
+                    {
+                        CompileStatus = ProgramLinkStatus.Failure;
+
+                        return;
+                    }
+                }
+
+                fixed (byte* pCode = spirv)
+                {
+                    ShaderModuleCreateInfo shaderModuleCreateInfo = new()
+                    {
+                        SType = StructureType.ShaderModuleCreateInfo,
+                        CodeSize = (uint)spirv.Length,
+                        PCode = (uint*)pCode,
+                    };
+
+                    lock (_gd.PipelineCreationLock)
+                    {
+                        _api.CreateShaderModule(_device, in shaderModuleCreateInfo, null, out _module).ThrowOnError();
+                    }
+                }
+
+                CompileStatus = ProgramLinkStatus.Success;
+            }
+            catch (Exception e)
+            {
+                Logger.Error?.PrintMsg(LogClass.Gpu, $"Shader module compilation failed: {e.Message}");
+
+                CompileStatus = ProgramLinkStatus.Failure;
+            }
         }
 
         private unsafe static byte[] GlslToSpirv(string glsl, ShaderStage stage)
@@ -154,7 +219,23 @@ namespace Ryujinx.Graphics.Vulkan
         {
             if (!_disposed)
             {
-                _api.DestroyShaderModule(_device, _module, null);
+                WaitForCompile();
+
+                if (_module.Handle != 0)
+                {
+                    if (_gd != null)
+                    {
+                        lock (_gd.PipelineCreationLock)
+                        {
+                            _api.DestroyShaderModule(_device, _module, null);
+                        }
+                    }
+                    else
+                    {
+                        _api.DestroyShaderModule(_device, _module, null);
+                    }
+                }
+
                 _disposed = true;
             }
         }

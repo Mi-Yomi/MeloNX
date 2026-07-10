@@ -327,15 +327,38 @@ namespace Ryujinx.Graphics.Vulkan
             DepthMode = true;
         }
 
+        public PipelineState Clone()
+        {
+            PipelineState clone = new();
+            clone.Initialize();
+
+            clone.Internal = Internal;
+            clone.HasTessellationControlShader = HasTessellationControlShader;
+            clone.PipelineLayout = PipelineLayout;
+            clone.SpecializationData = SpecializationData;
+
+            Stages.AsSpan().CopyTo(clone.Stages.AsSpan());
+
+            return clone;
+        }
+
         public unsafe Auto<DisposablePipeline> CreateComputePipeline(
             VulkanRenderer gd,
             Device device,
             ShaderCollection program,
-            PipelineCache cache)
+            PipelineCache cache,
+            bool allowSynchronousCompile = true,
+            bool throwOnError = true,
+            bool cachePipelineFailure = true)
         {
             if (program.TryGetComputePipeline(ref SpecializationData, out Auto<DisposablePipeline> pipeline))
             {
                 return pipeline;
+            }
+
+            if (!allowSynchronousCompile)
+            {
+                return null;
             }
 
             ComputePipelineCreateInfo pipelineCreateInfo = new()
@@ -368,14 +391,31 @@ namespace Ryujinx.Graphics.Vulkan
                     pipelineCreateInfo.Stage.PSpecializationInfo = info;
                 }
 
-                gd.Api.CreateComputePipelines(device, cache, 1, &pipelineCreateInfo, null, &pipelineHandle).ThrowOnError();
+                Result result;
+
+                lock (gd.PipelineCreationLock)
+                {
+                    result = gd.Api.CreateComputePipelines(device, cache, 1, &pipelineCreateInfo, null, &pipelineHandle);
+                }
+
+                if (throwOnError)
+                {
+                    result.ThrowOnError();
+                }
+                else if (result.IsError)
+                {
+                    if (cachePipelineFailure)
+                    {
+                        program.AddComputePipeline(ref SpecializationData, null);
+                    }
+
+                    return null;
+                }
             }
 
             pipeline = new Auto<DisposablePipeline>(new DisposablePipeline(gd.Api, device, pipelineHandle));
 
-            program.AddComputePipeline(ref SpecializationData, pipeline);
-
-            return pipeline;
+            return program.AddComputePipeline(ref SpecializationData, pipeline);
         }
 
         public unsafe Auto<DisposablePipeline> CreateGraphicsPipeline(
@@ -384,11 +424,18 @@ namespace Ryujinx.Graphics.Vulkan
             ShaderCollection program,
             PipelineCache cache,
             RenderPass renderPass,
-            bool throwOnError = false)
+            bool throwOnError = false,
+            bool allowSynchronousCompile = true,
+            bool cachePipelineFailure = true)
         {
             if (program.TryGetGraphicsPipeline(ref Internal, out Auto<DisposablePipeline> pipeline))
             {
                 return pipeline;
+            }
+
+            if (!allowSynchronousCompile)
+            {
+                return null;
             }
 
             Pipeline pipelineHandle = default;
@@ -418,7 +465,10 @@ namespace Ryujinx.Graphics.Vulkan
                 // If we find such a case, return null pipeline to skip the draw.
                 if (Topology == PrimitiveTopology.PatchList && !HasTessellationControlShader)
                 {
-                    program.AddGraphicsPipeline(ref Internal, null);
+                    if (cachePipelineFailure)
+                    {
+                        program.AddGraphicsPipeline(ref Internal, null);
+                    }
 
                     return null;
                 }
@@ -641,7 +691,12 @@ namespace Ryujinx.Graphics.Vulkan
                     RenderPass = renderPass,
                 };
 
-                Result result = gd.Api.CreateGraphicsPipelines(device, cache, 1, &pipelineCreateInfo, null, &pipelineHandle);
+                Result result;
+
+                lock (gd.PipelineCreationLock)
+                {
+                    result = gd.Api.CreateGraphicsPipelines(device, cache, 1, &pipelineCreateInfo, null, &pipelineHandle);
+                }
 
                 if (throwOnError)
                 {
@@ -649,7 +704,10 @@ namespace Ryujinx.Graphics.Vulkan
                 }
                 else if (result.IsError)
                 {
-                    program.AddGraphicsPipeline(ref Internal, null);
+                    if (cachePipelineFailure)
+                    {
+                        program.AddGraphicsPipeline(ref Internal, null);
+                    }
 
                     return null;
                 }
@@ -666,9 +724,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             pipeline = new Auto<DisposablePipeline>(new DisposablePipeline(gd.Api, device, pipelineHandle));
 
-            program.AddGraphicsPipeline(ref Internal, pipeline);
-
-            return pipeline;
+            return program.AddGraphicsPipeline(ref Internal, pipeline);
         }
 
         private void UpdateVertexAttributeDescriptions(VulkanRenderer gd)
