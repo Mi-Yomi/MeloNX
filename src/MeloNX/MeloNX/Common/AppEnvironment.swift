@@ -13,7 +13,7 @@ import Security
 
 extension Bundle {
     var hostBundleIdentifier: String? {
-        AppEnvironment.shared.lcBundle?.bundleIdentifier ?? Bundle.main.bundleIdentifier
+        AppEnvironment.lcBundle?.bundleIdentifier ?? Bundle.main.bundleIdentifier
     }
 }
 
@@ -21,7 +21,10 @@ class AppEnvironment {
     var isInLiveContainer: Bool
     var needsAsCopy: Bool
     var isInMultitask: Bool
-    var lcBundle: Bundle?
+    static var lcBundle: Bundle?
+    var lcBundle: Bundle? {
+        Self.lcBundle
+    }
     
     static var shared: AppEnvironment = .init()
     
@@ -29,12 +32,12 @@ class AppEnvironment {
         if let lc = Self.liveContainer() {
             self.isInLiveContainer = true
             self.isInMultitask = lc.1
-            self.lcBundle = lc.0
+            Self.lcBundle = lc.0
             self.needsAsCopy = Bundle.main.hostBundleIdentifier != Bundle.main.bundleIdentifier ? true : false
         } else {
             self.isInLiveContainer = false
             self.isInMultitask = false
-            self.lcBundle = nil
+            Self.lcBundle = nil
             self.needsAsCopy = false
             let hostIdentifier = Self.getModifiedHostIdentifier(originalHostIdentifier: "")
             if hostIdentifier != Bundle.main.bundleIdentifier! {

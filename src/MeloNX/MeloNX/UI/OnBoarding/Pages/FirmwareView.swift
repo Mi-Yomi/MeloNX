@@ -74,7 +74,7 @@ struct FirmwareView: View {
                         .frame(width: .infinity, height: .infinity)
                 )
                 .overlay(alignment: .bottom) {
-                    ContinueButton(text: "Finish!", action: goForward, enabled: .constant(true))
+                    ContinueButton(text: "Finish!", action: goForward, enabled: .constant(fwAdded))
                         .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
                             view
                                 .padding(.bottom)

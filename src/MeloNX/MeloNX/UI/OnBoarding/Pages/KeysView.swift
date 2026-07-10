@@ -79,7 +79,7 @@ struct KeysView: View {
                         .frame(width: .infinity, height: .infinity)
                 )
                 .overlay(alignment: .bottom) {
-                    ContinueButton(text: "Continue", action: goForward, enabled: .constant(true))
+                    ContinueButton(text: "Continue", action: goForward, enabled: .constant(keysAdded))
                         .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
                             view
                                 .padding(.bottom)
