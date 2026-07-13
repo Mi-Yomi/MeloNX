@@ -141,6 +141,8 @@ namespace Ryujinx.HLE.HOS
 
         private static bool StrEquals(string s1, string s2) => string.Equals(s1, s2, StringComparison.OrdinalIgnoreCase);
 
+        private static string NormalizeCheatId(string buildId) => buildId[..Math.Min(Cheat.CheatIdSize, buildId.Length)].ToUpperInvariant();
+
         public static string GetModsBasePath() => EnsureBaseDirStructure(AppDataManager.GetModsPath());
         public static string GetSdModsBasePath() => EnsureBaseDirStructure(AppDataManager.GetSdModsPath());
 
@@ -374,7 +376,17 @@ namespace Ryujinx.HLE.HOS
             using StreamReader cheatData = cheatFile.OpenText();
             while (cheatData.ReadLine() is { } line)
             {
-                line = line.Trim();
+                line = StripCheatLineComment(line).Trim();
+
+                if (line.Length == 0 || IsCheatCommentLine(line))
+                {
+                    continue;
+                }
+
+                if (line[0] == '\uFEFF')
+                {
+                    line = line[1..].TrimStart();
+                }
 
                 if (line.StartsWith('['))
                 {
@@ -410,6 +422,28 @@ namespace Ryujinx.HLE.HOS
             {
                 yield return new Cheat($"<{cheatName} Cheat>", cheatFile, instructions);
             }
+        }
+
+        private static string StripCheatLineComment(string line)
+        {
+            int commentIndex = -1;
+
+            foreach (string marker in new[] { "//", "#", ";" })
+            {
+                int index = line.IndexOf(marker, StringComparison.Ordinal);
+
+                if (index >= 0 && (commentIndex < 0 || index < commentIndex))
+                {
+                    commentIndex = index;
+                }
+            }
+
+            return commentIndex >= 0 ? line[..commentIndex] : line;
+        }
+
+        private static bool IsCheatCommentLine(string line)
+        {
+            return line.Length >= 2 && line[0] == '{' && line[^1] == '}';
         }
 
         // Assumes searchDirPaths don't overlap
@@ -735,12 +769,18 @@ namespace Ryujinx.HLE.HOS
             }
 
             List<Cheat> cheats = mods.Cheats;
-            Dictionary<string, ulong> processExes = tamperInfo.BuildIds.Zip(tamperInfo.CodeAddresses, (k, v) => new { k, v })
-                .ToDictionary(x => x.k[..Math.Min(Cheat.CheatIdSize, x.k.Length)], x => x.v);
+            string[] buildIds = tamperInfo.BuildIds.ToArray();
+            ulong[] codeAddresses = tamperInfo.CodeAddresses.ToArray();
+            Dictionary<string, ulong> processExes = new(StringComparer.OrdinalIgnoreCase);
+
+            for (int index = 0; index < Math.Min(buildIds.Length, codeAddresses.Length); index++)
+            {
+                processExes[NormalizeCheatId(buildIds[index])] = codeAddresses[index];
+            }
 
             foreach (Cheat cheat in cheats)
             {
-                string cheatId = Path.GetFileNameWithoutExtension(cheat.Path.Name).ToUpper();
+                string cheatId = NormalizeCheatId(Path.GetFileNameWithoutExtension(cheat.Path.Name));
 
                 if (!processExes.TryGetValue(cheatId, out ulong exeAddress))
                 {
@@ -760,11 +800,22 @@ namespace Ryujinx.HLE.HOS
         internal static void EnableCheats(ulong applicationId, TamperMachine tamperMachine)
         {
             DirectoryInfo contentDirectory = FindApplicationDir(new DirectoryInfo(Path.Combine(GetModsBasePath(), AmsContentsDir)), $"{applicationId:x16}");
+
+            if (contentDirectory == null)
+            {
+                tamperMachine.EnableAllCheats();
+                return;
+            }
+
             string enabledCheatsPath = Path.Combine(contentDirectory.FullName, CheatDir, "enabled.txt");
 
             if (File.Exists(enabledCheatsPath))
             {
                 tamperMachine.EnableCheats(File.ReadAllLines(enabledCheatsPath));
+            }
+            else
+            {
+                tamperMachine.EnableAllCheats();
             }
         }
 

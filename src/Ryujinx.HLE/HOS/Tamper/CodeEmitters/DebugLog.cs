@@ -81,7 +81,7 @@ namespace Ryujinx.HLE.HOS.Tamper.CodeEmitters
                     throw new TamperCompilationException($"Invalid operand type {operandType} in Atmosphere cheat");
             }
 
-            InstructionHelper.Emit(typeof(OpLog<>), operationWidth, context, logId, sourceOperand);
+            InstructionHelper.EmitLog(operationWidth, context, logId, sourceOperand);
         }
     }
 }

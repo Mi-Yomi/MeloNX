@@ -84,7 +84,7 @@ struct FirmwareView: View {
     }
     
     func importFirmware() {
-        fileImporter.importFiles(types: [.item, .folder], allowMultiple: false) { result in
+        fileImporter.importFiles(types: [.folder, .zip, .xci], allowMultiple: false) { result in
             ryujinxController.handleFirmwareImport(result: result)
             checkForFirmware()
         }

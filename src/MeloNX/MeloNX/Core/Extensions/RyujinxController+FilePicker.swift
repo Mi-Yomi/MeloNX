@@ -79,23 +79,18 @@ extension RyujinxController {
             }
             
             do {
-                let fun = url.startAccessingSecurityScopedResource()
                 let path = url.path
                 
                 try Ryujinx.installFirmware(at: path)
                 objectWillChange.send()
                 _ = firmwareVersion
-                
-                if fun {
-                    url.stopAccessingSecurityScopedResource()
-                }
             } catch FirmwareInstallationError.failedInstall(let string) {
-                AppAlerts.showSyncAlert(title: "Installing Firmware Failed", message: string)
+                AppAlerts.showSyncAlert(title: "Installing Firmware Failed", message: string, hasCancel: false)
             } catch {
-                AppAlerts.showSyncAlert(title: "Installing Firmware Failed", message: error.localizedDescription)
+                AppAlerts.showSyncAlert(title: "Installing Firmware Failed", message: error.localizedDescription, hasCancel: false)
             }
         case .failure(let error):
-            AppAlerts.showSyncAlert(title: "Installing Firmware Failed", message: error.localizedDescription)
+            AppAlerts.showSyncAlert(title: "Installing Firmware Failed", message: error.localizedDescription, hasCancel: false)
         }
     }
     

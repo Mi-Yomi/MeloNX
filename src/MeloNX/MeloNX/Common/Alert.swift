@@ -11,7 +11,35 @@ import SwiftUI
 
 class AppAlerts {
     static func topViewController() -> UIViewController? {
-        return UIApplication.shared.keyWindow?.rootViewController
+        let rootViewController = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first { $0.isKeyWindow }?
+            .rootViewController ?? UIApplication.shared.windows.first?.rootViewController
+        
+        guard let rootViewController else {
+            return nil
+        }
+        
+        return topMost(of: rootViewController)
+    }
+    
+    private static func topMost(of viewController: UIViewController) -> UIViewController {
+        if let presented = viewController.presentedViewController {
+            return topMost(of: presented)
+        }
+        
+        if let navigationController = viewController as? UINavigationController,
+           let visibleViewController = navigationController.visibleViewController {
+            return topMost(of: visibleViewController)
+        }
+        
+        if let tabController = viewController as? UITabBarController,
+           let selectedViewController = tabController.selectedViewController {
+            return topMost(of: selectedViewController)
+        }
+        
+        return viewController
     }
     
     static func showAlert(_ viewController: UIViewController? = nil,
@@ -30,12 +58,12 @@ class AppAlerts {
         }
         
         if Thread.isMainThread {
-            let coolVC = viewController ?? UIApplication.shared.windows.first?.rootViewController!
-            coolVC!.present(alert, animated: true, completion: nil)
+            let coolVC = viewController ?? topViewController()
+            coolVC?.present(alert, animated: true, completion: nil)
         } else {
             DispatchQueue.main.async {
-                let coolVC = viewController ?? UIApplication.shared.windows.first?.rootViewController!
-                coolVC!.present(alert, animated: true, completion: nil)
+                let coolVC = viewController ?? topViewController()
+                coolVC?.present(alert, animated: true, completion: nil)
             }
         }
     }
@@ -48,10 +76,6 @@ class AppAlerts {
         hasCancel: Bool = true,
         alertHandler: @escaping (String) -> Void = { _ in }
     ) -> UIAlertController? {
-        
-        guard let presenter = topViewController() else {
-            fatalError("No Top Controller")
-        }
         
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         
@@ -68,7 +92,7 @@ class AppAlerts {
         }
         
         Task { @MainActor in
-            presenter.present(alert, animated: true)
+            topViewController()?.present(alert, animated: true)
         }
         
         return alert
@@ -138,4 +162,3 @@ class AppAlerts {
         }
     }
 }
-

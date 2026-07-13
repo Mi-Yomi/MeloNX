@@ -499,9 +499,7 @@ namespace Ryujinx.Library
 
         public Ryujinx.HLE.HOS.Services.Account.Acc.UserProfile ShowPlayerSelectDialog()
         {
-            Logger.Warning?.Print(LogClass.Application, "Player select dialog is not supported in headless mode. Using default profile.");
-
-            return null;
+            return AccountSaveDataManager.GetLastUsedUser();
         }
 
         public void TakeScreenshot()

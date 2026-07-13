@@ -1,7 +1,5 @@
 using Ryujinx.HLE.Exceptions;
 using Ryujinx.HLE.HOS.Tamper.Operations;
-using System;
-using System.Collections.Generic;
 
 namespace Ryujinx.HLE.HOS.Tamper.CodeEmitters
 {
@@ -71,53 +69,37 @@ namespace Ryujinx.HLE.HOS.Tamper.CodeEmitters
                     throw new TamperCompilationException($"Invalid right-hand side switch {rightHandSideIsImmediate} in Atmosphere cheat");
             }
 
-            void Emit(Type operationType, IOperand rhs = null)
-            {
-                List<IOperand> operandList =
-                [
-                    destinationRegister,
-                    leftHandSideRegister
-                ];
-
-                if (rhs != null)
-                {
-                    operandList.Add(rhs);
-                }
-
-                InstructionHelper.Emit(operationType, operationWidth, context, operandList.ToArray());
-            }
-
             switch (operation)
             {
                 case Add:
-                    Emit(typeof(OpAdd<>), rightHandSideOperand);
+                    InstructionHelper.Emit(InstructionHelper.Operation.Add, operationWidth, context, destinationRegister, leftHandSideRegister, rightHandSideOperand);
                     break;
                 case Sub:
-                    Emit(typeof(OpSub<>), rightHandSideOperand);
+                    InstructionHelper.Emit(InstructionHelper.Operation.Sub, operationWidth, context, destinationRegister, leftHandSideRegister, rightHandSideOperand);
                     break;
                 case Mul:
-                    Emit(typeof(OpMul<>), rightHandSideOperand);
+                    InstructionHelper.Emit(InstructionHelper.Operation.Mul, operationWidth, context, destinationRegister, leftHandSideRegister, rightHandSideOperand);
                     break;
                 case Lsh:
-                    Emit(typeof(OpLsh<>), rightHandSideOperand);
+                    InstructionHelper.Emit(InstructionHelper.Operation.Lsh, operationWidth, context, destinationRegister, leftHandSideRegister, rightHandSideOperand);
                     break;
                 case Rsh:
-                    Emit(typeof(OpRsh<>), rightHandSideOperand);
+                    InstructionHelper.Emit(InstructionHelper.Operation.Rsh, operationWidth, context, destinationRegister, leftHandSideRegister, rightHandSideOperand);
                     break;
                 case And:
-                    Emit(typeof(OpAnd<>), rightHandSideOperand);
+                    InstructionHelper.Emit(InstructionHelper.Operation.And, operationWidth, context, destinationRegister, leftHandSideRegister, rightHandSideOperand);
                     break;
                 case Or:
-                    Emit(typeof(OpOr<>), rightHandSideOperand);
+                    InstructionHelper.Emit(InstructionHelper.Operation.Or, operationWidth, context, destinationRegister, leftHandSideRegister, rightHandSideOperand);
                     break;
                 case Not:
-                    Emit(typeof(OpNot<>));
+                    InstructionHelper.Emit(InstructionHelper.Operation.Not, operationWidth, context, destinationRegister, leftHandSideRegister);
                     break;
                 case Xor:
-                    Emit(typeof(OpXor<>), rightHandSideOperand);
+                    InstructionHelper.Emit(InstructionHelper.Operation.Xor, operationWidth, context, destinationRegister, leftHandSideRegister, rightHandSideOperand);
                     break;
                 case Mov:
-                    Emit(typeof(OpMov<>));
+                    InstructionHelper.Emit(InstructionHelper.Operation.Mov, operationWidth, context, destinationRegister, leftHandSideRegister);
                     break;
                 default:
                     throw new TamperCompilationException($"Invalid arithmetic operation {operation} in Atmosphere cheat");

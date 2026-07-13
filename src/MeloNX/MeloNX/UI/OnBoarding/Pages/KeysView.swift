@@ -8,6 +8,19 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+enum Keys: String, CaseIterable {
+    case prod
+    case title
+    
+    var fileName: String {
+        "\(rawValue).keys"
+    }
+    
+    static func keyForFile(_ file: URL) -> Keys? {
+        Keys.allCases.first(where: { $0.fileName == file.lastPathComponent })
+    }
+}
+
 struct KeysView: View {
     var goForward: () -> Void
     
@@ -16,9 +29,6 @@ struct KeysView: View {
     let fileManager: FileManager = .default
     
     let destination: URL = .keysFolderURL
-    let keys: [String] = [
-        "prod.keys", "title.keys"
-    ]
     
     @State var keysAdded: Bool = false
     
@@ -55,7 +65,7 @@ struct KeysView: View {
                     .foregroundColor(.primary)
                     .padding()
                 
-                Text("Import Encryption Keys.\nRequired to be dumped from a Modded Nintendo Switch.")
+                Text("Import Encryption Keys (prod.keys & title.keys).\nRequired to be dumped from a Modded Nintendo Switch.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -84,6 +94,16 @@ struct KeysView: View {
                             view
                                 .padding(.bottom)
                         }
+                        .if(checkFor(.prod) && !checkFor(.title)) { view in
+                            view
+                                .contextMenu {
+                                    Button(role: .destructive) {
+                                        goForward()
+                                    } label: {
+                                        Text("Continue without title.keys")
+                                    }
+                                }
+                        }
                 }
         }
     }
@@ -91,35 +111,70 @@ struct KeysView: View {
     func importKeys() {
         fileImporter.importFiles(types: [.item], allowMultiple: true) { result in
             switch result {
-            case .success(let success):
-                for url in success {
-                    guard keys.contains(url.lastPathComponent) else { continue }
-                    
-                    if !ryujinxController.verifyKeysFile(path: url) {
-                        AppAlerts.showSyncAlert(title: "Invalid Keys", message: "Input file is not a valid key package")
+            case .success(let urls):
+                var unsupportedFiles: [String] = []
+                var invalidFiles: [String] = []
+                var failedCopies: [String] = []
+
+                for url in urls {
+                    let fileName = url.lastPathComponent
+
+                    guard Keys.allCases.compactMap(\.fileName).contains(fileName) else {
+                        unsupportedFiles.append(fileName)
+                        continue
                     }
-                    
+
+                    guard ryujinxController.verifyKeysFile(path: url) else {
+                        invalidFiles.append(fileName)
+                        continue
+                    }
+
                     do {
-                        if fileManager.fileExists(atPath: URL.keysFolderURL.appendingPathComponent(url.lastPathComponent).path) {
-                            try? fileManager.removeItem(at: .keysFolderURL.appendingPathComponent(url.lastPathComponent))
+                        let destinationURL: URL = .keysFolderURL.appendingPathComponent(fileName)
+
+                        if fileManager.fileExists(atPath: destinationURL.path) {
+                            try fileManager.removeItem(at: destinationURL)
                         }
-                        
-                        try fileManager.copyItem(at: url, to: .keysFolderURL.appendingPathComponent(url.lastPathComponent))
-                    } catch { AppAlerts.showSyncAlert(title: "Import Failed", message: error.localizedDescription) }
+
+                        try fileManager.copyItem(at: url, to: destinationURL)
+                    } catch {
+                        failedCopies.append("\(fileName): \(error.localizedDescription)")
+                    }
+                }
+
+                checkForKeys()
+
+                var messages: [String] = []
+
+                if !unsupportedFiles.isEmpty {
+                    messages.append("Only prod.keys and title.keys are supported here. Ignored: \(unsupportedFiles.joined(separator: ", "))")
+                }
+
+                if !invalidFiles.isEmpty {
+                    messages.append("Invalid key file format: \(invalidFiles.joined(separator: ", "))")
+                }
+
+                if !failedCopies.isEmpty {
+                    messages.append("Failed to copy: \(failedCopies.joined(separator: ", "))")
+                }
+
+                if !messages.isEmpty {
+                    AppAlerts.showSyncAlert(title: "Import Keys Failed", message: messages.joined(separator: "\n\n"), hasCancel: false)
                 }
                 
-                
-                checkForKeys()
-                
             case .failure(let failure):
-                AppAlerts.showSyncAlert(title: "Import Failed", message: failure.localizedDescription)
+                AppAlerts.showSyncAlert(title: "Import Failed", message: failure.localizedDescription, hasCancel: false)
             }
         }
     }
     
+    func checkFor(_ key: Keys) -> Bool {
+        ryujinxController.verifyKeysFile(path: .keysFolderURL, keys: .prod)
+    }
+    
     func checkForKeys() {
-        let prod = ryujinxController.verifyKeysFile(path: .keysFolderURL.appendingPathComponent(keys[0]))
-        let title = ryujinxController.verifyKeysFile(path: .keysFolderURL.appendingPathComponent(keys[1]))
+        let prod = checkFor(.prod)
+        let title = checkFor(.title)
         
         keysAdded = prod && title
         
@@ -128,13 +183,25 @@ struct KeysView: View {
 }
 
 extension RyujinxController {
+    func verifyKeysFile(path parentPath: URL, keys: Keys) -> Bool {
+        let genericPattern = "^[a-z0-9_]+ = [a-z0-9]+$"
+        let titlePattern = "^[a-z0-9]{32} = [a-z0-9]{32}$"
+        
+        let path = (parentPath.lastPathComponent != keys.fileName && parentPath.hasDirectoryPath) ? parentPath.appendingPathComponent(keys.fileName) : parentPath
+        
+        return switch keys {
+        case .prod: verifyKeys(for: path.path, pattern: genericPattern)
+        case .title: verifyKeys(for: path.path, pattern: titlePattern)
+        }
+    }
+    
     func verifyKeysFile(path: URL) -> Bool {
         let genericPattern = "^[a-z0-9_]+ = [a-z0-9]+$"
         let titlePattern = "^[a-z0-9]{32} = [a-z0-9]{32}$"
         
-        return switch path.lastPathComponent {
-        case "prod.keys": verifyKeys(for: path.path, pattern: genericPattern)
-        case "title.keys": verifyKeys(for: path.path, pattern: titlePattern)
+        return switch Keys.keyForFile(path) {
+        case .prod: verifyKeys(for: path.path, pattern: genericPattern)
+        case .title: verifyKeys(for: path.path, pattern: titlePattern)
         default: false
         }
     }

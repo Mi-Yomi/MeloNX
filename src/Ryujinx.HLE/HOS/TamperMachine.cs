@@ -84,6 +84,14 @@ namespace Ryujinx.HLE.HOS
             }
         }
 
+        public void EnableAllCheats()
+        {
+            foreach (ITamperProgram program in _programDictionary.Values)
+            {
+                program.IsEnabled = true;
+            }
+        }
+
         private static bool IsProcessValid(ITamperedProcess process)
         {
             return process.State is not ProcessState.Crashed and not ProcessState.Exiting and not ProcessState.Exited;

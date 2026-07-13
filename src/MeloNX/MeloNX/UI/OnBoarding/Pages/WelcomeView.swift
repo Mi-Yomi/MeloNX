@@ -12,6 +12,7 @@ import Foundation
 
 struct WelcomeView: View {
     var goForward: () -> Void
+    var finish: () -> Void
     
     @State var versionInformation: WhatsNewDoc?
     
@@ -59,6 +60,9 @@ struct WelcomeView: View {
                     )
                     .shadow(color: .black.opacity(0.1), radius: 15, x: 0, y: 6)
                     .padding(.top, 60)
+                    .onTapGesture(count: 10) {
+                        finish()
+                    }
                 
                 Text("Welcome to MeloNX")
                     .font(.title)
@@ -152,6 +156,9 @@ struct WelcomeView: View {
                 )
                 .shadow(color: .black.opacity(0.1), radius: 15, x: 0, y: 6)
                 .padding(.top, 60)
+                .onTapGesture(count: 10) {
+                    finish()
+                }
             
             Text("Welcome to MeloNX" + versionNumber)
                 .font(.title)

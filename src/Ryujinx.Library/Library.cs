@@ -229,6 +229,10 @@ namespace Ryujinx.Library
             catch (Exception exception)
             {
                 return Marshal.StringToHGlobalAnsi(exception.ToString());
+            } 
+            catch 
+            {
+                return Marshal.StringToHGlobalAnsi("Unknown Exception.");
             }
 
             return null;

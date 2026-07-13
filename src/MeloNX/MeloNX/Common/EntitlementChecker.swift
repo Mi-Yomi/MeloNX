@@ -29,7 +29,7 @@ func SecTaskCreateFromSelf(
 ) -> SecTaskRef?
 
 @_silgen_name("CFRelease")
-func CFRelease(_ cf: CFTypeRef)
+func CFRelease(_ cf: CFTypeRef?)
 
 @_silgen_name("SecTaskCopyValuesForEntitlements")
 func SecTaskCopyValuesForEntitlements(

@@ -13,7 +13,7 @@ struct MetalViewContainer: View {
     var airplay: Bool = false
     @State var isPortrait: Bool = false
 
-    @EnvironmentObject var ryujinxController: RyujinxController
+    @ObservedObject var ryujinxController: RyujinxController
     @ObservedObject var statisticsHandler: StatisticsHandler
     @ObservedObject var nativeSettingsManager: NativeSettingsManager
     @ObservedObject var menuViewHandler: InGameConfigView_MenuView = .shared

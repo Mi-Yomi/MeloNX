@@ -71,7 +71,7 @@ struct EmulationView: View {
     
     @ViewBuilder
     func emulationView(_ airplay: Bool = false) -> some View {
-        MetalViewContainer(showView: isConnected ? airplay : true, airplay: airplay, statisticsHandler: statisticsHandler, nativeSettingsManager: nativeSettingsManager)
+        MetalViewContainer(showView: isConnected ? airplay : true, airplay: airplay, ryujinxController: ryujinxController, statisticsHandler: statisticsHandler, nativeSettingsManager: nativeSettingsManager)
             .overlay {
                 if controllerManager.hasVirtualController() && !airplay {
                     ControllerView(controller: VirtualControllerManager.shared, isEditing: false)

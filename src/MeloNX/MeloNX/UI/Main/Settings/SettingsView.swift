@@ -979,6 +979,7 @@ struct FolderListView: View {
                     if case .success(let paths) = result {
                         for url in paths {
                             let _ = folderManager.addFolder(url: url)
+                            RyujinxController.shared.loadGames()
                         }
                     }
                 }

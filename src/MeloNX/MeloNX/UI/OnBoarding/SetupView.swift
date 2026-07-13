@@ -25,7 +25,7 @@ struct SetupView: View {
     
     var body: some View {
         switch currentPage {
-        case .welcome: WelcomeView(goForward: goForward).transition(.backslide)
+        case .welcome: WelcomeView(goForward: goForward, finish: finishSetup).transition(.backslide)
         case .keys: KeysView(goForward: goForward).transition(.backslide)
         case .firmware: FirmwareView(goForward: goForward).transition(.backslide)
         }
