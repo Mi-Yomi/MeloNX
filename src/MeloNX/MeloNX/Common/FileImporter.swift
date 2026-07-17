@@ -9,6 +9,27 @@ import UIKit
 import Combine
 import UniformTypeIdentifiers
 
+struct UTTypeWrapper: Codable {
+    var types: [UTType] {
+        stringTypes.map { UTType($0) ?? .item }
+    }
+    
+    var stringTypes: [String]
+    
+    init(stringTypes: [String]) {
+        self.stringTypes = stringTypes
+    }
+    
+    init(types: [UTType]) {
+        self.stringTypes = types.map(\.identifier)
+    }
+    
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.stringTypes = try container.decode([String].self, forKey: .stringTypes)
+    }
+}
+
 class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate {
     static let shared = FileImporterManager()
     
@@ -21,25 +42,21 @@ class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate 
     }
     
     func importFiles(
-        types fullTypes: [UTType],
+        types: [UTType],
         allowMultiple: Bool = false,
         completion: @escaping (Result<[URL], Error>) -> Void
     ) {
         self.currentCompletion = { result in
-           Task { @MainActor in
+            Task { @MainActor in
                 completion(result)
-               self.stopAccessingSecurityScopedResources()
+                self.stopAccessingSecurityScopedResources()
             }
         }
         
-        var types = fullTypes
-    
-        let needsAsCopy = types == [.folder] ? false : AppEnvironment.shared.needsAsCopy
-        if types.contains(.folder), needsAsCopy {
-            types.removeAll(where: { $0 == .folder })
-        }
+        let needsAsCopy = types.contains(.folder) ? false : AppEnvironment.shared.needsAsCopy
         
-        let documentPicker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: needsAsCopy)
+        
+        let documentPicker: UIDocumentPickerViewController = .init(forOpeningContentTypes: types, asCopy: needsAsCopy)
         documentPicker.delegate = self
         documentPicker.allowsMultipleSelection = allowMultiple
         documentPicker.modalPresentationStyle = .formSheet
@@ -68,7 +85,7 @@ class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate 
         }
         return topMost(of: rootViewController)
     }
-
+    
     private func topMost(of viewController: UIViewController) -> UIViewController {
         if let presented = viewController.presentedViewController {
             return topMost(of: presented)

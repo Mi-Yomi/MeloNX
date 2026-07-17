@@ -93,16 +93,18 @@ namespace Ryujinx.Audio.Backends.SDL3
             if (frameCount == 0)
             {
                 // SDL3 left the responsibility to the user to clear the buffer.
-                streamSpan.Clear();
+                // streamSpan.Clear();
 
                 return;
             }
 
-            using SpanOwner<byte> samplesOwner = SpanOwner<byte>.Rent(frameCount * _bytesPerFrame);
+            int byteCount = frameCount * _bytesPerFrame;
+
+            using SpanOwner<byte> samplesOwner = SpanOwner<byte>.Rent(byteCount);
 
             Span<byte> samples = samplesOwner.Span;
 
-            _ringBuffer.Read(samples, 0, samples.Length);
+            _ringBuffer.Read(samples, 0, byteCount);
 
             // Zero the dest buffer
             streamSpan.Clear();
@@ -112,8 +114,8 @@ namespace Ryujinx.Audio.Backends.SDL3
                 {
 
                     // Apply volume to written data
-                    SDL_MixAudio(pStreamDst, pStreamSrc, _nativeSampleFormat, (uint)samples.Length, _driver.Volume * _volume);
-                    SDL_PutAudioStreamData(streamDevice, (nint)pStreamDst, additionalAmount);
+                    SDL_MixAudio(pStreamDst, pStreamSrc, _nativeSampleFormat, (uint)byteCount, _driver.Volume * _volume);
+                    SDL_PutAudioStreamData(streamDevice, (nint)pStreamDst, byteCount);
                 }
             }
 

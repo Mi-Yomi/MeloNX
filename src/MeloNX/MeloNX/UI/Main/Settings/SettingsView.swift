@@ -37,7 +37,13 @@ struct SettingsView: View {
     
     
     private var config: Binding<Options> {
-        $ryujinxController.settings
+        Binding(
+            get: { ryujinxController.settings },
+            set: {
+                ryujinxController.settings = $0
+                ryujinxController.saveConfig()
+            }
+        )
     }
     
     var currentResolution: String {
@@ -125,11 +131,15 @@ struct SettingsView: View {
             }
         }
     }
-    
+
+    var needsExtendedVirtualAddressing: Bool {
+        AppEnvironment.shared.requiresExtendedVirtualAddressing()
+    }
+
     var isPortrait: Bool {
         AlertHandlers.topWindow().bounds.height > AlertHandlers.topWindow().bounds.width
     }
-    
+
     // MARK: - Body
     
     var body: some View {
@@ -197,6 +207,7 @@ struct SettingsView: View {
                         
                         if !ProcessInfo.processInfo.isiOSAppOnMac {
                             let memoryLimit = checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit")
+                            let extendedVirtualAddressing = checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing")
                             Menu {
                                 Button {
                                     if !memoryLimit {
@@ -205,9 +216,24 @@ struct SettingsView: View {
                                 } label: {
                                     Text("Increased Memory Limit: \(memoryLimit ? "Enabled" : "Disabled")")
                                 }
+                                if needsExtendedVirtualAddressing ? true : extendedVirtualAddressing {
+                                    Button {
+                                        if !extendedVirtualAddressing {
+                                            UIApplication.shared.open(URL(string: "https://git.ryujinx.app/projects/MeloNX#entitlements")!)
+                                        }
+                                    } label: {
+                                        Text("Extended Virtual Addressing: \(memoryLimit ? "Enabled" : "Disabled")")
+                                    }
+                                }
                             } label: {
                                 Label(title: {
-                                    memoryLimit ? Text(memoryText + "  ") + Text(Image(systemName: "checkmark.circle.fill")).foregroundColor(.green) : Text(memoryText)
+                                    if memoryLimit && extendedVirtualAddressing {
+                                        Text(memoryText + "  ") + Text(Image(systemName: "checkmark.circle.fill")).foregroundColor(.green)
+                                    } else if memoryLimit {
+                                        Text(memoryText + "  ") + Text(Image(systemName: "checkmark.circle.fill")).foregroundColor(needsExtendedVirtualAddressing ? .orange : .green)
+                                    } else {
+                                        Text(memoryText)
+                                    }
                                 }, icon: {
                                     Image(systemName: "memorychip.fill")
                                 })

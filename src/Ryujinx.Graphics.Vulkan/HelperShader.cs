@@ -46,6 +46,7 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly ShaderCollection _programColorCopyShortening;
         private readonly ShaderCollection _programColorCopyToNonMs;
         private readonly ShaderCollection _programColorCopyWidening;
+        private readonly ShaderCollection _programPresentCopy;
         private readonly ShaderCollection _programColorDrawToMs;
         private readonly ShaderCollection _programDepthBlit;
         private readonly ShaderCollection _programDepthBlitMs;
@@ -130,6 +131,15 @@ namespace Ryujinx.Graphics.Vulkan
             _programColorCopyWidening = gd.CreateProgramWithMinimalLayout([
                 new ShaderSource(ReadSpirv("ColorCopyWideningCompute.spv"), ShaderStage.Compute, TargetLanguage.Spirv)
             ], colorCopyResourceLayout);
+
+            ResourceLayout presentCopyResourceLayout = new ResourceLayoutBuilder()
+                .Add(ResourceStages.Compute, ResourceType.UniformBuffer, 0)
+                .Add(ResourceStages.Compute, ResourceType.TextureAndSampler, 0)
+                .Add(ResourceStages.Compute, ResourceType.Image, 0, true).Build();
+
+            _programPresentCopy = gd.CreateProgramWithMinimalLayout([
+                new ShaderSource(ReadSpirv("PresentCopyCompute.spv"), ShaderStage.Compute, TargetLanguage.Spirv)
+            ], presentCopyResourceLayout);
 
             ResourceLayout colorDrawToMsResourceLayout = new ResourceLayoutBuilder()
                 .Add(ResourceStages.Fragment, ResourceType.UniformBuffer, 0)
@@ -443,6 +453,50 @@ namespace Ryujinx.Graphics.Vulkan
                 _pipeline.SetDepthTest(new DepthTestDescriptor(false, false, CompareOp.Always));
             }
 
+            _pipeline.Finish(gd, cbs);
+        }
+
+        public void PresentCopy(
+            VulkanRenderer gd,
+            CommandBufferScoped cbs,
+            TextureView src,
+            Auto<DisposableImageView> dst,
+            Extents2D srcRegion,
+            Extents2D dstRegion,
+            bool linearFilter)
+        {
+            int dispatchWidth = Math.Abs(dstRegion.X2 - dstRegion.X1);
+            int dispatchHeight = Math.Abs(dstRegion.Y2 - dstRegion.Y1);
+
+            if (dispatchWidth == 0 || dispatchHeight == 0)
+            {
+                return;
+            }
+
+            const int ParamsBufferSize = 32;
+
+            Span<float> shaderParams = stackalloc float[ParamsBufferSize / sizeof(float)];
+
+            shaderParams[0] = srcRegion.X1;
+            shaderParams[1] = srcRegion.X2;
+            shaderParams[2] = srcRegion.Y1;
+            shaderParams[3] = srcRegion.Y2;
+            shaderParams[4] = dstRegion.X1;
+            shaderParams[5] = dstRegion.Y1;
+            shaderParams[6] = dstRegion.X2;
+            shaderParams[7] = dstRegion.Y2;
+
+            using ScopedTemporaryBuffer buffer = gd.BufferManager.ReserveOrCreate(gd, cbs, ParamsBufferSize);
+
+            buffer.Holder.SetDataUnchecked<float>(buffer.Offset, shaderParams);
+
+            _pipeline.SetCommandBuffer(cbs);
+            _pipeline.SetProgram(_programPresentCopy);
+            _pipeline.SetTextureAndSamplerIdentitySwizzle(ShaderStage.Compute, 0, src, linearFilter ? _samplerLinear : _samplerNearest);
+            _pipeline.SetImage(0, dst);
+            _pipeline.SetUniformBuffers([new BufferAssignment(0, buffer.Range)]);
+            _pipeline.DispatchCompute(BitUtils.DivRoundUp(dispatchWidth, 16), BitUtils.DivRoundUp(dispatchHeight, 16), 1);
+            _pipeline.ComputeBarrier();
             _pipeline.Finish(gd, cbs);
         }
 
@@ -1683,6 +1737,7 @@ namespace Ryujinx.Graphics.Vulkan
                 _programColorCopyShortening.Dispose();
                 _programColorCopyToNonMs.Dispose();
                 _programColorCopyWidening.Dispose();
+                _programPresentCopy.Dispose();
                 _programColorDrawToMs.Dispose();
                 _programDepthBlit.Dispose();
                 _programDepthBlitMs.Dispose();

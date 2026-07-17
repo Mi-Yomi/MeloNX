@@ -71,7 +71,6 @@ struct GameRowView: View {
                 
                 VStack(alignment: .leading) {
                     HStack {
-                        // Play button — tinted by current theme accent
                         Image(systemName: "play.circle.fill")
                             .font(.title3)
                             .foregroundColor(theme.accent.primary)

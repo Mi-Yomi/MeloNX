@@ -27,7 +27,6 @@ enum AlertHandlers {
             
             let bytes = Data(bytesNoCopy: ptr, count: Int(data.len), deallocator: .none)
             guard let request = try? JSONDecoder().decode(TextInputRequest.self, from: bytes) else {
-                print("[AlertHandlers] show_text_input: failed to decode request")
                 return
             }
             
@@ -39,13 +38,13 @@ enum AlertHandlers {
     
     private static func presentTextInput(_ request: TextInputRequest) {
         let alert = UIAlertController(
-            title:   request.title,
+            title: request.title,
             message: request.message,
             preferredStyle: .alert
         )
         
         alert.addTextField { field in
-            field.placeholder       = request.placeholder
+            field.placeholder = request.placeholder
             field.autocorrectionType = .no
         }
         
@@ -71,7 +70,6 @@ enum AlertHandlers {
             
             let bytes = Data(bytesNoCopy: ptr, count: Int(data.len), deallocator: .none)
             guard let request = try? JSONDecoder().decode(AlertRequest.self, from: bytes) else {
-                print("[AlertHandlers] show_alert: failed to decode request")
                 return
             }
             
@@ -87,8 +85,6 @@ enum AlertHandlers {
             message: request.message,
             preferredStyle: .alert
         )
-        
-        
         
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         
@@ -124,10 +120,7 @@ enum AlertHandlers {
     
     
     public static func topWindow() -> UIWindow {
-        guard
-            let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive }),
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }),
             let root = scene.windows.first(where: { $0.isKeyWindow })
         else { return UIApplication.shared.keyWindow! }
         return root
@@ -135,11 +128,7 @@ enum AlertHandlers {
     
     
     private static func topViewController() -> UIViewController? {
-        guard
-            let scene = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .first(where: { $0.activationState == .foregroundActive }),
-            let root = scene.windows.first(where: { $0.isKeyWindow })?.rootViewController
+        guard let root = topWindow().rootViewController
         else { return nil }
         
         var top = root
@@ -148,6 +137,4 @@ enum AlertHandlers {
         }
         return top
     }
-    
 }
-

@@ -52,8 +52,28 @@ class AppEnvironment {
             let hostIdentifier = Self.getModifiedHostIdentifier(originalHostIdentifier: "")
             if hostIdentifier != Bundle.main.bundleIdentifier! {
                 self.needsAsCopy = true
+                
+                Self.swizzleInstanceMethod(
+                    for: NSClassFromString("DOCConfiguration")!,
+                    original: NSSelectorFromString("setHostIdentifier:"),
+                    swizzled: #selector(DOCConfigurationLC.hook_setHostIdentifier(_:))
+                )
             }
         }
+    }
+    
+    var _requiresVirtualAddressing: Bool? = nil
+    
+    func requiresExtendedVirtualAddressing() -> Bool {
+        if let _requiresVirtualAddressing { return _requiresVirtualAddressing }
+        
+        let fourGB = 4 * 1024 * 1024 * 1024
+
+        let addr = mmap(nil, fourGB, PROT_NONE, MAP_PRIVATE | MAP_ANON, -1, 0)
+        
+        _requiresVirtualAddressing = addr == MAP_FAILED
+        
+        return addr == MAP_FAILED ? true : munmap(addr, fourGB) != 0;
     }
     
     static private func liveContainer() -> (Bundle?, Bool)? {
@@ -134,7 +154,6 @@ class AppEnvironment {
                         exit(0)
                     }
                 }
-                
             default:
                 return
             }

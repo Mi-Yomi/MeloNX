@@ -41,6 +41,15 @@ class BaseController: Equatable, Identifiable {
     var inputQueue: DispatchQueue
     var motionQueue: DispatchQueue
     
+    private let lifecycleLock = NSLock()
+    private var _isActive: Bool = true
+    
+    var isActive: Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        return _isActive
+    }
+    
     var usesDeviceHandlers: Bool {
         virtual ? true : (name.lowercased() == "Joy-Con (l/R)".lowercased() ||
                           name.lowercased().hasSuffix("backbone") ||
@@ -81,6 +90,8 @@ class BaseController: Equatable, Identifiable {
     }
     
     func updateAxisValue(x: Float, y: Float, forAxis axis: Int) {
+        guard isActive else { return }
+        
         Ryujinx.setGamepadStickAxis(self.pointer, stickId: axis, x: x, y: y)
     }
     
@@ -93,6 +104,8 @@ class BaseController: Equatable, Identifiable {
     }
     
     func setButtonState(_ state: UInt8, for button: VirtualControllerButton) {
+        guard isActive else { return }
+        
         Ryujinx.setGamepadButtonState(self.pointer, buttonId: button.rawValue, pressed: state == 1)
     }
     
@@ -189,12 +202,29 @@ class BaseController: Equatable, Identifiable {
     }
     
     func cleanup() {
+        guard markInactive() else { return }
+        
+        let callbackName = "rumble-\(self.id)"
+        callbackName.withCString { UnregisterCallback($0) }
+        
         stopMotion()
+        rumbleController = nil
+        
+        let pointer = self.pointer
 
-        inputQueue.async { [weak self] in
-            guard let self = self else { return }
-            Ryujinx.detachGamepad(self.pointer)
+        inputQueue.async {
+            Ryujinx.detachGamepad(pointer)
         }
+    }
+    
+    private func markInactive() -> Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        
+        guard _isActive else { return false }
+        
+        _isActive = false
+        return true
     }
     
     static func == (lhs: BaseController, rhs: BaseController) -> Bool {

@@ -31,6 +31,8 @@ struct KeysView: View {
     let destination: URL = .keysFolderURL
     
     @State var keysAdded: Bool = false
+    @State var onlyProdAdded: Bool = false
+    
     
     var body: some View {
         ScrollView {
@@ -89,22 +91,23 @@ struct KeysView: View {
                         .frame(width: .infinity, height: .infinity)
                 )
                 .overlay(alignment: .bottom) {
-                    ContinueButton(text: "Continue", action: goForward, enabled: .constant(keysAdded))
+                    ContinueButton(text: "Continue", action: goForward2, success: onlyProdAdded, enabled: .constant(onlyProdAdded || keysAdded), showCheckmark: false, baseColor: onlyProdAdded ? .orange : .green)
                         .if(UIDevice.current.userInterfaceIdiom == .pad) { view in
                             view
                                 .padding(.bottom)
                         }
-                        .if(checkFor(.prod) && !checkFor(.title)) { view in
-                            view
-                                .contextMenu {
-                                    Button(role: .destructive) {
-                                        goForward()
-                                    } label: {
-                                        Text("Continue without title.keys")
-                                    }
-                                }
-                        }
                 }
+        }
+    }
+    
+    func goForward2() {
+        guard onlyProdAdded else { goForward(); return }
+        
+        AppAlerts.showSyncAlert(title: "Missing File", message: "title.keys recommended. Continue at your own risk.", hasCancel: true) { text in
+            switch text {
+            case "OK": goForward()
+            default: break
+            }
         }
     }
     
@@ -169,7 +172,7 @@ struct KeysView: View {
     }
     
     func checkFor(_ key: Keys) -> Bool {
-        ryujinxController.verifyKeysFile(path: .keysFolderURL, keys: .prod)
+        ryujinxController.verifyKeysFile(path: .keysFolderURL, keys: key)
     }
     
     func checkForKeys() {
@@ -177,6 +180,7 @@ struct KeysView: View {
         let title = checkFor(.title)
         
         keysAdded = prod && title
+        onlyProdAdded = prod && !title
         
         Ryujinx.reloadKeySet()
     }
@@ -189,6 +193,10 @@ extension RyujinxController {
         
         let path = (parentPath.lastPathComponent != keys.fileName && parentPath.hasDirectoryPath) ? parentPath.appendingPathComponent(keys.fileName) : parentPath
         
+        print(path)
+        
+        guard FileManager.default.fileExists(atPath: path.path) else { return false }
+        
         return switch keys {
         case .prod: verifyKeys(for: path.path, pattern: genericPattern)
         case .title: verifyKeys(for: path.path, pattern: titlePattern)
@@ -198,6 +206,8 @@ extension RyujinxController {
     func verifyKeysFile(path: URL) -> Bool {
         let genericPattern = "^[a-z0-9_]+ = [a-z0-9]+$"
         let titlePattern = "^[a-z0-9]{32} = [a-z0-9]{32}$"
+        
+        guard FileManager.default.fileExists(atPath: path.path) else { return false }
         
         return switch Keys.keyForFile(path) {
         case .prod: verifyKeys(for: path.path, pattern: genericPattern)

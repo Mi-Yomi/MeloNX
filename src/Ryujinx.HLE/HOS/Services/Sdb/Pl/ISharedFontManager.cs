@@ -103,8 +103,8 @@ namespace Ryujinx.HLE.HOS.Services.Sdb.Pl
                 loadedCount++;
             }
 
+            context.ResponseData.Write(1);
             context.ResponseData.Write(loadedCount);
-            context.ResponseData.Write((int)SharedFontType.Count);
 
             return ResultCode.Success;
         }

@@ -96,7 +96,7 @@ struct InGameConfigView: View {
             }
         }
         
-        /*
+        
         Button(role: .destructive) {
             Ryujinx.stopEmulation()
             Ryujinx.emulationView = nil
@@ -108,7 +108,7 @@ struct InGameConfigView: View {
                 Image(systemName: "x.circle")
             }
         }
-         */
+         
     }
     
     @ViewBuilder

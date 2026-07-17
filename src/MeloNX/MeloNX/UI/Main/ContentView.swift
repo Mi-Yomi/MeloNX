@@ -80,7 +80,7 @@ struct ContentView: View {
                         message: Text(LocalizedStringKey("MeloNX **REQUIRES** the Increased Memory Limit entitlement, Please follow the instructions on how to Install MeloNX and Enable the Entitlement.")),
                         primaryButton: .default(Text("Instructions")) {
                             UIApplication.shared.open(
-                                URL(string: "https://git.ryujinx.app/melonx/emu#how-to-install")!,
+                                URL(string: "https://git.ryujinx.app/projects/MeloNX#how-to-install")!,
                                 options: [:],
                                 completionHandler: nil
                             )
@@ -93,8 +93,29 @@ struct ContentView: View {
                 }
         case .noJIT:
             NoJITView(game: game)
+        case .extendedEntitlement:
+            ControllerView(controller: VirtualControllerManager.shared, isEditing: false)
+                .allowsHitTesting(false)
+                .frame(width: .infinity, height: .infinity)
+                .alert(isPresented: .constant(ryujinxController.isRunning.isEntitlement())) {
+                    Alert(
+                        title: Text("Entitlement"),
+                        message: Text(LocalizedStringKey("The Extended Virtual Addressing entitlement is required for your device, Please read the Information on how to Install MeloNX and Enable the **PAID** Entitlement.")),
+                        primaryButton: .default(Text("Information")) {
+                            UIApplication.shared.open(
+                                URL(string: "https://git.ryujinx.app/projects/MeloNX#entitlements")!,
+                                options: [:],
+                                completionHandler: nil
+                            )
+                            ryujinxController.isRunning = .stopped
+                        },
+                        secondaryButton: .cancel(Text("Cancel")) {
+                            ryujinxController.isRunning = .stopped
+                        }
+                    )
+                }
         case .usersList:
-            EmptyView() // TODO: Finish by 2.4.1 or 2.5
+            EmptyView() // TODO: Finish eventually™
         }
     }
     
@@ -105,8 +126,17 @@ struct ContentView: View {
                 tabView
             case .started(game: let game, state: let state):
                 emulationView(game: game, state: state)
-            case .crashed(result: _):
+            case .crashed(result: let crashed):
                 tabView
+                    .alert(isPresented: .constant(ryujinxController.isRunning.hasCrashed())) {
+                        Alert(
+                            title: Text("MeloNX Crashed!"),
+                            message: Text(LocalizedStringKey("MeloNX crashed with result: \(crashed)")),
+                            dismissButton: .cancel(Text("Cancel")) {
+                                ryujinxController.isRunning = .stopped
+                            }
+                        )
+                    }
             }
         }
         .onChange(of: scenePhase) { newPhase in

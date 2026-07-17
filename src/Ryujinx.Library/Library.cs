@@ -84,6 +84,7 @@ namespace Ryujinx.Library
         private static bool _enableMouse;
         private static nint nativeMetalLayer = nint.Zero;
         private static readonly Lock metalLayerLock = new();
+        private static readonly Lock inputConfigurationLock = new();
         private static KeyboardConfigNative? _keyboardConfig = null;
 
         [UnmanagedCallersOnly(EntryPoint = "main_ryujinx_sdl")]
@@ -159,6 +160,7 @@ namespace Ryujinx.Library
 
                 invoked.WaitOne();
             };
+
         }
 
         [UnmanagedCallersOnly(EntryPoint = "set_native_window")]
@@ -175,9 +177,10 @@ namespace Ryujinx.Library
             if (_window != null)
             {
                 _window.Exit();
+                _emulationContext.Dispose();
             }
         }
-
+        
         public static nint GetNativeMetalLayer()
         {
             lock (metalLayerLock)
@@ -218,7 +221,7 @@ namespace Ryujinx.Library
         }
 
         [UnmanagedCallersOnly(EntryPoint = "install_firmware")]
-        public static unsafe nint? InstallFirmwareNative(nint pathPtr)
+        public static nint InstallFirmwareNative(nint pathPtr)
         {
             var firmwarePath = Marshal.PtrToStringAnsi(pathPtr);
 
@@ -235,7 +238,7 @@ namespace Ryujinx.Library
                 return Marshal.StringToHGlobalAnsi("Unknown Exception.");
             }
 
-            return null;
+            return nint.Zero;
         }
 
         [UnmanagedCallersOnly(EntryPoint = "create_account")]
@@ -493,67 +496,73 @@ namespace Ryujinx.Library
             string name = Marshal.PtrToStringAnsi(namePtr);
             string inputId = idPtr.ToInt64().ToString("X");
 
-            nint result = 0;
-            if (idPtr != nint.Zero)
+            lock (inputConfigurationLock)
             {
-                result = NativeGamepadDriver.AttachGamepad(name, idPtr);
-                if (result == nint.Zero)
-                    return nint.Zero;
-            }
+                nint result = 0;
+                if (idPtr != nint.Zero)
+                {
+                    result = NativeGamepadDriver.AttachGamepad(name, idPtr);
+                    if (result == nint.Zero)
+                        return nint.Zero;
+                }
 
-            if (playerIndex < 0 || playerIndex > 7)
-            {
-                Logger.Warning?.Print(LogClass.Application, $"AttachGamepad: invalid playerIndex {playerIndex} for \"{inputId}\"");
+                if (playerIndex < 0 || playerIndex > 7)
+                {
+                    Logger.Warning?.Print(LogClass.Application, $"AttachGamepad: invalid playerIndex {playerIndex} for \"{inputId}\"");
+                    return result;
+                }
+
+                var assignedIndex = (PlayerIndex)playerIndex;
+                InputConfig config = HandlePlayerConfiguration(inputId, assignedIndex, controllerType);
+                
+                if (config != null)
+                {
+                    _inputConfiguration ??= new List<InputConfig>();
+                    _inputConfiguration.RemoveAll(c => c.PlayerIndex == assignedIndex || c.Id == inputId);
+                    _inputConfiguration.Add(config);
+                    
+                    Logger.Info?.Print(LogClass.Application,
+                        $"AttachGamepad: assigned \"{inputId}\" to {assignedIndex} as {controllerType}. " +
+                        $"Total configs: {_inputConfiguration.Count}");
+
+                    EnsureKeyboardFallback();
+                    
+                    _window?.NpadManager.ReloadConfiguration(_inputConfiguration, _enableKeyboard, _enableMouse);
+                }
+
                 return result;
             }
-
-            var assignedIndex = (PlayerIndex)playerIndex;
-            InputConfig config = HandlePlayerConfiguration(inputId, assignedIndex, controllerType);
-            
-            if (config != null)
-            {
-                _inputConfiguration ??= new List<InputConfig>();
-                _inputConfiguration.RemoveAll(c => c.PlayerIndex == assignedIndex || c.Id == inputId);
-                _inputConfiguration.Add(config);
-                
-                Logger.Info?.Print(LogClass.Application,
-                    $"AttachGamepad: assigned \"{inputId}\" to {assignedIndex} as {controllerType}. " +
-                    $"Total configs: {_inputConfiguration.Count}");
-
-                EnsureKeyboardFallback();
-                
-                _window?.NpadManager.ReloadConfiguration(_inputConfiguration, _enableKeyboard, _enableMouse);
-            }
-
-            return result;
         }
 
         [UnmanagedCallersOnly(EntryPoint = "detach_gamepad")]
         public static void DetachGamepad(nint idPtr)
         {
-            NativeGamepadDriver.DetachGamepad(idPtr);
-
-            if (idPtr == nint.Zero)
-                return;
-            
-            string inputId = idPtr.ToInt64().ToString("X");
-            if (inputId == null)
-                return;
-
-            int removed = _inputConfiguration?.RemoveAll(c => c.Id == inputId) ?? 0;
-
-            if (removed > 0)
+            lock (inputConfigurationLock)
             {
-                Logger.Info?.Print(LogClass.Application,
-                    $"DetachGamepad: removed \"{inputId}\". " +
-                    $"Remaining configs: {_inputConfiguration?.Count ?? 0}");
+                NativeGamepadDriver.DetachGamepad(idPtr);
 
-                EnsureKeyboardFallback();
+                if (idPtr == nint.Zero)
+                    return;
+                
+                string inputId = idPtr.ToInt64().ToString("X");
+                if (inputId == null)
+                    return;
 
-                _window?.NpadManager.ReloadConfiguration(
-                    _inputConfiguration ?? new List<InputConfig>(),
-                    _enableKeyboard,
-                    _enableMouse);
+                int removed = _inputConfiguration?.RemoveAll(c => c.Id == inputId) ?? 0;
+
+                if (removed > 0)
+                {
+                    Logger.Info?.Print(LogClass.Application,
+                        $"DetachGamepad: removed \"{inputId}\". " +
+                        $"Remaining configs: {_inputConfiguration?.Count ?? 0}");
+
+                    EnsureKeyboardFallback();
+
+                    _window?.NpadManager.ReloadConfiguration(
+                        _inputConfiguration ?? new List<InputConfig>(),
+                        _enableKeyboard,
+                        _enableMouse);
+                }
             }
         }
         
@@ -820,6 +829,12 @@ namespace Ryujinx.Library
             }
 
             _inputManager.Dispose();
+
+            GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
+
+            GC.WaitForPendingFinalizers();
+            
+            GC.Collect();
         }
         
         private static WindowBase CreateWindow(Options options)

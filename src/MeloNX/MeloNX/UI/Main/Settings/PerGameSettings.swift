@@ -141,86 +141,12 @@ struct PerGameSettingsView: View {
             }
     }
     
-    // MARK: - Main (iOS on normal settings, but .popOver doesn't allow for our split view with)
+    // MARK: - Main (iOS on normal settings, but .popOver doesn't allow for our split view)
     
     var iOSSettings: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 VStack(spacing: 8) {
-                    
-                    HStack(spacing: 6) {
-                        jitRow
-                    }
-                    .padding(.horizontal, 16)
-                    
-                    let infoColumns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
-
-                    LazyVGrid(columns: infoColumns, spacing: 6) {
-                        Label(UIDevice.modelName, systemImage: deviceIcon)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity)
-                            .background(Color(.tertiarySystemGroupedBackground),
-                                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.15)) { showOSIcon.toggle() }
-                        } label: {
-                            Group {
-                                if isPortrait {
-                                    if showOSIcon {
-                                        Label(osVersionString, systemImage: "applelogo")
-                                            .font(.caption)
-                                    } else {
-                                        Text(systemVersionString)
-                                            .font(.system(size: 9))
-                                    }
-                                } else {
-                                    Label(systemVersionString, systemImage: "applelogo")
-                                        .font(.caption)
-                                }
-                            }
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .frame(maxWidth: .infinity)
-                            .background(Color(.tertiarySystemGroupedBackground),
-                                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                        
-                        if !ProcessInfo.processInfo.isiOSAppOnMac {
-                            let memoryLimit = checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit")
-                            Menu {
-                                Button {
-                                    if !memoryLimit {
-                                        UIApplication.shared.open(URL(string: "https://git.ryujinx.app/projects/MeloNX#entitlements")!)
-                                    }
-                                } label: {
-                                    Text("Increased Memory Limit: \(memoryLimit ? "Enabled" : "Disabled")")
-                                }
-                            } label: {
-                                Label(title: {
-                                    memoryLimit ? Text(memoryText + "  ") + Text(Image(systemName: "checkmark.circle.fill")).foregroundColor(.green) : Text(memoryText)
-                                }, icon: {
-                                    Image(systemName: "memorychip.fill")
-                                })
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                                .lineLimit(1)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .frame(maxWidth: .infinity)
-                                .background(Color(.tertiarySystemGroupedBackground),
-                                            in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 16)
                     
                     let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 5)
                     LazyVGrid(columns: cols, spacing: 8) {
@@ -296,101 +222,6 @@ struct PerGameSettingsView: View {
             selectedCategory = set ?? .system
         }
         
-    }
-    
-    private var jitRow: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(ryujinxController.isJITEnabled ? Color.green : Color.red)
-                .frame(width: 8, height: 8)
-            if ProcessInfo.processInfo.isiOSAppOnMac && !checkAppEntitlement("get-task-allow") {
-                Text("JIT Enabled (macOS)")
-                    .foregroundColor(ryujinxController.isJITEnabled ? .green : .red)
-            } else if !checkAppEntitlement("get-task-allow") &&
-                        !checkAppEntitlement("com.apple.security.cs.allow-jit") &&
-                        !checkAppEntitlement("dynamic-codesigning") &&
-                        !ryujinxController.isJITEnabled {
-                Text("No JIT Support")
-                    .foregroundColor(.red)
-            } else {
-                Text(ryujinxController.isJITEnabled ? "JIT Enabled" : "JIT Not Acquired")
-                    .foregroundColor(ryujinxController.isJITEnabled ? .green : .red)
-            }
-            
-            Spacer()
-            
-            Spacer()
-            Text("v\(appVersion)")
-                .font(.subheadline.weight(.medium))
-                .foregroundColor(.secondary)
-        }
-        .font(.subheadline.weight(.medium))
-    }
-    
-    @ViewBuilder
-    private var deviceInfoCards: some View {
-        VStack(spacing: 16) {
-            InfoCard(
-                title: "Device",
-                value: "\(UIDevice.modelName)",
-                icon: deviceIcon,
-                color: .blue
-            )
-            
-            InfoCard(
-                title: "System",
-                value: "\(systemVersionString)",
-                icon: "applelogo",
-                color: .gray
-            )
-            
-            if ProcessInfo.processInfo.isiOSAppOnMac {
-                InfoCard(
-                    title: "Increased Memory Limit",
-                    value: "Not needed (macOS)",
-                    icon: "memorychip.fill",
-                    color: .orange
-                )
-            } else {
-                let memoryLimit = checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit")
-                Button {
-                    if !memoryLimit {
-                        UIApplication.shared.open(URL(string: "https://git.ryujinx.app/projects/MeloNX#entitlements")!)
-                    }
-                } label: {
-                    InfoCard(
-                        title: "Increased Memory Limit",
-                        value: memoryLimit ? "Enabled" : "Disabled",
-                        icon: "memorychip.fill",
-                        color: .orange
-                    )
-                }
-                .buttonStyle(.plain)
-                if checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing") {
-                    InfoCard(
-                        title: "Extended Virtual Addressing",
-                        value: "Enabled",
-                        icon: "memorychip",
-                        color: .yellow
-                    )
-                }
-                if let lc = appEnvironment.lcBundle, appEnvironment.isInLiveContainer, !appEnvironment.isInMultitask {
-                    InfoCard(
-                        title: "LiveContainer",
-                        value: "v\(lc.infoDictionary?["CFBundleShortVersionString"] as? String ?? (lc.infoDictionary?["CFBundleVersion"] as? String ?? "Unknown")) \(lc.infoDictionary?["LCVersionInfo"] as? String ?? "")",
-                        icon: "app.fill",
-                        color: .indigo
-                    )
-                } else if appEnvironment.isInMultitask {
-                    InfoCard(
-                        title: "LiveContainer",
-                        value: "Multitask",
-                        icon: "app.fill",
-                        color: .indigo
-                    )
-                }
-            }
-        }
     }
     
     // MARK: - Graphics Form

@@ -21,6 +21,7 @@ class ControllerManager: ObservableObject {
     @Published var allControllers: [BaseController] = []
     
     @Published var selectedControllers: [String] = [] 
+    private var didInitControllerObservers = false
     
     func initAll() {
         refreshControllersList()
@@ -32,9 +33,10 @@ class ControllerManager: ObservableObject {
         controllerQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
             self._privAllControllers.append(self.virtualController)
+            let controllers = self._privAllControllers
             
             DispatchQueue.main.async {
-                self.allControllers = self._privAllControllers
+                self.allControllers = controllers
             }
         }
     }
@@ -65,37 +67,46 @@ class ControllerManager: ObservableObject {
                 }
             }
             
-           // _privAllControllers.append(KBController())
+            // _privAllControllers.append(KBController())
             
             let physicalControllers = self._privAllControllers.filter { !$0.virtual }.compactMap(\.id) as [String]
+            let controllers = self._privAllControllers
+            let selectedControllerIds = physicalControllers.isEmpty ? [self.virtualController.id] : physicalControllers
             
             DispatchQueue.main.async {
-                self.allControllers = self._privAllControllers
-                self.selectedControllers.removeAll()
-                
-                if physicalControllers.isEmpty {
-                    self.selectedControllers.append(self.virtualController.id)
-                } else {
-                    self.selectedControllers.append(contentsOf: physicalControllers)
-                }
+                self.allControllers = controllers
+                self.selectedControllers = selectedControllerIds
                 
                 if RyujinxController.shared.isRunning.isRunning() {
-                    self.attachAllControllers()
+                    self.attachAllControllers(selectedControllerIds: selectedControllerIds)
                 }
             }
         }
     }
     
     func attachAllControllers() {
+        attachAllControllers(selectedControllerIds: selectedControllerIdsSnapshot())
+    }
+    
+    private func attachAllControllers(selectedControllerIds: [String]) {
+        let config = RyujinxController.shared.settings
+        
         controllerQueue.sync {
-            
-            let config = RyujinxController.shared.settings
-            
-            for index in selectedControllers.indices {
-                let cont = _privAllControllers.first(where: { $0.id == selectedControllers[index] })
+            for (index, controllerId) in selectedControllerIds.enumerated() {
+                let cont = _privAllControllers.first(where: { $0.id == controllerId })
                 
                 cont?.attach(index, controllerType: config.controllerType(for: index) ?? .proController)
             }
+        }
+    }
+    
+    private func selectedControllerIdsSnapshot() -> [String] {
+        if Thread.isMainThread {
+            return selectedControllers
+        }
+        
+        return DispatchQueue.main.sync {
+            selectedControllers
         }
     }
     
@@ -122,12 +133,17 @@ class ControllerManager: ObservableObject {
     }
     
     func hasVirtualController() -> Bool {
+        let selectedControllerIds = selectedControllerIdsSnapshot()
+        
         return controllerQueue.sync {
-            return selectedControllers.contains(_privAllControllers.first(where: { $0.virtual })?.id ?? "Failed to find virtual controller!")
+            return selectedControllerIds.contains(_privAllControllers.first(where: { $0.virtual })?.id ?? "Failed to find virtual controller!")
         }
     }
     
     func initControllerObservers() {
+        guard !didInitControllerObservers else { return }
+        didInitControllerObservers = true
+        
         NotificationCenter.default.addObserver(
             forName: .GCControllerDidConnect,
             object: nil,

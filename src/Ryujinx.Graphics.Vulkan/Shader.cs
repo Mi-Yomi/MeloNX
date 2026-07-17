@@ -25,11 +25,16 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly ShaderStageFlags _stage;
 
         private bool _disposed;
+        private int _compileStatus;
         private ShaderModule _module;
 
         public ShaderStageFlags StageFlags => _stage;
 
-        public ProgramLinkStatus CompileStatus { private set; get; }
+        public ProgramLinkStatus CompileStatus
+        {
+            get => (ProgramLinkStatus)Volatile.Read(ref _compileStatus);
+            private set => Volatile.Write(ref _compileStatus, (int)value);
+        }
 
         public readonly Task CompileTask;
 
@@ -42,36 +47,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             _stage = shaderSource.Stage.Convert();
 
-            CompileTask = Task.Run(() =>
-            {
-                byte[] spirv = shaderSource.BinaryCode;
-
-                if (spirv == null)
-                {
-                    spirv = GlslToSpirv(shaderSource.Code, shaderSource.Stage);
-
-                    if (spirv == null)
-                    {
-                        CompileStatus = ProgramLinkStatus.Failure;
-
-                        return;
-                    }
-                }
-
-                fixed (byte* pCode = spirv)
-                {
-                    ShaderModuleCreateInfo shaderModuleCreateInfo = new()
-                    {
-                        SType = StructureType.ShaderModuleCreateInfo,
-                        CodeSize = (uint)spirv.Length,
-                        PCode = (uint*)pCode,
-                    };
-
-                    api.CreateShaderModule(device, in shaderModuleCreateInfo, null, out _module).ThrowOnError();
-                }
-
-                CompileStatus = ProgramLinkStatus.Success;
-            });
+            CompileTask = Task.Run(() => Compile(shaderSource));
         }
 
         public unsafe Shader(VulkanRenderer gd, Device device, ShaderSource shaderSource, bool compileAsync = true, bool highPriorityBackgroundCompilation = false)
@@ -122,7 +98,14 @@ namespace Ryujinx.Graphics.Vulkan
                         PCode = (uint*)pCode,
                     };
 
-                    lock (_gd.PipelineCreationLock)
+                    if (_gd != null)
+                    {
+                        lock (_gd.PipelineCreationLock)
+                        {
+                            _api.CreateShaderModule(_device, in shaderModuleCreateInfo, null, out _module).ThrowOnError();
+                        }
+                    }
+                    else
                     {
                         _api.CreateShaderModule(_device, in shaderModuleCreateInfo, null, out _module).ThrowOnError();
                     }

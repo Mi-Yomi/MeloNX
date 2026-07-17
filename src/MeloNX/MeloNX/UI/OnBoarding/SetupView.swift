@@ -53,8 +53,12 @@ struct ContinueButton: View {
     @Binding var enabled: Bool
     @Environment(\.colorScheme) var colorScheme
     
+    var showCheckmark: Bool = true
+    
+    var baseColor: Color = .green
+    
     var shadowColor: Color {
-        guard !success else { return .green.opacity(colorScheme == .dark ? 0.3 : 0.1) }
+        guard !success else { return baseColor.opacity(colorScheme == .dark ? 0.3 : 0.1) }
         return (enabled ? .accentColor : Color(.darkGray).opacity(colorScheme == .dark ? 0.3 : 0.1))
     }
     
@@ -63,23 +67,23 @@ struct ContinueButton: View {
     }
     
     var borderColor: Color {
-        guard !success else { return .green }
+        guard !success else { return baseColor }
         return enabled ? Color.accentColor : Color(.systemGray4)
     }
     
     var textColour: Color {
-        guard !success else { return .green }
+        guard !success else { return baseColor }
         return enabled ? Color.white : Color(.systemGray4)
     }
     
     var backgroundColour: Color {
-        guard !success else { return .green.opacity(0.15)}
+        guard !success else { return baseColor.opacity(0.15)}
         return enabled ? .accentColor.opacity(0.15) : .clear
     }
     
     var body: some View {
         Button(action: doAction) {
-            Text(success ? "✓" : text)
+            Text(success && showCheckmark ? "✓" : text)
                 .padding()
                 .padding(.horizontal, 24)
                 .foregroundStyle(textColour)

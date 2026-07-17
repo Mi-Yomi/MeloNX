@@ -68,9 +68,15 @@ extension BaseController {
     }
 
     private func submitMotion(accelerometer: SIMD3<Float>, gyroscope: SIMD3<Float>) {
-        motionQueue.async {
-            Ryujinx.setGamepadMotion(self.pointer, motionType: 1, axis: accelerometer)
-            Ryujinx.setGamepadMotion(self.pointer, motionType: 2, axis: gyroscope)
+        guard isActive else { return }
+        
+        let pointer = self.pointer
+        
+        motionQueue.async { [weak self] in
+            guard self?.isActive == true else { return }
+            
+            Ryujinx.setGamepadMotion(pointer, motionType: 1, axis: accelerometer)
+            Ryujinx.setGamepadMotion(pointer, motionType: 2, axis: gyroscope)
         }
     }
 

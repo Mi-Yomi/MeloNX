@@ -183,7 +183,7 @@ struct ModsManagerSheet: View {
     }
     
     private func modMetadataURL(for titleId: String) -> URL {
-        let modsRoot = URL.documentsDirectory.appendingPathComponent("mods")
+        let modsRoot: URL = .modsFolderURL
         let metadataDir = modsRoot.appendingPathComponent("metadata")
         try? FileManager.default.createDirectory(at: metadataDir, withIntermediateDirectories: true)
         return metadataDir.appendingPathComponent("\(titleId).json")
@@ -222,11 +222,7 @@ struct ModsManagerSheet: View {
     private func loadData() {
         guard let game = game else { return }
         
-        let documentsDirectory = URL.documentsDirectory
-        let cool =  documentsDirectory
-            .appendingPathComponent("mods")
-            .appendingPathComponent("contents")
-            .appendingPathComponent(game.titleId)
+        let cool: URL = .modFolderURL(for: game)
         modsURL = cool
         
         let metadata = loadModMetadata(for: game.titleId)
@@ -263,9 +259,7 @@ struct ModsManagerSheet: View {
                 
                 do {
                     let fileManager = FileManager.default
-                    let updatesDirectory = URL.documentsDirectory.appendingPathComponent("mods")
-                    let contentsDirectory = updatesDirectory.appendingPathComponent("contents")
-                    let gameModsDirectory = contentsDirectory.appendingPathComponent(game.titleId)
+                    let gameModsDirectory: URL = .modFolderURL(for: game)
                     
                     try? fileManager.createDirectory(at: gameModsDirectory, withIntermediateDirectories: true)
                     

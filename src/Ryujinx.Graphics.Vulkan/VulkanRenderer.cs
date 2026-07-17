@@ -1082,6 +1082,8 @@ namespace Ryujinx.Graphics.Vulkan
                 shader.WaitForBackgroundCompilation();
             }
 
+            Api.DeviceWaitIdle(_device);
+
             CommandBufferPool.Dispose();
             BackgroundResources.Dispose();
             _counters.Dispose();

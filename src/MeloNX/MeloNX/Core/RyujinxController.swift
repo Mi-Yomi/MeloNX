@@ -43,6 +43,14 @@ extension URL {
     static var keysFolderURL: URL {
         documentsDirectory.appendingPathComponent("system")
     }
+    
+    static var modsFolderURL: URL {
+        modsFolderURL.appendingPathComponent("mods")
+    }
+    
+    static func modFolderURL(for game: GameInfo) -> URL {
+        modsFolderURL.appendingPathComponent("contents").appendingPathComponent(game.titleId)
+    }
 }
 
 extension UIDevice {
@@ -58,6 +66,7 @@ extension UIDevice {
 enum StartedState {
     case none
     case entitlement
+    case extendedEntitlement
     case noJIT
     case usersList
 }
@@ -66,6 +75,13 @@ enum RunningState {
     case started(game: GameInfo, state: StartedState = .none)
     case stopped
     case crashed(result: String)
+    
+    func hasStarted() -> Bool {
+        if case .started = self {
+            return true
+        }
+        return false
+    }
     
     func isRunning() -> Bool {
         if case .started(_, let state) = self {
@@ -77,6 +93,13 @@ enum RunningState {
     func isEntitlement() -> Bool {
         if case .started(_, let state) = self {
             return state == .entitlement
+        }
+        return false
+    }
+    
+    func hasCrashed() -> Bool {
+        if case .crashed = self {
+            return true
         }
         return false
     }
@@ -127,6 +150,7 @@ class RyujinxController: ObservableObject {
     
     private static var hasScript: Bool = false
     private var controllerManager: ControllerManager = .shared
+    private var emulationThreadActive = false
     
     var firmwareVersion: String {
         return Ryujinx.installedFirmwareVersion
@@ -144,14 +168,35 @@ class RyujinxController: ObservableObject {
         checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit")
     }
     
+    var hasExtendedVirtualAddressingEntitlement: Bool {
+        checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing")
+    }
+    
+    
     
     func startGame(_ game: GameInfo) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.startGame(game)
+            }
+            return
+        }
+        
+        guard !emulationThreadActive, !isRunning.hasStarted() else { return }
+        
         loadConfig()
         
         if !hasIncreasedMemoryLimitEntitlement {
             isRunning = .started(game: game, state: .entitlement)
             return
         }
+        
+        if !hasExtendedVirtualAddressingEntitlement && AppEnvironment.shared.requiresExtendedVirtualAddressing() {
+            isRunning = .started(game: game, state: .extendedEntitlement)
+            return
+        }
+        
+        // extendedEntitlement
         
         if !isJITEnabled {
             isRunning = .started(game: game, state: .noJIT)
@@ -176,6 +221,9 @@ class RyujinxController: ObservableObject {
         settings.backendThreading = .on
         
         isRunning = .started(game: game)
+        _isPaused = false
+        wasManuallyPaused = false
+        emulationThreadActive = true
         
         let nativeSettingsManager = NativeSettingsManager.shared
         
@@ -187,6 +235,8 @@ class RyujinxController: ObservableObject {
             let response = Ryujinx.mainRyu(settings)
             
             DispatchQueue.main.async {
+                self.emulationThreadActive = false
+                
                 if response != 0 {
                     self.isRunning = .crashed(result: "Code: \(response)")
                 } else {

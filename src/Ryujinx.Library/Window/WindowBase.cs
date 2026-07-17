@@ -280,6 +280,7 @@ namespace Ryujinx.Library
         {
             TouchScreenManager?.Dispose();
             NpadManager?.Dispose();
+            Device.Dispose();
 
             if (_isStopped)
             {
@@ -294,6 +295,7 @@ namespace Ryujinx.Library
 
             _exitEvent.WaitOne();
             _exitEvent.Dispose();
+
             NativeGamepadDriver.OnInputUpdated -= SignalInputUpdated;
         }
 

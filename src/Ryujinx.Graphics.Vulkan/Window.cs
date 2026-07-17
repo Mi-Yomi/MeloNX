@@ -434,6 +434,17 @@ namespace Ryujinx.Graphics.Vulkan
                     new Extents2D(dstX0, dstY0, dstX1, dstY1)
                     );
             }
+            else if (!view.Info.Target.IsMultisample)
+            {
+                _gd.HelperShader.PresentCopy(
+                    _gd,
+                    cbs,
+                    view,
+                    _swapchainImageViews[nextImage].GetImageViewForAttachment(),
+                    new Extents2D(srcX0, srcY0, srcX1, srcY1),
+                    new Extents2D(dstX0, dstY1, dstX1, dstY0),
+                    _isLinear);
+            }
             else
             {
                 _gd.HelperShader.BlitColor(

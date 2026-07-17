@@ -233,7 +233,7 @@ struct GamesListView: View {
                 Button {
                     activeSheet = .perGameSettings(game: game)
                 } label: {
-                    Label("\(game.titleName) Settings", systemImage: "gear")
+                    Label("\(game.titleName) Settings", systemImage: ryujinxController.perSettings[game.titleId] == nil ? "gear" : "checkmark.circle")
                 }
                 
                 Button {
