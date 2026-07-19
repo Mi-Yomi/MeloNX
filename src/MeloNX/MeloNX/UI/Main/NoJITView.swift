@@ -19,13 +19,26 @@ struct NoJITView: View {
     var body: some View {
         VStack(spacing: 20) {
             ZStack {
-                Circle()
-                    .stroke(Color.accentColor.opacity(0.5), lineWidth: 1)
-                    .frame(width: 100, height: 100)
-                
-                Image(systemName: "cpu.fill")
-                    .font(.system(size: 50))
-                    .foregroundColor(.accentColor)
+                if let icon = game.icon {
+                    Image(uiImage: icon)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 150, height: 150)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(12)
+                        .background {
+                            RoundedRectangle(cornerRadius: 24)
+                                .stroke(Color.accentColor.opacity(0.5), lineWidth: 1)
+                        }
+                } else {
+                    Circle()
+                        .stroke(Color.accentColor.opacity(0.5), lineWidth: 1)
+                        .frame(width: 100, height: 100)
+                    
+                    Image(systemName: "cpu.fill")
+                        .font(.system(size: 50))
+                        .foregroundColor(.accentColor)
+                }
             }
             .padding(.top, 10)
             
