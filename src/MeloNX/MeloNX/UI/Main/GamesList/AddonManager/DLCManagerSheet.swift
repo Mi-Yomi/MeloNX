@@ -225,13 +225,16 @@ struct DLCManagerSheet: View {
             var newDLCs: [DLCItem] = []
             
             for selectedURL in urls {
-                guard let game = game,
-                      selectedURL.startAccessingSecurityScopedResource() else {
-                    print("Failed to access security-scoped resource")
+                guard let game = game else {
                     continue
                 }
-                
-                defer { selectedURL.stopAccessingSecurityScopedResource() }
+
+                let hasSecurityScope = selectedURL.startAccessingSecurityScopedResource()
+                defer {
+                    if hasSecurityScope {
+                        selectedURL.stopAccessingSecurityScopedResource()
+                    }
+                }
                 
                 do {
                     let fileManager = FileManager.default
