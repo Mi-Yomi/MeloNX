@@ -31,6 +31,12 @@ namespace Ryujinx.Common.PreciseSleep
         {
             long now = PerformanceCounter.ElapsedTicks;
             long delta = (timePoint - now);
+
+            if (delta <= 0)
+            {
+                return false;
+            }
+
             long ms = Math.Min(delta / PerformanceCounter.TicksPerMillisecond, int.MaxValue);
             long ns = (delta * 1_000_000) / PerformanceCounter.TicksPerMillisecond;
 
@@ -51,12 +57,26 @@ namespace Ryujinx.Common.PreciseSleep
                 // The 1ms wait will be interrupted by the nanosleep timeout if it completes.
                 if (!_pool.SleepAndSignal(ns, timePoint))
                 {
+                    if (OperatingSystem.IsIOS())
+                    {
+                        _waitEvent.WaitOne(1);
+
+                        return true;
+                    }
+
                     // Too many threads on the pool.
                     return false;
                 }
 
                 _waitEvent.WaitOne(1);
                 _pool.IgnoreSignal();
+
+                return true;
+            }
+
+            if (OperatingSystem.IsIOS())
+            {
+                _waitEvent.WaitOne(1);
 
                 return true;
             }

@@ -155,7 +155,7 @@ struct InGameConfigView: View {
             controllerManager.refreshControllersList()
         }
         .onDisappear {
-            controllerManager.refreshControllersList()
+            controllerManager.refreshControllersList(true)
         }
     }
     

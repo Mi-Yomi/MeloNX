@@ -80,6 +80,7 @@ namespace Ryujinx.HLE.HOS.Services.SurfaceFlinger
         private void UpdateSwapInterval(int swapInterval)
         {
             _swapInterval = swapInterval;
+            _device.Gpu.Window.SetUnboundedPresentMode(_swapInterval == 0);
 
             // If the swap interval is 0, Game VSync is disabled.
             if (_swapInterval == 0)

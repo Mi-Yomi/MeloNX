@@ -42,7 +42,7 @@ class ControllerManager: ObservableObject {
     }
     
     
-    func refreshControllersList() {
+    func refreshControllersList(_ inGameSelector: Bool = false) {
         let connectedNativeControllers = Set(GCController.controllers())
         
         controllerQueue.async(flags: .barrier) { [weak self] in
@@ -71,7 +71,15 @@ class ControllerManager: ObservableObject {
             
             let physicalControllers = self._privAllControllers.filter { !$0.virtual }.compactMap(\.id) as [String]
             let controllers = self._privAllControllers
-            let selectedControllerIds = physicalControllers.isEmpty ? [self.virtualController.id] : physicalControllers
+            
+            let selectedControllerIds: [String]
+            
+            if inGameSelector {
+                selectedControllerIds = selectedControllers
+            } else {
+                selectedControllerIds = physicalControllers.isEmpty ? [self.virtualController.id] : physicalControllers
+            }
+            // RyujinxController.shared.isRunning.isRunning(
             
             DispatchQueue.main.async {
                 self.allControllers = controllers
@@ -92,6 +100,10 @@ class ControllerManager: ObservableObject {
         let config = RyujinxController.shared.settings
         
         controllerQueue.sync {
+            for controller in _privAllControllers {
+                Ryujinx.detachGamepad(controller.pointer)
+            }
+            
             for (index, controllerId) in selectedControllerIds.enumerated() {
                 let cont = _privAllControllers.first(where: { $0.id == controllerId })
                 

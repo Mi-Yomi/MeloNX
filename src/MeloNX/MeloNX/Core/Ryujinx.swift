@@ -97,6 +97,11 @@ final class Ryujinx {
     static func setViewSize(_ rect: CGRect) {
         MeloNX.set_view_size(Int32(rect.width), Int32(rect.height))
     }
+
+    static func setUnboundedPresentTargetFps(for screen: UIScreen?) {
+        let targetFps = max(1, screen?.maximumFramesPerSecond ?? Air.shared.airScreen?.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond)
+        set_unbounded_present_target_fps(Int32(targetFps))
+    }
     
     private static func getDlcList(titleId: String, path: String) -> DlcNcaListC {
         titleId.withCString { titlePtr in
@@ -445,6 +450,9 @@ fileprivate func touch_ended(_ index: Int32)
 
 @_silgen_name("set_view_size")
 fileprivate func set_view_size(_ width: Int32, _ height: Int32)
+
+@_silgen_name("set_unbounded_present_target_fps")
+fileprivate func set_unbounded_present_target_fps(_ targetFps: Int32)
 
 @_silgen_name("get_dlc_nca_list")
 func get_dlc_nca_list(_ titleIdPtr: UnsafePointer<CChar>!, _ pathPtr: UnsafePointer<CChar>!) -> DlcNcaListC

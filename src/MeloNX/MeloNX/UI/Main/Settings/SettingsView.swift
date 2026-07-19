@@ -131,15 +131,15 @@ struct SettingsView: View {
             }
         }
     }
-
+    
     var needsExtendedVirtualAddressing: Bool {
         AppEnvironment.shared.requiresExtendedVirtualAddressing()
     }
-
+    
     var isPortrait: Bool {
         AlertHandlers.topWindow().bounds.height > AlertHandlers.topWindow().bounds.width
     }
-
+    
     // MARK: - Body
     
     var body: some View {
@@ -166,7 +166,7 @@ struct SettingsView: View {
                     .padding(.horizontal, 16)
                     
                     let infoColumns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 3)
-
+                    
                     LazyVGrid(columns: infoColumns, spacing: 6) {
                         Label(UIDevice.modelName, systemImage: deviceIcon)
                             .font(.caption)
@@ -216,7 +216,7 @@ struct SettingsView: View {
                                 } label: {
                                     Text("Increased Memory Limit: \(memoryLimit ? "Enabled" : "Disabled")")
                                 }
-                                if needsExtendedVirtualAddressing ? true : extendedVirtualAddressing {
+                                if needsExtendedVirtualAddressing || extendedVirtualAddressing {
                                     Button {
                                         if !extendedVirtualAddressing {
                                             UIApplication.shared.open(URL(string: "https://git.ryujinx.app/projects/MeloNX#entitlements")!)
@@ -554,13 +554,43 @@ struct SettingsView: View {
             
             // Display Toggles
             Section("Display") {
+                let vSyncModeBinding = Binding<VSyncMode>(
+                    get: { config.wrappedValue.vSyncMode },
+                    set: {
+                        config.wrappedValue.vSyncMode = $0
+                        config.wrappedValue.disableVSync = $0 == .unbounded
+                    }
+                )
+                let customVSyncIntervalBinding = Binding<Float>(
+                    get: { Float(config.wrappedValue.customVSyncInterval / 2) },
+                    set: { config.wrappedValue.customVSyncInterval = max(1, Int32($0.rounded() * 2)) }
+                )
+                
                 NativeToggleRow("Shader Cache", icon: "memorychip",
                                 isOn: config.disableShaderCache.reversed,
                                 info: "Shader Cache saves shaders to a file and preloads them on game launch. Leave OFF if unsure.")
                 
-                NativeToggleRow("VSync", icon: "arrow.triangle.2.circlepath",
-                                isOn: config.disableVSync.reversed,
-                                info: "VSync makes the game run at the Switch's framerate. Disabling may cause games to run at screen refresh rate, affecting speed. Leave ON if unsure.")
+                Picker("VSync Mode", selection: vSyncModeBinding) {
+                    ForEach(VSyncMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                
+                if config.wrappedValue.vSyncMode == .custom {
+                    let formatter: NumberFormatter = {
+                        let f = NumberFormatter(); f.numberStyle = .none; return f
+                    }()
+                    HStack {
+                        Text("Custom VSync FPS")
+                        Spacer()
+                        TextField("FPS", value: customVSyncIntervalBinding, formatter: formatter)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                }
+                
                 NativeToggleRow("Docked Mode", icon: "dock.rectangle",
                                 isOn: config.disableDockedMode.reversed,
                                 info: "Docked mode emulates a docked Nintendo Switch, improving graphics. Disabling emulates handheld mode. Leave OFF if unsure.")
@@ -875,6 +905,16 @@ struct SettingsView: View {
                         Text(type.displayName).tag(type)
                     }
                 }
+                
+                Picker("Library Sort", selection: nativeSettingsManager.gameSort(GameSort.none).projectedValue) {
+                    ForEach(GameSort.allCases, id: \.self) { type in
+                        Text(type.displayName).tag(type)
+                    }
+                }
+                .onChange(of: nativeSettingsManager.gameSort(GameSort.none).value) { _ in
+                    ryujinxController.sortGames()
+                }
+                
                 
                 NativeToggleRow("Menu Button (in-game)", icon: "arrow.left.circle",
                                 isOn: nativeSettingsManager.showScreenShotButton(true).projectedValue,

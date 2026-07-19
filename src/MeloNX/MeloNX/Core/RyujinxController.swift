@@ -45,7 +45,7 @@ extension URL {
     }
     
     static var modsFolderURL: URL {
-        modsFolderURL.appendingPathComponent("mods")
+        documentsDirectory.appendingPathComponent("mods")
     }
     
     static func modFolderURL(for game: GameInfo) -> URL {
@@ -77,8 +77,8 @@ enum RunningState {
     case crashed(result: String)
     
     func hasStarted() -> Bool {
-        if case .started = self {
-            return true
+        if case .started(_, let state) = self {
+            return state != .noJIT
         }
         return false
     }
@@ -135,6 +135,15 @@ class RyujinxController: ObservableObject {
         }
     }
     
+    var lastGameLaunched: String? {
+        get {
+            UserDefaults.standard.string(forKey: "lastGameLaunched")
+        } set {
+            if let cool = newValue { UserDefaults.standard.set(newValue, forKey: "lastGameLaunched"); return }
+            UserDefaults.standard.removeObject(forKey: "lastGameLaunched")
+        }
+    }
+    
     @Published var _isPaused: Bool = false
     
     @Published var wasManuallyPaused: Bool = false
@@ -175,24 +184,19 @@ class RyujinxController: ObservableObject {
     
     
     func startGame(_ game: GameInfo) {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in
-                self?.startGame(game)
-            }
-            return
-        }
-        
         guard !emulationThreadActive, !isRunning.hasStarted() else { return }
         
         loadConfig()
         
         if !hasIncreasedMemoryLimitEntitlement {
             isRunning = .started(game: game, state: .entitlement)
+            lastGameLaunched = nil
             return
         }
         
         if !hasExtendedVirtualAddressingEntitlement && AppEnvironment.shared.requiresExtendedVirtualAddressing() {
             isRunning = .started(game: game, state: .extendedEntitlement)
+            lastGameLaunched = nil
             return
         }
         
@@ -202,6 +206,8 @@ class RyujinxController: ObservableObject {
             isRunning = .started(game: game, state: .noJIT)
             return
         }
+        
+        lastGameLaunched = nil
         
         let config = pullKeyboardConfig()
         Ryujinx.setKeyboardConfig(config)
@@ -391,6 +397,25 @@ class RyujinxController: ObservableObject {
         }
         
         self.games = games
+        
+        sortGames(true)
+    }
+    
+    func sortGames(_ isCalled: Bool = false) {
+        let nativeSettingsManager: NativeSettingsManager = .shared
+        switch nativeSettingsManager.gameSort(GameSort.none).value {
+        case .alphabetical:
+            games = games.sorted { $0.titleName < $1.titleName }
+        case .newest:
+            games = games.sorted { (game, gam2) -> Bool in
+                let date1 = (try? game.fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                let date2 = (try? gam2.fileURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                
+                return (date1 ?? Date.distantPast) > (date2 ?? Date.distantPast)
+            }
+        case .none:
+            if !isCalled { loadGames() }
+        }
     }
     
     static func attemptToMapDualMapping() -> Bool {

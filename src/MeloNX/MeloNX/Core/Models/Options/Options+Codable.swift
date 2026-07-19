@@ -14,7 +14,7 @@ extension Options: Codable {
         case controllerType5, controllerType6, controllerType7, controllerType8
         case hideCursorMode, listInputProfiles, listInputIds
         case disablePTC, enableInternetAccess, disableFsIntegrityChecks, fsGlobalAccessLogMode
-        case disableVSync, disableShaderCache, enableTextureRecompression, disableDockedMode
+        case disableVSync, vSyncMode, customVSyncInterval, disableShaderCache, enableTextureRecompression, disableDockedMode
         case systemLanguage, systemRegion, systemTimeZone, systemTimeOffset
         case memoryManagerMode, audioVolume, useHypervisor, ldnMitm, multiplayerLanInterfaceId
         case disableFileLog, loggingEnableDebug, loggingDisableStub, loggingDisableInfo
@@ -48,6 +48,8 @@ extension Options: Codable {
         try c.encode(disableFsIntegrityChecks,   forKey: .disableFsIntegrityChecks)
         try c.encode(fsGlobalAccessLogMode,      forKey: .fsGlobalAccessLogMode)
         try c.encode(disableVSync,               forKey: .disableVSync)
+        try c.encode(vSyncMode.rawValue,         forKey: .vSyncMode)
+        try c.encode(customVSyncInterval,        forKey: .customVSyncInterval)
         try c.encode(disableShaderCache,         forKey: .disableShaderCache)
         try c.encode(enableTextureRecompression, forKey: .enableTextureRecompression)
         try c.encode(disableDockedMode,          forKey: .disableDockedMode)
@@ -98,6 +100,8 @@ extension Options: Codable {
         disableFsIntegrityChecks   = try c.decodeIfPresent(Bool.self,   forKey: .disableFsIntegrityChecks) ?? false
         fsGlobalAccessLogMode      = try c.decodeIfPresent(Int32.self,  forKey: .fsGlobalAccessLogMode)    ?? 0
         disableVSync               = try c.decodeIfPresent(Bool.self,   forKey: .disableVSync)             ?? false
+        vSyncMode                  = VSyncMode(rawValue: try c.decodeIfPresent(Int32.self, forKey: .vSyncMode) ?? (disableVSync ? VSyncMode.unbounded.rawValue : VSyncMode.switchMode.rawValue)) ?? .switchMode
+        customVSyncInterval        = try c.decodeIfPresent(Int32.self,  forKey: .customVSyncInterval)      ?? 120
         disableShaderCache         = try c.decodeIfPresent(Bool.self,   forKey: .disableShaderCache)       ?? true
         enableTextureRecompression = try c.decodeIfPresent(Bool.self,   forKey: .enableTextureRecompression) ?? false
         disableDockedMode          = try c.decodeIfPresent(Bool.self,   forKey: .disableDockedMode)        ?? true

@@ -1,13 +1,34 @@
 using System;
 using System.Diagnostics;
+using System.Threading;
 
 namespace Ryujinx.Cpu
 {
     public class TickSource : ITickSource
     {
-        private static Stopwatch _tickCounter;
+        private sealed class TickSnapshot
+        {
+            public long HostTicks { get; }
+            public long ElapsedTicks { get; }
+            public long TickScalar { get; }
 
-        private static double _hostTickFreq;
+            public TickSnapshot(long hostTicks, long elapsedTicks, long tickScalar)
+            {
+                HostTicks = hostTicks;
+                ElapsedTicks = elapsedTicks;
+                TickScalar = tickScalar;
+            }
+
+            public long GetElapsedTicks(long hostTicks)
+            {
+                return ElapsedTicks + (hostTicks - HostTicks) * TickScalar / ITickSource.RealityTickScalar;
+            }
+        }
+
+        private readonly Stopwatch _tickCounter;
+        private readonly double _hostTickFreq;
+        private readonly object _tickScalarLock = new();
+        private TickSnapshot _snapshot;
 
         /// <inheritdoc/>
         public ulong Frequency { get; }
@@ -16,23 +37,28 @@ namespace Ryujinx.Cpu
         public ulong Counter => (ulong)(ElapsedSeconds * Frequency);
 
 
-        public long TickScalar { get; set; }
+        public long TickScalar
+        {
+            get => Volatile.Read(ref _snapshot).TickScalar;
+            set
+            {
+                lock (_tickScalarLock)
+                {
+                    long hostTicks = _tickCounter.ElapsedTicks;
+                    TickSnapshot snapshot = Volatile.Read(ref _snapshot);
 
-        private static long _acumElapsedTicks;
-
-        private static long _lastElapsedTicks;
+                    Volatile.Write(ref _snapshot, new TickSnapshot(hostTicks, snapshot.GetElapsedTicks(hostTicks), value));
+                }
+            }
+        }
 
         private long ElapsedTicks
         {
             get
             {
-                long elapsedTicks = _tickCounter.ElapsedTicks;
+                TickSnapshot snapshot = Volatile.Read(ref _snapshot);
 
-                _acumElapsedTicks += (elapsedTicks - _lastElapsedTicks) * TickScalar / 100;
-
-                _lastElapsedTicks = elapsedTicks;
-
-                return _acumElapsedTicks;
+                return snapshot.GetElapsedTicks(_tickCounter.ElapsedTicks);
             }
         }
 
@@ -47,6 +73,7 @@ namespace Ryujinx.Cpu
         {
             Frequency = frequency;
             _hostTickFreq = 1.0 / Stopwatch.Frequency;
+            _snapshot = new TickSnapshot(0, 0, ITickSource.RealityTickScalar);
 
             _tickCounter = new Stopwatch();
             _tickCounter.Start();

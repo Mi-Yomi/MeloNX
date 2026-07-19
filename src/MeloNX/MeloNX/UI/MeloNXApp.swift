@@ -10,16 +10,18 @@ import SDL3
 import AVFoundation
 
 func configureAudioSession() {
-    Task.detached {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(
-                .playback,
-                options: .mixWithOthers
-            )
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch {
-            print("Audio session error: \(error.localizedDescription)")
-        }
+    do {
+        let session = AVAudioSession.sharedInstance()
+
+        try session.setCategory(
+            .playback,
+            options: .mixWithOthers
+        )
+        try session.setPreferredSampleRate(48000)
+        try session.setPreferredIOBufferDuration(0.005)
+        try session.setActive(true)
+    } catch {
+        print("Audio session error: \(error.localizedDescription)")
     }
 }
 

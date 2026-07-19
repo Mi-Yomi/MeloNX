@@ -131,14 +131,24 @@ class AppEnvironment {
                 let nameMatch = components.queryItems?.first(where: { $0.name == "name" })?.value
                 
                 if let query = idMatch ?? nameMatch {
-                    
+                    let nativeSettingsManager: NativeSettingsManager = .shared
                     ryujinxController.loadGames()
                     let game = ryujinxController.games.first {
                         $0.titleId == query || $0.titleName == query
                     }
                     
                     if let game {
-                        ryujinxController.startGame(game)
+                        if ryujinxController.isJITEnabled {
+                            ryujinxController.startGame(game)
+                        } else {
+                            ryujinxController.lastGameLaunched = game.titleId
+                            let jitProv = nativeSettingsManager.jitProvider(JITProvider.disabled).value
+                            if jitProv == .disabled {
+                                ryujinxController.startGame(game)
+                            } else {
+                                EnableJIT.enableJIT(jitProv)
+                            }
+                        }
                     }
                 }
                 

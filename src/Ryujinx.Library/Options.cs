@@ -187,6 +187,12 @@ namespace Ryujinx.Library
         [Option("disable-vsync", Required = false, HelpText = "Disables Vertical Sync.")]
         public bool DisableVSync { get; set; }
 
+        [Option("vsync-mode", Required = false, Default = VSyncMode.Switch, HelpText = "Sets the VSync mode.")]
+        public VSyncMode VSyncMode { get; set; }
+
+        [Option("custom-vsync-interval", Required = false, Default = 120, HelpText = "Sets the custom VSync interval.")]
+        public int CustomVSyncInterval { get; set; }
+
         [Option("disable-shader-cache", Required = false, HelpText = "Disables Shader cache.")]
         public bool DisableShaderCache { get; set; }
 
@@ -404,6 +410,8 @@ namespace Ryujinx.Library
         public bool   DisableFsIntegrityChecks;
         public int    FsGlobalAccessLogMode;
         public bool   DisableVSync;
+        public int    VSyncMode;
+        public int    CustomVSyncInterval;
         public bool   DisableShaderCache;
         public bool   EnableTextureRecompression;
         public bool   DisableDockedMode;
@@ -527,6 +535,8 @@ namespace Ryujinx.Library
                 DisableFsIntegrityChecks   = n->DisableFsIntegrityChecks,
                 FsGlobalAccessLogMode      = n->FsGlobalAccessLogMode,
                 DisableVSync               = n->DisableVSync,
+                VSyncMode                  = (VSyncMode)n->VSyncMode,
+                CustomVSyncInterval        = n->CustomVSyncInterval,
                 DisableShaderCache         = n->DisableShaderCache,
                 EnableTextureRecompression = n->EnableTextureRecompression,
                 DisableDockedMode          = n->DisableDockedMode,

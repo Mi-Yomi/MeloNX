@@ -69,6 +69,18 @@ struct NoJITView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(.thinMaterial)
             )
+            
+            
+            Button("Go Back") {
+                ryujinxController.lastGameLaunched = nil
+                ryujinxController.isRunning = .stopped
+            }
+            .foregroundStyle(Color.accentColor)
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(.thinMaterial)
+            )
         }
         .padding(24)
         .frame(maxWidth: 400)
@@ -77,10 +89,12 @@ struct NoJITView: View {
             
             EnableJIT.enableJIT(nativeSettingsManager.jitProvider(JITProvider.disabled).value)
             
-            Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { timer in
-                if ryujinxController.isJITEnabled {
-                    timer.invalidate()
-                    
+            Task.detached {
+                while !jitEnabled() {
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+                
+                await MainActor.run {
                     withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                         ryujinxController.startGame(game)
                     }

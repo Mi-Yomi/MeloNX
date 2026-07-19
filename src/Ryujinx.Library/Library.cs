@@ -171,6 +171,12 @@ namespace Ryujinx.Library
             }
         }
 
+        [UnmanagedCallersOnly(EntryPoint = "set_unbounded_present_target_fps")]
+        public static void SetUnboundedPresentTargetFps(int targetFps)
+        {
+            _emulationContext?.SetUnboundedPresentTargetFps(targetFps);
+        }
+
         [UnmanagedCallersOnly(EntryPoint = "stop_emulation")]
         public static void StopEmulation()
         {
@@ -888,7 +894,7 @@ namespace Ryujinx.Library
                 MemoryConfiguration.MemoryConfiguration4GiB,
                 options.SystemLanguage,
                 options.SystemRegion,
-                Ryujinx.Common.Configuration.VSyncMode.Switch,
+                options.DisableVSync ? Ryujinx.Common.Configuration.VSyncMode.Unbounded : options.VSyncMode,
                 !options.DisableDockedMode,
                 !options.DisablePTC,
                 ITickSource.RealityTickScalar,
@@ -910,7 +916,7 @@ namespace Ryujinx.Library
                 false,
                 0,
                 false,
-                0
+                options.CustomVSyncInterval
             ).Configure(
                 _virtualFileSystem,
                 _libHacHorizonManager,

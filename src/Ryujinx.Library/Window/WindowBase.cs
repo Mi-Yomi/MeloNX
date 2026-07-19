@@ -228,10 +228,8 @@ namespace Ryujinx.Library
                         Device.Statistics.RecordFifoEnd();
                     }
 
-                    while (Device.ConsumeFrameAvailable())
+                    if (Device.PresentLoop(SwapBuffers))
                     {
-                        Device.PresentFrame(SwapBuffers);
-
                         if (!_ranFirstFrame)
                         { 
                             _ranFirstFrame = true;

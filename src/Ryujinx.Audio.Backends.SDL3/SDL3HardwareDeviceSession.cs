@@ -81,72 +81,65 @@ namespace Ryujinx.Audio.Backends.SDL3
 
         private unsafe void Update(nint userdata, SDL_AudioStream* streamDevice, int additionalAmount, int totalAmmount)
         {
+            if (additionalAmount <= 0)
+            {
+                return;
+            }
+
             using SpanOwner<byte> stream = SpanOwner<byte>.Rent(additionalAmount);
             Span<byte> streamSpan = stream.Span;
 
+            streamSpan.Clear();
 
             int maxFrameCount = (int)GetSampleCount(additionalAmount);
             int bufferedFrames = _ringBuffer.Length / _bytesPerFrame;
 
             int frameCount = Math.Min(bufferedFrames, maxFrameCount);
-
-            if (frameCount == 0)
-            {
-                // SDL3 left the responsibility to the user to clear the buffer.
-                // streamSpan.Clear();
-
-                return;
-            }
-
             int byteCount = frameCount * _bytesPerFrame;
 
-            using SpanOwner<byte> samplesOwner = SpanOwner<byte>.Rent(byteCount);
+            if (frameCount > 0)
+            {
+                using SpanOwner<byte> samplesOwner = SpanOwner<byte>.Rent(byteCount);
+                Span<byte> samples = samplesOwner.Span;
 
-            Span<byte> samples = samplesOwner.Span;
+                _ringBuffer.Read(samples, 0, byteCount);
 
-            _ringBuffer.Read(samples, 0, byteCount);
-
-            // Zero the dest buffer
-            streamSpan.Clear();
-
-            fixed (byte* pStreamDst = streamSpan) {
+                fixed (byte* pStreamDst = streamSpan)
                 fixed (byte* pStreamSrc = samples)
                 {
-
                     // Apply volume to written data
                     SDL_MixAudio(pStreamDst, pStreamSrc, _nativeSampleFormat, (uint)byteCount, _driver.Volume * _volume);
-                    SDL_PutAudioStreamData(streamDevice, (nint)pStreamDst, byteCount);
                 }
-            }
 
-            ulong sampleCount = GetSampleCount(samples.Length);
+                ulong availaibleSampleCount = GetSampleCount(byteCount);
+                bool needUpdate = false;
 
-            ulong availaibleSampleCount = sampleCount;
-
-            bool needUpdate = false;
-
-            while (availaibleSampleCount > 0 && _queuedBuffers.TryPeek(out SDL3AudioBuffer driverBuffer))
-            {
-                ulong sampleStillNeeded = driverBuffer.SampleCount - Interlocked.Read(ref driverBuffer.SamplePlayed);
-                ulong playedAudioBufferSampleCount = Math.Min(sampleStillNeeded, availaibleSampleCount);
-
-                ulong currentSamplePlayed = Interlocked.Add(ref driverBuffer.SamplePlayed, playedAudioBufferSampleCount);
-                availaibleSampleCount -= playedAudioBufferSampleCount;
-
-                if (currentSamplePlayed == driverBuffer.SampleCount)
+                while (availaibleSampleCount > 0 && _queuedBuffers.TryPeek(out SDL3AudioBuffer driverBuffer))
                 {
-                    _queuedBuffers.TryDequeue(out _);
+                    ulong sampleStillNeeded = driverBuffer.SampleCount - Interlocked.Read(ref driverBuffer.SamplePlayed);
+                    ulong playedAudioBufferSampleCount = Math.Min(sampleStillNeeded, availaibleSampleCount);
 
-                    needUpdate = true;
+                    ulong currentSamplePlayed = Interlocked.Add(ref driverBuffer.SamplePlayed, playedAudioBufferSampleCount);
+                    availaibleSampleCount -= playedAudioBufferSampleCount;
+
+                    if (currentSamplePlayed == driverBuffer.SampleCount)
+                    {
+                        _queuedBuffers.TryDequeue(out _);
+                        needUpdate = true;
+                    }
+
+                    Interlocked.Add(ref _playedSampleCount, playedAudioBufferSampleCount);
                 }
 
-                Interlocked.Add(ref _playedSampleCount, playedAudioBufferSampleCount);
+                if (needUpdate)
+                {
+                    _updateRequiredEvent.Set();
+                }
             }
-
-            // Notify the output if needed.
-            if (needUpdate)
+            
+            fixed (byte* pStreamDst = streamSpan)
             {
-                _updateRequiredEvent.Set();
+                SDL_PutAudioStreamData(streamDevice, (nint)pStreamDst, additionalAmount);
             }
         }
 

@@ -332,7 +332,7 @@ namespace Ryujinx.Ava.Systems
         {
             if (Device != null)
             {
-                Device.TargetVSyncInterval = e.NewValue;
+                Device.CustomVSyncInterval = e.NewValue;
                 Device.UpdateVSyncInterval();
             }
         }

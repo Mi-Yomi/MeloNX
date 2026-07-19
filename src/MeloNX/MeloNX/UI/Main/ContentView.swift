@@ -47,7 +47,9 @@ struct ContentView: View {
         .onOpenURL(perform: { AppEnvironment.handleDeepLink($0, ryujinxController: ryujinxController) } )
         .onAppear { NativeSettingsManager.setShared() }
         .task {
-            EnableJIT.enableJIT(nativeSettingsManager.jitProvider(JITProvider.disabled).value)
+            if ryujinxController.lastGameLaunched == nil {
+                EnableJIT.enableJIT(nativeSettingsManager.jitProvider(JITProvider.disabled).value)
+            }
             
             _ = ryujinxController.attemptToMapDualMapping()
             
@@ -62,6 +64,14 @@ struct ContentView: View {
             AlertHandlers.register()
             
             Air.play(AnyView(Text("Select Game")))
+            
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            
+            if let gameId = ryujinxController.lastGameLaunched, let game = ryujinxController.games.first(where: { $0.titleId == gameId }) {
+                ryujinxController.startGame(game)
+            } else {
+                ryujinxController.lastGameLaunched = nil
+            }
         }
     }
     
@@ -99,7 +109,7 @@ struct ContentView: View {
                 .frame(width: .infinity, height: .infinity)
                 .alert(isPresented: .constant(ryujinxController.isRunning.isEntitlement())) {
                     Alert(
-                        title: Text("Entitlement"),
+                        title: Text("Extended Virtual Addressing"),
                         message: Text(LocalizedStringKey("The Extended Virtual Addressing entitlement is required for your device, Please read the Information on how to Install MeloNX and Enable the **PAID** Entitlement.")),
                         primaryButton: .default(Text("Information")) {
                             UIApplication.shared.open(

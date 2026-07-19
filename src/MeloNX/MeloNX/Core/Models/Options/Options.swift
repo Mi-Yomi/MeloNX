@@ -78,6 +78,8 @@ struct Options {
     var disableFsIntegrityChecks: Bool = false
     var fsGlobalAccessLogMode: Int32 = 0
     var disableVSync: Bool = false
+    var vSyncMode: VSyncMode = .switchMode
+    var customVSyncInterval: Int32 = 120
     var disableShaderCache: Bool = true
     var enableTextureRecompression: Bool = false
     var disableDockedMode: Bool = true
@@ -215,6 +217,8 @@ struct Options {
         n.pointee.DisableFsIntegrityChecks   = disableFsIntegrityChecks
         n.pointee.FsGlobalAccessLogMode      = fsGlobalAccessLogMode
         n.pointee.DisableVSync               = disableVSync
+        n.pointee.VSyncMode                  = vSyncMode.rawValue
+        n.pointee.CustomVSyncInterval        = customVSyncInterval
         n.pointee.DisableShaderCache         = disableShaderCache
         n.pointee.EnableTextureRecompression = enableTextureRecompression
         n.pointee.DisableDockedMode          = disableDockedMode

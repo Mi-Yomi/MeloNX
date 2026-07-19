@@ -18,6 +18,21 @@ class MetalView: MTKView {
     func setAspectRatio() {
         self.aspectRatio = RyujinxController.shared.currentSettings.aspectRatio
         Ryujinx.setViewSize(self.bounds)
+        updateUnboundedPresentTargetFps()
+    }
+
+    private func updateUnboundedPresentTargetFps() {
+        Ryujinx.setUnboundedPresentTargetFps(for: window?.screen)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateUnboundedPresentTargetFps()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        updateUnboundedPresentTargetFps()
     }
     
     private func transformToTargetCoordinates(_ point: CGPoint) -> CGPoint {
@@ -176,6 +191,7 @@ struct MetalViewRepresentable: UIViewRepresentable {
             let layerPtr = Unmanaged.passUnretained(metalLayer).toOpaque()
             
             Ryujinx.setNativeWindow(layerPtr)
+            Ryujinx.setUnboundedPresentTargetFps(for: view.window?.screen)
             
             Ryujinx.emulationView = view
             return view

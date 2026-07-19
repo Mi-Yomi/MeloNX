@@ -182,6 +182,8 @@ typedef struct OptionsNative {
     bool   DisableFsIntegrityChecks;
     int32_t FsGlobalAccessLogMode;
     bool   DisableVSync;
+    int32_t VSyncMode;
+    int32_t CustomVSyncInterval;
     bool   DisableShaderCache;
     bool   EnableTextureRecompression;
     bool   DisableDockedMode;

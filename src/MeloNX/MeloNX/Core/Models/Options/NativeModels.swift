@@ -8,6 +8,22 @@
 import Foundation
 import SwiftUI
 
+enum VSyncMode: Int32, Codable, CaseIterable, Identifiable {
+    case switchMode = 0
+    case unbounded = 1
+    case custom = 2
+
+    var id: Int32 { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .switchMode: return String(localized: "Switch")
+        case .unbounded: return String(localized: "Unbounded")
+        case .custom: return String(localized: "Custom")
+        }
+    }
+}
+
 extension ControllerType: CaseIterable, Identifiable {
     public var id: Int { Int(self.rawValue) }
     
