@@ -32,7 +32,6 @@ extension Color {
         )
     }
     
-    
     func toHex(includeAlpha: Bool = false) -> String? {
         guard let components = UIColor(self).cgColor.components,
               components.count >= 3 else { return nil }
@@ -47,5 +46,32 @@ extension Color {
         } else {
             return String(format: "%02X%02X%02X", r, g, b)
         }
+    }
+}
+
+extension UIColor {
+    convenience init(hex: String) {
+        var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
+        var rgb: UInt64 = 0
+        Scanner(string: hexSanitized).scanHexInt64(&rgb)
+        self.init(
+            red: CGFloat((rgb & 0xFF0000) >> 16) / 255,
+            green: CGFloat((rgb & 0x00FF00) >> 8) / 255,
+            blue: CGFloat(rgb & 0x0000FF) / 255,
+            alpha: 1.0
+        )
+    }
+
+    static func average(hexes: [String]) -> UIColor {
+        let colors = hexes.map { UIColor(hex: $0) }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        for color in colors {
+            var cr: CGFloat = 0, cg: CGFloat = 0, cb: CGFloat = 0, ca: CGFloat = 0
+            color.getRed(&cr, green: &cg, blue: &cb, alpha: &ca)
+            r += cr; g += cg; b += cb; a += ca
+        }
+        let count = CGFloat(colors.count)
+        return UIColor(red: r / count, green: g / count, blue: b / count, alpha: a / count)
     }
 }

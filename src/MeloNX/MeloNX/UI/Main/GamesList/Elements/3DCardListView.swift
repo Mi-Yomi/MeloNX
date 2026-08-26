@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SceneKit
+import Combine
 
 struct CartridgeData {
     let labelImage: UIImage
@@ -48,7 +49,7 @@ struct CartridgeCarouselView: UIViewRepresentable {
     func makeUIView(context: Context) -> SCNView {
         let scnView = SCNView()
         scnView.allowsCameraControl = false
-        scnView.autoenablesDefaultLighting = true
+        scnView.autoenablesDefaultLighting = false
         scnView.backgroundColor = .clear
         
         let tapGesture = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
@@ -67,6 +68,40 @@ struct CartridgeCarouselView: UIViewRepresentable {
         cameraNode.eulerAngles = SCNVector3(0, Float.pi, 0)
         scene.rootNode.addChildNode(cameraNode)
         scnView.pointOfView = cameraNode
+        
+        let ambientLight = SCNLight()
+        ambientLight.type = .ambient
+        ambientLight.color = UIColor.white
+        ambientLight.intensity = 700
+        let ambientNode = SCNNode()
+        ambientNode.light = ambientLight
+        scene.rootNode.addChildNode(ambientNode)
+        
+        let whiteLight = SCNLight()
+        whiteLight.type = .omni
+        whiteLight.color = UIColor.white
+        whiteLight.intensity = 550
+        let whiteLightNode = SCNNode()
+        whiteLightNode.name = "whiteLight"
+        whiteLightNode.light = whiteLight
+        cameraNode.addChildNode(whiteLightNode)
+
+        let accentLight = SCNLight()
+        accentLight.type = .omni
+        
+        if ThemeManager.shared.currentTheme == .defaultTheme {
+            accentLight.color = UIColor.white
+        } else {
+            accentLight.color = UIColor(ThemeManager.shared.currentTheme.accent.primary)
+        }
+        accentLight.intensity = 1000
+        accentLight.attenuationStartDistance = 10
+        accentLight.attenuationEndDistance = 80
+        let accentLightNode = SCNNode()
+        accentLightNode.name = "themeTintLight"
+        accentLightNode.light = accentLight
+        accentLightNode.position = SCNVector3(0, 0, isPortraitiPhone ? 40 : 30)
+        scene.rootNode.addChildNode(accentLightNode)
         
         if let baseScene = SCNScene(named: "cart.usdc") {
             for (index, item) in cartridges.enumerated() {
@@ -112,7 +147,7 @@ struct CartridgeCarouselView: UIViewRepresentable {
     
     func updateUIView(_ scnView: SCNView, context: Context) {
         guard let cameraNode = scnView.pointOfView else { return }
-
+        
         let targetX = -Float(selectedIndex) * spacing
         
         if context.coordinator.lastCameraTarget != selectedIndex {
@@ -123,6 +158,15 @@ struct CartridgeCarouselView: UIViewRepresentable {
             )
             moveAction.timingMode = .easeInEaseOut
             cameraNode.runAction(moveAction, forKey: "cameraMove")
+            
+            if let accentLightNode = scnView.scene?.rootNode.childNode(withName: "themeTintLight", recursively: false) {
+                let moveAccent = SCNAction.move(
+                    to: SCNVector3(targetX, accentLightNode.position.y, accentLightNode.position.z),
+                    duration: 0.35
+                )
+                moveAccent.timingMode = .easeInEaseOut
+                accentLightNode.runAction(moveAccent, forKey: "accentMove")
+            }
         }
         
         if reset {
@@ -254,8 +298,28 @@ struct CartridgeCarouselView: UIViewRepresentable {
         
         var parent: CartridgeCarouselView
         
+        var themeCancellable: AnyCancellable?
+        
         init(_ parent: CartridgeCarouselView) {
             self.parent = parent
+            super.init()
+            
+            themeCancellable = ThemeManager.shared.$currentTheme
+                .map { $0 == .defaultTheme ? UIColor.white : UIColor($0.accent.primary) }
+                .removeDuplicates()
+                .sink { [weak self] color in
+                    self?.updateAmbientColor(color)
+                }
+        }
+        
+        func updateAmbientColor(_ color: UIColor) {
+            guard let ambientNode = scnView?.scene?.rootNode
+                .childNode(withName: "themeTintLight", recursively: false) else { return }
+            
+            SCNTransaction.begin()
+            SCNTransaction.animationDuration = 0.3
+            ambientNode.light?.color = color
+            SCNTransaction.commit()
         }
         
         @objc func orientationChanged() {
@@ -263,7 +327,7 @@ struct CartridgeCarouselView: UIViewRepresentable {
 
             let newSpacing = parent.spacing
             let targetX = -Float(parent.selectedIndex) * newSpacing
-            let newCameraY: Float = parent.isPortraitiPhone ? -70 : -50
+            // let newCameraY: Float = parent.isPortraitiPhone ? -70 : -50
             
             for node in scnView.scene?.rootNode.childNodes ?? [] {
                 guard let name = node.name, name.hasPrefix("Cartridge_"),
@@ -397,7 +461,7 @@ struct CartridgeCarouselView: UIViewRepresentable {
         parentNode.enumerateHierarchy { node, _ in
             guard let materials = node.geometry?.materials else { return }
             for material in materials where material.name == materialName {
-                material.diffuse.contents = image
+                material.diffuse.contents = image.withRoundedCorners(radius: 12)
             }
         }
     }
@@ -411,13 +475,48 @@ struct CartridgeCarouselView: UIViewRepresentable {
                     material.diffuse.contents = colors[index]
                     
                     material.lightingModel = .physicallyBased
-                    material.specular.contents = UIColor.black
-                    material.shininess = 0.0
-                    material.ambient.contents = UIColor(white: 0.2, alpha: 1.0)
+                    
+                    material.roughness.contents = 0.75
+                    material.metalness.contents = 0.0
+                    
+                    material.ambient.contents = UIColor(white: 0.35, alpha: 1.0)
                     
                     index += 1
                 }
             }
+        }
+    }
+}
+
+
+extension UIImage {
+    func withRoundedCorners(radius: CGFloat) -> UIImage? {
+        let rect = CGRect(origin: .zero, size: self.size)
+        
+        let renderer = UIGraphicsImageRenderer(size: self.size)
+        
+        return renderer.image { context in
+            let path = UIBezierPath(roundedRect: rect, cornerRadius: radius)
+            path.addClip()
+            
+            self.draw(in: rect)
+        }
+    }
+    
+    func toCircle() -> UIImage? {
+        let minSide = min(self.size.width, self.size.height)
+        let rect = CGRect(x: (self.size.width - minSide) / 2,
+                          y: (self.size.height - minSide) / 2,
+                          width: minSide,
+                          height: minSide)
+        
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: minSide, height: minSide))
+        
+        return renderer.image { context in
+            let path = UIBezierPath(ovalIn: CGRect(origin: .zero, size: CGSize(width: minSide, height: minSide)))
+            path.addClip()
+            
+            self.draw(in: CGRect(x: -rect.origin.x, y: -rect.origin.y, width: self.size.width, height: self.size.height))
         }
     }
 }

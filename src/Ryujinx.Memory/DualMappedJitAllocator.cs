@@ -48,7 +48,7 @@ namespace Ryujinx.Memory
             Logger.Info?.Print(LogClass.Cpu,
                 $"Allocating dual-mapped JIT memory of size {size} bytes, called by {callingMethod?.DeclaringType?.FullName}.{callingMethod?.Name} with {hasTXM}, {dualMappingEnabled}");
             Size = size;
-        
+            AllocateDualMapping();
         }
 
         nint? BreakGetJITMapping(nuint bytes)

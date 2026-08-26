@@ -147,6 +147,40 @@ enum BackgroundStyle: String, Codable, CaseIterable {
     }
 }
 
+extension BackgroundStyle {
+    var ambientColor: UIColor {
+        switch self {
+        case .systemDefault:
+            return .systemGray6
+        case .solidDark:
+            return UIColor(hex: "#0F0F14")
+        case .solidLight:
+            return UIColor(hex: "#F2F2F7")
+        case .oled:
+            return .black
+        case .gradientAurora:
+            return .average(hexes: ["#050D1A", "#0A2A2A", "#0D1A12"])
+        case .gradientSunset:
+            return .average(hexes: ["#1A080A", "#2A1200", "#1A0A0A"])
+        case .gradientOcean:
+            return .average(hexes: ["#050A1A", "#0A1428", "#050D1E"])
+        case .gradientForest:
+            return .average(hexes: ["#051A08", "#0A2E10", "#061A0A"])
+        case .gradientCrimson:
+            return .average(hexes: ["#1C0605", "#300B09", "#210402"])
+        case .gradientGold:
+            return .average(hexes: ["#2A1A00", "#3D2600", "#1F1200"])
+        case .chapter5:
+            return .average(hexes: ["#76375c", "#85412a", "#695d2f"])
+        case .gradientQueer:
+            return .average(hexes: ["#161608", "#0A160A", "#080F18"])
+        case .lily:
+            return .average(hexes: ["#0D0A1F", "#1A0E3D", "#120D35"])
+        }
+    }
+}
+
+
 struct AppTheme: Identifiable, Equatable, Codable {
     let id: String
     let name: String

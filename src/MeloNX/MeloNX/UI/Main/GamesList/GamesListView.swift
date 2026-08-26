@@ -120,6 +120,8 @@ struct GamesListView: View {
                                     }
                                 }
                             }
+                            .modifier(HiddenScrollBackground())
+                            .themedBackground()
                         case .carousel:
                             ZStack {
                                 Text("")
@@ -127,7 +129,7 @@ struct GamesListView: View {
                                         toolbarHandler()
                                     }
                                 
-                                let cartridges: [CartridgeData] = ryujinxController.games.compactMap({ CartridgeData(labelImage: $0.icon ?? UIImage(), colors: [.black, .yellow]) })
+                                let cartridges: [CartridgeData] = ryujinxController.games.compactMap({ CartridgeData(labelImage: $0.icon ?? UIImage(), colors: [UIColor(hex: "171717"), .yellow]) })
                                 
                                 CartridgeCarouselView(cartridges: cartridges, selectedIndex: $selectedIndex, uiMenu: gameContextUIMenu, spinTrigger: $spinTrigger, reset: $spinReset, spun: { index in
                                     let game = ryujinxController.games[index]
@@ -142,6 +144,8 @@ struct GamesListView: View {
                                     resetControllerObservers()
                                 }
                             }
+                            .modifier(HiddenScrollBackground())
+                            .themedBackground()
                             .if(!(horizontalSizeClass == .compact && verticalSizeClass == .regular)) { view in
                                 view
                                     .ignoresSafeArea(.all, edges: UIDevice.current.userInterfaceIdiom == .pad ? .bottom : .top)
@@ -171,6 +175,8 @@ struct GamesListView: View {
                                 .padding(.horizontal)
                                 .padding(.top)
                             }
+                            .modifier(HiddenScrollBackground())
+                            .themedBackground()
                         }
                     }
                 }
@@ -178,8 +184,6 @@ struct GamesListView: View {
             
 
         }
-        .modifier(HiddenScrollBackground())
-        .themedBackground()
         .overlay {
             if ryujinxController.isJITEnabled {
                 VStack {
