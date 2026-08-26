@@ -92,9 +92,12 @@ struct GamesListView: View {
     
     var body: some View {
         NavigationStack {
-            Group {
+            VStack {
                 if ryujinxController.games.isEmpty {
                     emptyStateView
+                        .toolbar {
+                            toolbarHandler()
+                        }
                 } else {
                     Group {
                         switch nativeSettings.cardLayout(CardType.card).value {
@@ -122,6 +125,9 @@ struct GamesListView: View {
                             }
                             .modifier(HiddenScrollBackground())
                             .themedBackground()
+                            .toolbar {
+                                toolbarHandler()
+                            }
                         case .carousel:
                             ZStack {
                                 Text("")
@@ -177,12 +183,13 @@ struct GamesListView: View {
                             }
                             .modifier(HiddenScrollBackground())
                             .themedBackground()
+                            .toolbar {
+                                toolbarHandler()
+                            }
                         }
                     }
                 }
             }
-            
-
         }
         .overlay {
             if ryujinxController.isJITEnabled {
@@ -202,9 +209,6 @@ struct GamesListView: View {
             }
         }
         .navigationTitle("Library")
-        .toolbar {
-            toolbarHandler()
-        }
         .accentColor(theme.accent.primary)
         .fullScreenCover(isPresented: controllerEdit) {
             ControllerView(controller: VirtualControllerManager.shared, isEditing: true, gameId: controllerEditor?.titleId ?? "")
