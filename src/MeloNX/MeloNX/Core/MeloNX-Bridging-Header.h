@@ -13,7 +13,8 @@
 #include <stdbool.h>
 #include <signal.h>
 #include <stdint.h>
-#include "Models/Options/NativeOptions.h"
+#include "Models/Options/NativeOptions.h" 
+#include <IOKit/IOKitLib.h>
 
 struct GameInfoC {
     long FileSize;

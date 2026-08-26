@@ -40,10 +40,12 @@
 	<array>
 		<string>fileimporterhelper</string>
 	</array>
+	<key>LSSupportsGameMode</key>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
-		<false/>
+		<true/>
 	</dict>
 	<key>UIFileSharingEnabled</key>
 	<true/>

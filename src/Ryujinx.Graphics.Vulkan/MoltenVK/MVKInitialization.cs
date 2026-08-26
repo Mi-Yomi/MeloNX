@@ -11,6 +11,7 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
     public static partial class MVKInitialization
     {
         private const string VulkanLib = "libvulkan.dylib";
+        private const uint MaxActiveMetalCommandBuffersPerQueue = 32;
 
         [LibraryImport("libMoltenVK.dylib")]
         private static partial Result vkGetMoltenVKConfigurationMVK(nint unusedInstance, out MVKConfiguration config, in nint configSize);
@@ -28,7 +29,8 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
             config.FastMathEnabled = true;
 
             config.SemaphoreSupportStyle = MVKVkSemaphoreSupportStyle.MVK_CONFIG_VK_SEMAPHORE_SUPPORT_STYLE_SINGLE_QUEUE;
-            // config.SynchronousQueueSubmits = false;
+            config.SynchronousQueueSubmits = false;
+            config.MaxActiveMetalCommandBuffersPerQueue = MaxActiveMetalCommandBuffersPerQueue;
 
             config.ResumeLostDevice = true;
 

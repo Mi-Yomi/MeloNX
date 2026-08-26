@@ -165,6 +165,33 @@ namespace Ryujinx.Graphics.Gpu.Image
         public ulong Size => (ulong)_sizeInfo.TotalSize;
 
         /// <summary>
+        /// Estimated memory retained by this texture while it is in the deletion cache.
+        /// </summary>
+        public ulong CacheSize { get; set; }
+
+        /// <summary>
+        /// Estimates host texture storage and any retained CPU-side comparison copy.
+        /// </summary>
+        public ulong GetEstimatedHostSize()
+        {
+            ulong size = TextureCache.GetCreateInfo(Info, _context.Capabilities, ScaleFactor).GetTotalSize();
+
+            if (_flushHostTexture != null)
+            {
+                size += TextureCache.GetCreateInfo(Info, _context.Capabilities, 1f).GetTotalSize();
+            }
+
+            if (_setHostTexture != null)
+            {
+                size += TextureCache.GetCreateInfo(Info, _context.Capabilities, 1f).GetTotalSize();
+            }
+
+            size += (ulong)(_currentData?.Length ?? 0);
+
+            return size;
+        }
+
+        /// <summary>
         /// Whether or not the texture belongs is a view.
         /// </summary>
         public bool IsView => _viewStorage != this;

@@ -4,6 +4,7 @@ using Ryujinx.Memory.Range;
 using Ryujinx.Memory.Tracking;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
@@ -46,6 +47,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
         public Buffer Previous { get; set; }
 
         /// <summary>
+        /// Node used to track this buffer in the cache's least-recently-used list.
+        /// </summary>
+        public LinkedListNode<Buffer> CacheNode { get; set; }
+
+        /// <summary>
         /// Increments when the buffer is (partially) unmapped or disposed.
         /// </summary>
         public int UnmappedSequence { get; private set; }
@@ -84,6 +90,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private readonly Action<ulong, ulong> _modifiedDelegate;
 
         private HashSet<MultiRangeBuffer> _virtualDependencies;
+        private int _cacheDependencyCount;
         private readonly ReaderWriterLockSlim _virtualDependenciesLock;
 
         private int _sequenceNumber;
@@ -514,6 +521,45 @@ namespace Ryujinx.Graphics.Gpu.Memory
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Returns whether the host copy can be discarded and recreated from guest memory.
+        /// </summary>
+        public bool CanEvict()
+        {
+            if (_syncActionRegistered || _cacheDependencyCount != 0 || _modifiedRanges is { HasRanges: true })
+            {
+                return false;
+            }
+
+            _virtualDependenciesLock.EnterReadLock();
+
+            try
+            {
+                return _virtualDependencies == null || _virtualDependencies.Count == 0;
+            }
+            finally
+            {
+                _virtualDependenciesLock.ExitReadLock();
+            }
+        }
+
+        /// <summary>
+        /// Prevents eviction while another cached host resource refers to this buffer's storage.
+        /// </summary>
+        public void IncrementCacheDependency()
+        {
+            _cacheDependencyCount++;
+        }
+
+        /// <summary>
+        /// Releases a cache dependency previously registered for this buffer.
+        /// </summary>
+        public void DecrementCacheDependency()
+        {
+            Debug.Assert(_cacheDependencyCount > 0);
+            _cacheDependencyCount--;
         }
 
         /// <summary>

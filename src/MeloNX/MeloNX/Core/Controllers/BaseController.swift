@@ -24,6 +24,8 @@ class BaseController: Equatable, Identifiable {
     
     var orgName: String = "MeloNX Virtual Controller"
     
+    var controllerType: ControllerType = .proController
+    
     var virtual: Bool = false
     var name: String { virtual ? orgName : nativeController?.vendorName ?? orgName }
     var nativeController: GCController?
@@ -61,7 +63,6 @@ class BaseController: Equatable, Identifiable {
         self.nativeController = nativeController
         self.virtual = virtual ?? (nativeController == nil)
         
-        
         if !self.virtual {
             orgName = "Unknown"
         }
@@ -72,11 +73,11 @@ class BaseController: Equatable, Identifiable {
         self.inputQueue = DispatchQueue(label: queueLabel, qos: .userInteractive)
         self.motionQueue = DispatchQueue(label: queueLabel + ".motion", qos: .background)
         
-        setupController()
     }
     
     public func attach(_ index: Int, controllerType: ControllerType) {
-        Ryujinx.attachGamepad(self.pointer, self.name, index, controllerType)
+        setupController()
+        Ryujinx.attachGamepad(self.pointer, self.name, controllerType == .handheld ? 8 : index, controllerType)
     }
     
     public func setupController() {

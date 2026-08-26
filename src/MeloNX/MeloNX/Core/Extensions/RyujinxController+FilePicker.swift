@@ -94,42 +94,4 @@ extension RyujinxController {
         }
     }
     
-    public func clearShaderCache(_ titleId: String = "") {
-        AppAlerts.showAlert(title: "Clear Shader Cache", message: titleId.isEmpty ? "Are you sure you want to clear ALL shader cache?" : "Are you sure you want to clear your shader cache?",
-                  actions: [
-                    (title: "Cancel", style: .cancel, handler: nil),
-                    (title: "Clear", style: .destructive, handler: {
-                        self.clearShaderCacheImpl(titleId)
-                    }),
-                  ]
-        )
-        
-    }
-    
-    private func clearShaderCacheImpl(_ titleId: String) {
-        if titleId.isEmpty {
-            let fileManager = FileManager.default
-            let gamesURL = URL.documentsDirectory.appendingPathComponent("games")
-            
-            do {
-                let contents = try fileManager.contentsOfDirectory(at: gamesURL, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])
-                
-                let folderURLs = contents.filter { url in
-                    (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-                }
-                
-                for folderURL in folderURLs {
-                    try? fileManager.removeItem(at: folderURL.appendingPathComponent("cache"))
-                }
-                
-            } catch {
-                print("Error reading games folder: \(error)")
-            }
-        } else {
-            let fileManager = FileManager.default
-            let cacheURL = URL.documentsDirectory.appendingPathComponent("games").appendingPathComponent(titleId).appendingPathComponent("cache")
-            
-            try? fileManager.removeItem(at: cacheURL)
-        }
-    }
 }

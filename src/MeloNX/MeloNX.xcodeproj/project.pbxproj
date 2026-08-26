@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		4E5FB8FA2F9612F7005969EC /* Melo-Controller in Frameworks */ = {isa = PBXBuildFile; productRef = 4E5FB8F92F9612F7005969EC /* Melo-Controller */; };
+		4E696875302702350024B484 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E696874302702350024B484 /* IOKit.framework */; };
 		4EA6523B2FBD941E00D6FB52 /* NavigationStackBackport in Frameworks */ = {isa = PBXBuildFile; productRef = 4EA6523A2FBD941E00D6FB52 /* NavigationStackBackport */; };
 		4EC482D22F8D101B008C1955 /* Ryujinx.Library.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 4EC482D12F8D101B008C1955 /* Ryujinx.Library.dylib */; };
 		4EC482D32F8D101B008C1955 /* Ryujinx.Library.dylib in Embed Libraries */ = {isa = PBXBuildFile; fileRef = 4EC482D12F8D101B008C1955 /* Ryujinx.Library.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -38,6 +39,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		4E696874302702350024B484 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		4EC482D12F8D101B008C1955 /* Ryujinx.Library.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = Ryujinx.Library.dylib; path = "../Ryujinx.Library/bin/Release/net10.0/ios-arm64/native/Ryujinx.Library.dylib"; sourceTree = "<group>"; };
 		4ED5D50B2F80DD02007DB057 /* MeloNX.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MeloNX.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -105,6 +107,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4E696875302702350024B484 /* IOKit.framework in Frameworks */,
 				4E5FB8FA2F9612F7005969EC /* Melo-Controller in Frameworks */,
 				4EC482D22F8D101B008C1955 /* Ryujinx.Library.dylib in Frameworks */,
 				4EA6523B2FBD941E00D6FB52 /* NavigationStackBackport in Frameworks */,
@@ -117,6 +120,7 @@
 		4EC480BC2F8CCA70008C1955 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				4E696874302702350024B484 /* IOKit.framework */,
 				4EC482D12F8D101B008C1955 /* Ryujinx.Library.dylib */,
 			);
 			name = Frameworks;
@@ -402,6 +406,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MeloNX/Info.plist;
 				INFOPLIST_KEY_GCSupportsControllerUserInteraction = YES;
+				INFOPLIST_KEY_GCSupportsGameMode = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "MeloNX needs local network access for LAN / Local Multiplaer";
@@ -419,8 +424,8 @@
 					"$(PROJECT_DIR)/MeloNX/Frameworks",
 					"$(PROJECT_DIR)/MeloNX/Dependencies",
 				);
-				MARKETING_VERSION = 2.5;
-				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.MeloNX;
+				MARKETING_VERSION = 2.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.wow2.MeloNX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -454,6 +459,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MeloNX/Info.plist;
 				INFOPLIST_KEY_GCSupportsControllerUserInteraction = YES;
+				INFOPLIST_KEY_GCSupportsGameMode = YES;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.games";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "MeloNX needs local network access for LAN / Local Multiplaer";
@@ -471,8 +477,8 @@
 					"$(PROJECT_DIR)/MeloNX/Frameworks",
 					"$(PROJECT_DIR)/MeloNX/Dependencies",
 				);
-				MARKETING_VERSION = 2.5;
-				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.MeloNX;
+				MARKETING_VERSION = 2.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.stossy11.wow2.MeloNX;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

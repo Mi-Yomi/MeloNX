@@ -59,6 +59,7 @@ class MemoryUsageMonitor: ObservableObject {
 
 
 struct EmulationView: View {
+    var game: GameInfo
     @EnvironmentObject var ryujinxController: RyujinxController
     @ObservedObject var menuViewHandler: InGameConfigView_MenuView = .shared
     @StateObject var controllerManager: ControllerManager = .shared
@@ -68,17 +69,18 @@ struct EmulationView: View {
     
     @State var isConnected = false
     
-    
     @ViewBuilder
     func emulationView(_ airplay: Bool = false) -> some View {
-        MetalViewContainer(showView: isConnected ? airplay : true, airplay: airplay, ryujinxController: ryujinxController, statisticsHandler: statisticsHandler, nativeSettingsManager: nativeSettingsManager)
-            .overlay {
-                if controllerManager.hasVirtualController() && !airplay {
-                    ControllerView(controller: VirtualControllerManager.shared, isEditing: false)
-                        .ignoresSafeArea(.all, edges: .vertical)
+        if airplay { MetalViewRepresentable(showView: true).ignoresSafeArea().frame(maxWidth: .infinity, maxHeight: .infinity) } else {
+            MetalViewContainer(showView: !isConnected, airplay: airplay, ryujinxController: ryujinxController, statisticsHandler: statisticsHandler, nativeSettingsManager: nativeSettingsManager)
+                .overlay {
+                    if controllerManager.hasVirtualController() && !airplay {
+                        ControllerView(controller: VirtualControllerManager.shared, isEditing: false, gameId: game.titleId)
+                            .ignoresSafeArea(.all, edges: .vertical)
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
     
     var body: some View {
@@ -95,14 +97,10 @@ struct EmulationView: View {
                 .if(!statisticsHandler.started) { view in
                     view
                         .overlay {
-                            if case .started(game: let game, state: _) = ryujinxController.isRunning {
-                                LoadingOverlayView(game:  game, showLogs: false)
-                                    .onDisappear() {
-                                        menuViewHandler.triggerButton()
-                                    }
-                            } else {
-                                Color.black.opacity(0.8).ignoresSafeArea()
-                            }
+                            LoadingOverlayView(game:  game, showLogs: false)
+                                .onDisappear() {
+                                    menuViewHandler.triggerButton()
+                                }
                         }
                 }
         }

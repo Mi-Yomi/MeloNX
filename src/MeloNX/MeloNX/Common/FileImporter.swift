@@ -53,8 +53,19 @@ class FileImporterManager: NSObject, ObservableObject, UIDocumentPickerDelegate 
             }
         }
         
-        let needsAsCopy = types.contains(.folder) ? false : AppEnvironment.shared.needsAsCopy
+        var types = types
+        let needsAsCopy = AppEnvironment.shared.needsAsCopy
         
+        if needsAsCopy {
+            switch types {
+            case [.folder]:
+                types = [.item]
+            case let t where t.contains(.folder):
+                types.removeAll(where: { $0 == .folder })
+            default:
+                break
+            }
+        }
         
         let documentPicker: UIDocumentPickerViewController = .init(forOpeningContentTypes: types, asCopy: needsAsCopy)
         documentPicker.delegate = self

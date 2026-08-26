@@ -69,6 +69,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         private List<PhysicalDependency> _dependencies;
+        private List<Buffer> _cacheDependencies;
         private BufferModifiedRangeList _modifiedRanges = null;
 
         /// <summary>
@@ -130,6 +131,20 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             (_dependencies ??= []).Add(new(buffer, rangeAddress - buffer.Address, dstOffset, rangeSize));
             buffer.AddVirtualDependency(this);
+        }
+
+        /// <summary>
+        /// Keeps a physical buffer alive while its storage is referenced by this sparse buffer.
+        /// </summary>
+        public void AddCacheDependency(Buffer buffer)
+        {
+            _cacheDependencies ??= [];
+
+            if (!_cacheDependencies.Contains(buffer))
+            {
+                _cacheDependencies.Add(buffer);
+                buffer.IncrementCacheDependency();
+            }
         }
 
         /// <summary>
@@ -229,6 +244,16 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// </summary>
         public void Dispose()
         {
+            if (_cacheDependencies != null)
+            {
+                foreach (Buffer buffer in _cacheDependencies)
+                {
+                    buffer.DecrementCacheDependency();
+                }
+
+                _cacheDependencies = null;
+            }
+
             if (_dependencies != null)
             {
                 foreach (PhysicalDependency dependency in _dependencies)

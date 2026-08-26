@@ -47,12 +47,12 @@ namespace Ryujinx.Audio.Backends.SDL3
 
         private void EnsureAudioStreamSetup(AudioBuffer buffer)
         {
-            uint bufferSampleCount = (uint)GetSampleCount(buffer);
-            bool needAudioSetup = (_outputStream == null && !_hasSetupError) ||
-                (bufferSampleCount >= Constants.TargetSampleCount && bufferSampleCount < _sampleCount);
+            bool needAudioSetup = _outputStream == null && !_hasSetupError;
 
             if (needAudioSetup)
             {
+                uint bufferSampleCount = (uint)GetSampleCount(buffer);
+
                 _sampleCount = Math.Max(Constants.TargetSampleCount, bufferSampleCount);
 
                 SDL_AudioStream* newOutputStream = SDL3HardwareDeviceDriver.OpenStream(RequestedSampleFormat, RequestedSampleRate, RequestedChannelCount, _sampleCount, _callbackDelegate);

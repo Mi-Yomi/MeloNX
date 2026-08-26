@@ -9,7 +9,8 @@ namespace Ryujinx.Ava.Systems.Configuration
         OpenAl,
         SoundIo,
         SDL3,
-        AudioToolbox,
+        AVFoundation,
+        AudioToolbox = AVFoundation,
         SDL2 = SDL3
     }
 }

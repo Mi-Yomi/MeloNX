@@ -19,6 +19,9 @@ namespace Ryujinx.Cpu.LightningJit
 
         public static bool InitMemoryCache()
         {
+            if (!MemoryBlock.DualMappedEnabled()) 
+                return true;
+
             if (initialized)
                 return true;
 
@@ -60,7 +63,7 @@ namespace Ryujinx.Cpu.LightningJit
                 { 
 #pragma warning disable CA1416 // iOS checking is handled in MemoryBlock.DualMappedEnabled() 
                     DualMappedNoWxCache.InitMemoryCache();
-                    _dualMappedNoWxCache = new(new JitMemoryAllocator(), CreateStackWalker(), this);
+                    _dualMappedNoWxCache = new(this);
 #pragma warning disable CA1416
                 }
                 else 
@@ -107,9 +110,6 @@ namespace Ryujinx.Cpu.LightningJit
 
             NativeInterface.UnregisterThread();
             _noWxCache?.ClearEntireThreadLocalCache();
-#pragma warning disable CA1416
-            _dualMappedNoWxCache?.ClearEntireThreadLocalCache();
-#pragma warning restore CA1416
         }
 
         internal nint GetOrTranslatePointer(nint framePointer, ulong address, ExecutionMode mode)
@@ -137,7 +137,7 @@ namespace Ryujinx.Cpu.LightningJit
                 CompiledFunction func = Compile(address, mode);
 
 #pragma warning disable CA1416
-                return _dualMappedNoWxCache.Map(framePointer, func.Code, address, (ulong)func.GuestCodeLength);
+                return _dualMappedNoWxCache.Map(func.Code, address, (ulong)func.GuestCodeLength);
 #pragma warning restore CA1416
             }
 

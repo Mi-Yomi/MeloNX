@@ -7,6 +7,93 @@
 
 
 import Foundation
+import Darwin
+
+struct IPv4NetworkInterface: Hashable {
+    let name: String
+    let address: String
+    let subnetMask: String
+
+    var displayName: String {
+        "\(name): \(address)"
+    }
+}
+
+func availableIPv4NetworkInterfaces() -> [IPv4NetworkInterface] {
+    var interfaceAddresses: UnsafeMutablePointer<ifaddrs>?
+
+    guard getifaddrs(&interfaceAddresses) == 0, let firstAddress = interfaceAddresses else {
+        return []
+    }
+
+    defer { freeifaddrs(interfaceAddresses) }
+
+    var interfaces: [IPv4NetworkInterface] = []
+    var currentAddress: UnsafeMutablePointer<ifaddrs>? = firstAddress
+
+    while let current = currentAddress {
+        let interface = current.pointee
+
+        defer { currentAddress = interface.ifa_next }
+
+        guard
+            let address = interface.ifa_addr,
+            let netmask = interface.ifa_netmask,
+            address.pointee.sa_family == UInt8(AF_INET)
+        else {
+            continue
+        }
+
+        let name = String(cString: interface.ifa_name)
+        var addressBuffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        var netmaskBuffer = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+
+        guard
+            getnameinfo(
+                address,
+                socklen_t(address.pointee.sa_len),
+                &addressBuffer,
+                socklen_t(addressBuffer.count),
+                nil,
+                0,
+                NI_NUMERICHOST
+            ) == 0,
+            getnameinfo(
+                netmask,
+                socklen_t(netmask.pointee.sa_len),
+                &netmaskBuffer,
+                socklen_t(netmaskBuffer.count),
+                nil,
+                0,
+                NI_NUMERICHOST
+            ) == 0
+        else {
+            continue
+        }
+
+        let ipv4Address = String(cString: addressBuffer)
+
+        guard ipv4Address != "127.0.0.1", !interfaces.contains(where: { $0.name == name }) else {
+            continue
+        }
+
+        interfaces.append(
+            IPv4NetworkInterface(
+                name: name,
+                address: ipv4Address,
+                subnetMask: String(cString: netmaskBuffer)
+            )
+        )
+    }
+
+    interfaces.sort {
+        if $0.name == "en0" { return true }
+        if $1.name == "en0" { return false }
+        return $0.name.localizedStandardCompare($1.name) == .orderedAscending
+    }
+
+    return interfaces
+}
 
 struct Options {
 
@@ -92,6 +179,8 @@ struct Options {
     var useHypervisor: Bool = false
     var ldnMitm: Bool = false
     var multiplayerLanInterfaceId: String = "0"
+    var multiplayerLanInterfaceAddress: String?
+    var multiplayerLanInterfaceSubnetMask: String?
     
     // Logging
     var disableFileLog: Bool = false
@@ -132,16 +221,49 @@ struct Options {
     
     func controllerType(for index: Int) -> ControllerType? {
         switch index {
-        case 1: return controllerType1
-        case 2: return controllerType2
-        case 3: return controllerType3
-        case 4: return controllerType4
-        case 5: return controllerType5
-        case 6: return controllerType6
-        case 7: return controllerType7
-        case 8: return controllerType8
+        case 0: return controllerType1
+        case 1: return controllerType2
+        case 2: return controllerType3
+        case 3: return controllerType4
+        case 4: return controllerType5
+        case 5: return controllerType6
+        case 6: return controllerType7
+        case 7: return controllerType8
         default: return nil
         }
+    }
+    
+    static func updateControllerType(index: Int, to type: ControllerType, options self: inout Options) {
+        switch index {
+        case 0: self.controllerType1 = type
+        case 1: self.controllerType2 = type
+        case 2: self.controllerType3 = type
+        case 3: self.controllerType4 = type
+        case 4: self.controllerType5 = type
+        case 5: self.controllerType6 = type
+        case 6: self.controllerType7 = type
+        case 7: self.controllerType8 = type
+        default: break
+        }
+    }
+
+    @discardableResult
+    mutating func resolveMultiplayerLanInterface(preferredInterfaceId: String? = nil) -> Bool {
+        let interfaces = availableIPv4NetworkInterfaces()
+        let requestedInterfaceId = preferredInterfaceId ?? multiplayerLanInterfaceId
+        let selectedInterface = interfaces.first(where: { $0.name == requestedInterfaceId }) ?? interfaces.first
+
+        guard let selectedInterface else {
+            multiplayerLanInterfaceAddress = nil
+            multiplayerLanInterfaceSubnetMask = nil
+            return false
+        }
+
+        multiplayerLanInterfaceId = selectedInterface.name
+        multiplayerLanInterfaceAddress = selectedInterface.address
+        multiplayerLanInterfaceSubnetMask = selectedInterface.subnetMask
+
+        return true
     }
     
     
@@ -231,6 +353,8 @@ struct Options {
         n.pointee.UseHypervisor              = useHypervisor
         n.pointee.LdnMitm                    = ldnMitm
         n.pointee.MultiplayerLanInterfaceId  = utf8(multiplayerLanInterfaceId)
+        n.pointee.MultiplayerLanInterfaceAddress = utf8(multiplayerLanInterfaceAddress)
+        n.pointee.MultiplayerLanInterfaceSubnetMask = utf8(multiplayerLanInterfaceSubnetMask)
         
         n.pointee.DisableFileLog            = disableFileLog
         n.pointee.LoggingEnableDebug        = loggingEnableDebug
@@ -298,6 +422,8 @@ struct Options {
         free(n.pointee.InputDSUServerHandheld)
         free(n.pointee.SystemTimeZone)
         free(n.pointee.MultiplayerLanInterfaceId)
+        free(n.pointee.MultiplayerLanInterfaceAddress)
+        free(n.pointee.MultiplayerLanInterfaceSubnetMask)
         free(n.pointee.GraphicsShadersDumpPath)
         free(n.pointee.PreferredGPUVendor)
         free(n.pointee.InputPath)

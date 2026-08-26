@@ -47,7 +47,7 @@ class ROMFolderManager: ObservableObject {
         
         
         do {
-            var url = try URL(
+            let url = try URL(
                 resolvingBookmarkData: bookmark,
                 options: withSecurityScope,
                 relativeTo: nil,

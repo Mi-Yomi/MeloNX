@@ -20,34 +20,92 @@ class NativeController: BaseController {
     var count = 0
     
     override public func setupController() {
-        guard let gamepad = nativeController?.extendedGamepad
-        else { return }
+        if let gamepad = nativeController?.extendedGamepad {
+            
+            nativeController?.handlerQueue = inputQueue
+            
+            setupButtonChangeListener(gamepad.buttonA, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .B : .A)
+            setupButtonChangeListener(gamepad.buttonB, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .A : .B)
+            setupButtonChangeListener(gamepad.buttonX, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .Y : .X)
+            setupButtonChangeListener(gamepad.buttonY, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .X : .Y)
+            
+            setupButtonChangeListener(gamepad.dpad.up, for: .dPadUp)
+            setupButtonChangeListener(gamepad.dpad.down, for: .dPadDown)
+            setupButtonChangeListener(gamepad.dpad.left, for: .dPadLeft)
+            setupButtonChangeListener(gamepad.dpad.right, for: .dPadRight)
+            
+            setupButtonChangeListener(gamepad.leftShoulder, for: .leftShoulder)
+            setupButtonChangeListener(gamepad.rightShoulder, for: .rightShoulder)
+            gamepad.leftThumbstickButton.map { setupButtonChangeListener($0, for: .leftStick) }
+            gamepad.rightThumbstickButton.map { setupButtonChangeListener($0, for: .rightStick) }
+            
+            setupButtonChangeListener(gamepad.buttonMenu, for: .start)
+            gamepad.buttonOptions.map { setupButtonChangeListener($0, for: .back) }
+            
+            setupStickChangeListener(gamepad.leftThumbstick, for: .left)
+            setupStickChangeListener(gamepad.rightThumbstick, for: .right)
+            
+            setupTriggerChangeListener(gamepad.leftTrigger, for: .left)
+            setupTriggerChangeListener(gamepad.rightTrigger, for: .right)
+        } else if let profile = nativeController?.physicalInputProfile {
+            let swapAB = UserDefaults.standard.bool(forKey: "swapBandA")
+            
+            if let a = profile.buttons[GCInputButtonA] {
+                setupButtonChangeListener(a, for: swapAB ? .B : .A)
+            }
+            if let b = profile.buttons[GCInputButtonB] {
+                setupButtonChangeListener(b, for: swapAB ? .A : .B)
+            }
+            if let x = profile.buttons[GCInputButtonX] {
+                setupButtonChangeListener(x, for: swapAB ? .Y : .X)
+            }
+            if let y = profile.buttons[GCInputButtonY] {
+                setupButtonChangeListener(y, for: swapAB ? .X : .Y)
+            }
+            
+            if let dpad = profile.dpads[GCInputDirectionPad] {
+                setupButtonChangeListener(dpad.up, for: .dPadUp)
+                setupButtonChangeListener(dpad.down, for: .dPadDown)
+                setupButtonChangeListener(dpad.left, for: .dPadLeft)
+                setupButtonChangeListener(dpad.right, for: .dPadRight)
+            }
+            
+            if let leftShoulder = profile.buttons[GCInputLeftShoulder] {
+                setupButtonChangeListener(leftShoulder, for: .leftShoulder)
+            }
+            if let rightShoulder = profile.buttons[GCInputRightShoulder] {
+                setupButtonChangeListener(rightShoulder, for: .rightShoulder)
+            }
+            if let leftStick = profile.buttons[GCInputLeftThumbstickButton] {
+                setupButtonChangeListener(leftStick, for: .leftStick)
+            }
+            if let rightStick = profile.buttons[GCInputRightThumbstickButton] {
+                setupButtonChangeListener(rightStick, for: .rightStick)
+            }
+            
+            if let menu = profile.buttons[GCInputButtonMenu] {
+                setupButtonChangeListener(menu, for: .start)
+            }
+            if let options = profile.buttons[GCInputButtonOptions] {
+                setupButtonChangeListener(options, for: .back)
+            }
+            
+            if let leftThumbstick = profile.dpads[GCInputLeftThumbstick] {
+                setupStickChangeListener(leftThumbstick, for: .left)
+            }
+            if let rightThumbstick = profile.dpads[GCInputRightThumbstick] {
+                setupStickChangeListener(rightThumbstick, for: .right)
+            }
+            
+            if let leftTrigger = profile.buttons[GCInputLeftTrigger] {
+                setupTriggerChangeListener(leftTrigger, for: .left)
+            }
+            if let rightTrigger = profile.buttons[GCInputRightTrigger] {
+                setupTriggerChangeListener(rightTrigger, for: .right)
+            }
+            
+        }
         
-        nativeController?.handlerQueue = inputQueue
-        
-        setupButtonChangeListener(gamepad.buttonA, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .B : .A)
-        setupButtonChangeListener(gamepad.buttonB, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .A : .B)
-        setupButtonChangeListener(gamepad.buttonX, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .Y : .X)
-        setupButtonChangeListener(gamepad.buttonY, for: UserDefaults.standard.bool(forKey: "swapBandA") ? .X : .Y)
-
-        setupButtonChangeListener(gamepad.dpad.up, for: .dPadUp)
-        setupButtonChangeListener(gamepad.dpad.down, for: .dPadDown)
-        setupButtonChangeListener(gamepad.dpad.left, for: .dPadLeft)
-        setupButtonChangeListener(gamepad.dpad.right, for: .dPadRight)
-
-        setupButtonChangeListener(gamepad.leftShoulder, for: .leftShoulder)
-        setupButtonChangeListener(gamepad.rightShoulder, for: .rightShoulder)
-        gamepad.leftThumbstickButton.map { setupButtonChangeListener($0, for: .leftStick) }
-        gamepad.rightThumbstickButton.map { setupButtonChangeListener($0, for: .rightStick) }
-
-        setupButtonChangeListener(gamepad.buttonMenu, for: .start)
-        gamepad.buttonOptions.map { setupButtonChangeListener($0, for: .back) }
-
-        setupStickChangeListener(gamepad.leftThumbstick, for: .left)
-        setupStickChangeListener(gamepad.rightThumbstick, for: .right)
-
-        setupTriggerChangeListener(gamepad.leftTrigger, for: .left)
-        setupTriggerChangeListener(gamepad.rightTrigger, for: .right)
         /*
         gamepad.buttonHome?.valueChangedHandler = { [unowned self] _, _, pressed in
             if pressed {

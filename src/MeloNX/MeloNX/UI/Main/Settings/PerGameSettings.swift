@@ -553,54 +553,6 @@ struct PerGameSettingsView: View {
                                 isOn: nativeSettingsManager.showScreenShotButton(true).projectedValue,
                                 info: "Shows an in-game menu button to exit, lock orientation (iPhone only), change aspect ratio, or change controllers.")
                 
-                Button {
-                    showingAppIconSwitcher = true
-                } label: {
-                    Text("App Icon Switcher")
-                }
-                .sheet(isPresented: $showingAppIconSwitcher) {
-                    AppIconSwitcherView()
-                }
-                
-            }
-            
-            // JIT and Updates
-            Section("JIT & Updates") {
-                HStack {
-                    Text("JIT Enabler")
-                    Spacer()
-                    Picker("", selection: nativeSettingsManager.jitProvider(JITProvider.disabled).projectedValue) {
-                        ForEach(JITProvider.allCases) { provider in
-                            Text(provider.displayName).tag(provider)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-                
-                let model = UIDevice.modelName
-                if !model.contains("Mac") || !ProcessInfo.processInfo.isiOSAppOnMac {
-                    if #available(iOS 19, *) {
-                        HStack {
-                            Label("Dual Mapped JIT", systemImage: "light.strip.2")
-                            Spacer()
-                            Text("Always On (iOS 26)")
-                                .foregroundColor(.secondary)
-                        }
-                    } else {
-                        NativeToggleRow("Dual Mapped JIT", icon: "light.strip.2",
-                                        isOn: nativeSettingsManager.setting(forKey: "DUAL_MAPPED_JIT", default: false).projectedValue,
-                                        info: "iOS 26 / Non-TXM JIT.")
-                        .disabled(ProcessInfo.processInfo.hasTXM)
-                    }
-                } else {
-                    NativeToggleRow("Dual Mapped JIT", icon: "light.strip.2",
-                                    isOn: nativeSettingsManager.setting(forKey: "DUAL_MAPPED_JIT", default: false).projectedValue)
-                }
-                
-                NativeToggleRow("Check for Updates", icon: "square.and.arrow.down",
-                                isOn: nativeSettingsManager.checkForUpdate(true).projectedValue,
-                                info: "Automatically checks for updates on launch.")
-                
             }
         }
     }

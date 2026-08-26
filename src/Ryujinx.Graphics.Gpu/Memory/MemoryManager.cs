@@ -84,6 +84,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             MemoryUnmapped += physicalMemory.BufferCache.MemoryUnmappedHandler;
             MemoryUnmapped += VirtualRangeCache.MemoryUnmappedHandler;
             MemoryUnmapped += CounterCache.MemoryUnmappedHandler;
+            physicalMemory.BufferCache.Initialize(cpuMemorySize);
             physicalMemory.TextureCache.Initialize(cpuMemorySize);
         }
 

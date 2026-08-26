@@ -170,6 +170,16 @@ namespace Ryujinx.HLE
         public string MultiplayerLanInterfaceId { internal get; set; }
 
         /// <summary>
+        /// Host-provided IPv4 address for the multiplayer LAN interface.
+        /// </summary>
+        public string MultiplayerLanInterfaceAddress { get; private set; }
+
+        /// <summary>
+        /// Host-provided IPv4 subnet mask for the multiplayer LAN interface.
+        /// </summary>
+        public string MultiplayerLanInterfaceSubnetMask { get; private set; }
+
+        /// <summary>
         /// Multiplayer Mode
         /// </summary>
         public MultiplayerMode MultiplayerMode { internal get; set; }
@@ -270,6 +280,14 @@ namespace Ryujinx.HLE
             GdbStubPort = gdbStubPort;
             DebuggerSuspendOnStart = debuggerSuspendOnStart;
             Hacks = dirtyHacks ?? [];
+        }
+
+        public HleConfiguration ConfigureMultiplayerLanInterface(string address, string subnetMask)
+        {
+            MultiplayerLanInterfaceAddress = address;
+            MultiplayerLanInterfaceSubnetMask = subnetMask;
+
+            return this;
         }
 
         /// <summary>

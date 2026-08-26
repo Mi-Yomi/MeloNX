@@ -482,7 +482,7 @@ namespace Ryujinx.Library
 
             DisplayMessageDialog(title, message + errorSuffix);
 
-            return false;
+            return true;
         }
 
         public IDynamicTextInputHandler CreateDynamicTextInputHandler()

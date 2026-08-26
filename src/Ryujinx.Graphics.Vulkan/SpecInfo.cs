@@ -80,7 +80,9 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly byte[] _data;
         private readonly int _hash;
 
-        public int Length => _data.Length;
+        public static SpecData Empty { get; } = new(ReadOnlySpan<byte>.Empty);
+
+        public int Length => _data?.Length ?? 0;
         public ReadOnlySpan<byte> Span => _data.AsSpan();
         public override int GetHashCode() => _hash;
 
@@ -89,9 +91,16 @@ namespace Ryujinx.Graphics.Vulkan
             _data = new byte[data.Length];
             data.CopyTo(_data);
 
-            HashCode hc = new();
-            hc.AddBytes(data);
-            _hash = hc.ToHashCode();
+            if (data.IsEmpty)
+            {
+                _hash = 0;
+            }
+            else
+            {
+                HashCode hc = new();
+                hc.AddBytes(data);
+                _hash = hc.ToHashCode();
+            }
         }
 
         public override bool Equals(object obj) => obj is SpecData other && Equals(other);

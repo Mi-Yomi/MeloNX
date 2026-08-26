@@ -26,7 +26,8 @@ func configureAudioSession() {
 }
 
 var environment: [EnvironmentVariable] = [
-    EnvironmentVariable(string: "MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE", value: "128"),
+    EnvironmentVariable(string: "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", value: "0"),
+    EnvironmentVariable(string: "MVK_CONFIG_MAX_ACTIVE_METAL_COMMAND_BUFFERS_PER_QUEUE", value: "32"),
 ]
 
 
@@ -40,7 +41,12 @@ func initEnvironmentVariables() {
     if #available(iOS 19, *) {
         environment.append(contentsOf: [
             .init(string: "HAS_TXM", value: ProcessInfo.processInfo.hasTXM && !ProcessInfo.processInfo.isiOSAppOnMac ? "1" : "0"),
-            .init(string: "DUAL_MAPPED_JIT", value: "1")
+            .init(string: "DUAL_MAPPED_JIT", value: !ProcessInfo.processInfo.isiOSAppOnMac ? "1" : "0")
+        ])
+    } else {
+        environment.append(contentsOf: [
+            .init(string: "HAS_TXM", value: "0"),
+            .init(string: "DUAL_MAPPED_JIT", value: "0")
         ])
     }
     
@@ -69,9 +75,7 @@ struct MeloNXApp: App {
     init() {
         SDL_SetMainReady()
         SDL_SetiOSEventPump(true)
-        configureAudioSession()
-        SDL_Init(SDL_INIT_EVENTS | SDL_INIT_AUDIO)
-        configureAudioSession()
+        SDL_Init(SDL_INIT_EVENTS)
         JIT26BreakpointHandler()
         initEnvironmentVariables()
         Ryujinx.initialize()
@@ -87,8 +91,9 @@ struct MeloNXApp: App {
                 .onAppear() {
                     UIDevice.current.beginGeneratingDeviceOrientationNotifications()
                     
+                    configureAudioSession()
+                    
                     let versionNumber = lastAppversion.withUnsafeBytes { $0.load(as: Float.self) }
-
                     
                     if versionNumber < Float(Bundle.main.versionNumber) ?? .zero {
                         lastAppversion = encodeFloatToData(Float(Bundle.main.versionNumber) ?? .zero)

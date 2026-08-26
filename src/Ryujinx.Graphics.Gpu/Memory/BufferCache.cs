@@ -1,3 +1,4 @@
+using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Memory.Range;
 using System;
@@ -30,6 +31,12 @@ namespace Ryujinx.Graphics.Gpu.Memory
         public const ulong SparseBufferAlignmentSize = 0x10000;
 
         private const ulong MaxDynamicGrowthSize = 0x100000;
+        private const ulong MiB = 1024 * 1024;
+        private const ulong GiB = 1024 * MiB;
+        private const ulong DefaultMaxCachedBufferBytes = 2 * GiB;
+        private const ulong MinUnifiedBufferBytes = 256 * MiB;
+        private const ulong MaxUnifiedBufferBytes = 768 * MiB;
+        private const int UnifiedMemoryDivisor = 16;
 
         private readonly GpuContext _context;
         private readonly PhysicalMemory _physicalMemory;
@@ -40,6 +47,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// </remarks>
         private readonly NonOverlappingRangeList<Buffer> _buffers;
         private readonly MultiRangeList<MultiRangeBuffer> _multiRangeBuffers;
+        private readonly LinkedList<Buffer> _lruBuffers;
+
+        private ulong _maxCachedBufferBytes = DefaultMaxCachedBufferBytes;
+        private ulong _cachedBufferBytes;
+        private bool _initialized;
 
         private readonly Dictionary<ulong, BufferCacheEntry> _dirtyCache;
         private readonly Dictionary<ulong, BufferCacheEntry> _modifiedCache;
@@ -60,11 +72,108 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
             _buffers = [];
             _multiRangeBuffers = [];
+            _lruBuffers = [];
 
             _dirtyCache = new Dictionary<ulong, BufferCacheEntry>();
 
             // There are a lot more entries on the modified cache, so it is separate from the one for ForceDirty.
             _modifiedCache = new Dictionary<ulong, BufferCacheEntry>();
+        }
+
+        /// <summary>
+        /// Initializes the buffer cache memory budget.
+        /// </summary>
+        /// <param name="cpuMemorySize">Configured CPU memory size, used as a conservative unified-memory budget proxy.</param>
+        public void Initialize(ulong cpuMemorySize)
+        {
+            if (_initialized)
+            {
+                return;
+            }
+
+            bool isAppleUnifiedMemory = (OperatingSystem.IsIOS() || OperatingSystem.IsMacOS()) &&
+                                        _context.Capabilities.MemoryType == SystemMemoryType.UnifiedMemory;
+
+            if (isAppleUnifiedMemory)
+            {
+                _maxCachedBufferBytes = Math.Clamp(
+                    cpuMemorySize / UnifiedMemoryDivisor,
+                    MinUnifiedBufferBytes,
+                    MaxUnifiedBufferBytes);
+            }
+
+            _initialized = true;
+
+            string memoryKind = isAppleUnifiedMemory ? " (Apple unified memory)" : string.Empty;
+            Logger.Info?.Print(LogClass.Gpu, $"Buffer cache memory limit: {_maxCachedBufferBytes / MiB} MiB{memoryKind}");
+        }
+
+        private void AddBuffer(Buffer buffer)
+        {
+            _buffers.Add(buffer);
+            _cachedBufferBytes += buffer.Size;
+            buffer.CacheNode = _lruBuffers.AddLast(buffer);
+
+            EnforceCapacity(buffer);
+        }
+
+        private void RemoveBufferTracking(Buffer buffer)
+        {
+            if (buffer.CacheNode != null)
+            {
+                _lruBuffers.Remove(buffer.CacheNode);
+                buffer.CacheNode = null;
+                _cachedBufferBytes -= buffer.Size;
+            }
+        }
+
+        private void RemoveBuffers(Buffer[] buffers)
+        {
+            _buffers.RemoveRange(buffers[0], buffers[^1]);
+
+            foreach (Buffer buffer in buffers)
+            {
+                RemoveBufferTracking(buffer);
+            }
+        }
+
+        private void Touch(Buffer buffer)
+        {
+            LinkedListNode<Buffer> node = buffer.CacheNode;
+
+            if (node != null && node != _lruBuffers.Last)
+            {
+                _lruBuffers.Remove(node);
+                _lruBuffers.AddLast(node);
+            }
+        }
+
+        private void EnforceCapacity(Buffer protectedBuffer)
+        {
+            LinkedListNode<Buffer> node = _lruBuffers.First;
+            bool buffersEvicted = false;
+
+            while (_cachedBufferBytes > _maxCachedBufferBytes && node != null)
+            {
+                LinkedListNode<Buffer> next = node.Next;
+                Buffer buffer = node.Value;
+
+                if (buffer != protectedBuffer && buffer.CanEvict())
+                {
+                    _buffers.Remove(buffer);
+                    RemoveBufferTracking(buffer);
+                    buffer.Dispose();
+                    buffersEvicted = true;
+                }
+
+                node = next;
+            }
+
+            if (buffersEvicted)
+            {
+                _pruneCaches = true;
+                NotifyBuffersModified?.Invoke();
+            }
         }
 
         /// <summary>
@@ -326,6 +435,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                         ulong alignedSize = alignedEndAddress - alignedAddress;
 
                         Buffer buffer = _buffers.FindOverlap(alignedAddress, alignedSize);
+                        Touch(buffer);
                         BufferRange bufferRange = buffer.GetRange(alignedAddress, alignedSize, false);
 
                         alignedSubRanges[i] = new MemoryRange(alignedAddress, alignedSize);
@@ -341,6 +451,20 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 }
 
                 multiRangeBuffer = new(_context, new MultiRange(alignedSubRanges), storages);
+
+                for (int i = 0; i < range.Count; i++)
+                {
+                    MemoryRange subRange = range.GetSubRange(i);
+
+                    if (subRange.Address != MemoryManager.PteUnmapped)
+                    {
+                        ulong alignedAddress = subRange.Address & ~alignmentMask;
+                        ulong alignedEndAddress = (subRange.Address + subRange.Size + alignmentMask) & ~alignmentMask;
+                        Buffer buffer = _buffers.FindOverlap(alignedAddress, alignedEndAddress - alignedAddress);
+
+                        multiRangeBuffer.AddCacheDependency(buffer);
+                    }
+                }
             }
             else
             {
@@ -393,6 +517,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 if (subRange.Address != MemoryManager.PteUnmapped)
                 {
                     Buffer buffer = _buffers.FindOverlap(subRange.Address, subRange.Size);
+                    Touch(buffer);
 
                     virtualBuffer.AddPhysicalDependency(buffer, subRange.Address, dstOffset, subRange.Size);
                     physicalBuffers.Add(buffer);
@@ -434,6 +559,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 _dirtyCache[gpuVa] = result;
             }
 
+            Touch(result.Buffer);
             result.Buffer.ForceDirty(result.Address, size);
         }
 
@@ -470,6 +596,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
             }
 
             outAddr = result.Address | (gpuVa & mask);
+
+            Touch(result.Buffer);
 
             return result.Buffer.IsModified(result.Address, size);
         }
@@ -534,17 +662,21 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
                     Buffer[] overlapsArray = overlaps.ToArray();
                     
-                    _buffers.RemoveRange(overlaps[0], overlaps[^1]);
+                    RemoveBuffers(overlapsArray);
                     
                     ulong newSize = endAddress - address;
 
-                    _buffers.Add(CreateBufferAligned(address, newSize, stage, anySparseCompatible, overlapsArray));
+                    AddBuffer(CreateBufferAligned(address, newSize, stage, anySparseCompatible, overlapsArray));
+                }
+                else
+                {
+                    Touch(overlaps[0]);
                 }
             }
             else
             {
                 // No overlap, just create a new buffer.
-                _buffers.Add(new(_context, _physicalMemory, address, size, stage, sparseCompatible: false, []));
+                AddBuffer(new(_context, _physicalMemory, address, size, stage, sparseCompatible: false, []));
             }
         }
 
@@ -599,15 +731,19 @@ namespace Ryujinx.Graphics.Gpu.Memory
                     
                     Buffer[] overlapsArray = overlaps.ToArray();
                     
-                    _buffers.RemoveRange(overlaps[0], overlaps[^1]);
+                    RemoveBuffers(overlapsArray);
                     
-                    _buffers.Add(CreateBufferAligned(address, newSize, stage, sparseAligned, overlapsArray));
+                    AddBuffer(CreateBufferAligned(address, newSize, stage, sparseAligned, overlapsArray));
+                }
+                else
+                {
+                    Touch(overlaps[0]);
                 }
             }
             else
             {
                 // No overlap, just create a new buffer.
-                _buffers.Add(new(_context, _physicalMemory, address, size, stage, sparseAligned, []));
+                AddBuffer(new(_context, _physicalMemory, address, size, stage, sparseAligned, []));
             } 
         }
 
@@ -856,6 +992,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 MemoryRange subRange = range.GetSubRange(i);
 
                 Buffer subBuffer = _buffers.FindOverlap(subRange.Address, subRange.Size);
+                Touch(subBuffer);
 
                 subBuffer.SynchronizeMemory(subRange.Address, subRange.Size);
 
@@ -918,6 +1055,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 buffer = _buffers.FindOverlapFast(address, 1);
             }
 
+            Touch(buffer);
+
             return buffer;
         }
 
@@ -954,6 +1093,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             if (size != 0)
             {
                 Buffer buffer = _buffers.FindOverlap(address, size);
+                Touch(buffer);
 
                 if (copyBackVirtual)
                 {
@@ -971,6 +1111,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="buffer">The buffer that has changed handle</param>
         public void BufferBackingChanged(Buffer buffer)
         {
+            Touch(buffer);
             NotifyBuffersModified?.Invoke();
 
             RecreateMultiRangeBuffers(buffer.Address, buffer.Size);
@@ -1032,10 +1173,18 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             lock (_buffers)
             {
+                foreach (MultiRangeBuffer buffer in _multiRangeBuffers)
+                {
+                    buffer.Dispose();
+                }
+
                 foreach (Buffer buffer in _buffers)
                 {
                     buffer.Dispose();
                 }
+
+                _lruBuffers.Clear();
+                _cachedBufferBytes = 0;
             }
         }
     }

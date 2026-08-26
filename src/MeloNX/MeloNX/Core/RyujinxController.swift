@@ -51,6 +51,17 @@ extension URL {
     static func modFolderURL(for game: GameInfo) -> URL {
         modsFolderURL.appendingPathComponent("contents").appendingPathComponent(game.titleId)
     }
+    
+    static var logsFolderURL: URL {
+        documentsDirectory.appendingPathComponent("logs")
+    }
+    
+    static func cacheFolderURL(for game: GameInfo) -> URL {
+        let fileManager = FileManager.default
+        let gamesFolder = documentsDirectory.appendingPathComponent("games")
+        
+        return gamesFolder.appendingPathComponent(game.titleId).appendingPathComponent("cache")
+    }
 }
 
 extension UIDevice {
@@ -139,7 +150,7 @@ class RyujinxController: ObservableObject {
         get {
             UserDefaults.standard.string(forKey: "lastGameLaunched")
         } set {
-            if let cool = newValue { UserDefaults.standard.set(newValue, forKey: "lastGameLaunched"); return }
+            if let cool = newValue { UserDefaults.standard.set(cool, forKey: "lastGameLaunched"); return }
             UserDefaults.standard.removeObject(forKey: "lastGameLaunched")
         }
     }
@@ -215,13 +226,18 @@ class RyujinxController: ObservableObject {
         controllerManager.attachAllControllers()
         
         if NativeSettingsManager.exists(game.titleId) {
-            print("true")
             NativeSettingsManager.setShared(game.titleId, pullOriginal: true)
         }
         
         loadWithoutSave(game.titleId)
         
         var settings = perSettings[game.titleId] ?? settings
+
+        let preferredNetworkInterfaceId = settings.multiplayerLanInterfaceId == "0"
+            ? self.settings.multiplayerLanInterfaceId
+            : settings.multiplayerLanInterfaceId
+        
+        settings.resolveMultiplayerLanInterface(preferredInterfaceId: preferredNetworkInterfaceId)
         
         settings.inputPath = game.fileURL.path
         settings.backendThreading = .on
@@ -256,7 +272,7 @@ class RyujinxController: ObservableObject {
     func redirectStdIOToFile() {
         let fileManager = FileManager.default
         
-        let logsDir = URL.documentsDirectory.appendingPathComponent("logs")
+        let logsDir = URL.logsFolderURL
         
         if !fileManager.fileExists(atPath: logsDir.path) {
             try? fileManager.createDirectory(at: logsDir, withIntermediateDirectories: true)
@@ -303,15 +319,24 @@ class RyujinxController: ObservableObject {
     }
     
     func loadConfig() {
-        if let settings = try? Options.loadFromJSON(at: .configURL) {
+        if var settings = try? Options.loadFromJSON(at: .configURL) {
+            settings.resolveMultiplayerLanInterface()
             self.settings = settings
+            try? self.settings.saveAsJSON(to: .configURL)
         } else {
+            self.settings.resolveMultiplayerLanInterface()
+            try? FileManager.default.removeItem(at: .configURL)
             try? self.settings.saveAsJSON(to: .configURL)
         }
     }
     
     func saveConfig() {
-        try? settings.saveAsJSON(to: .configURL)
+        do {
+            try settings.saveAsJSON(to: .configURL)
+        } catch {
+            try? FileManager.default.removeItem(at: .configURL)
+            try? settings.saveAsJSON(to: .configURL)
+        }
     }
     
     func loadPerGameConfig(_ titleId: String) {
@@ -319,6 +344,7 @@ class RyujinxController: ObservableObject {
         if let settings = try? Options.loadFromJSON(at: .perGameConfigURL(titleId)) {
             self.perSettings[titleId] = settings
         } else {
+            try? FileManager.default.removeItem(at: .perGameConfigURL(titleId))
             try? setting2s.saveAsJSON(to: .perGameConfigURL(titleId))
             self.perSettings[titleId] = .init(inputPath: "")
         }
@@ -334,6 +360,59 @@ class RyujinxController: ObservableObject {
         let setting2s = perSettings[titleId] ??  .init(inputPath: "")
         try? setting2s.saveAsJSON(to: .perGameConfigURL(titleId))
     }
+    
+    
+    func loadGamesArray() -> [GameInfo] {
+        let fileManager = FileManager.default
+        var romDirectories: [URL] = [.romsURL]
+        
+        let romFolderManager = ROMFolderManager.shared
+        romFolderManager.loadBookmarks()
+        
+        for bookmarkData in romFolderManager.bookmarks {
+            var isStale = false
+            do {
+                let url = try URL(
+                    resolvingBookmarkData: bookmarkData,
+                    options: [withSecurityScope],
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &isStale
+                )
+                
+                if isStale, fileManager.fileExists(atPath: url.path) {
+                    _ = romFolderManager.addFolder(url: url)
+                }
+                
+                if url.startAccessingSecurityScopedResource() {
+                    romDirectories.append(url)
+                }
+            } catch {
+                print("Failed to resolve bookmark: \(error)")
+            }
+        }
+        
+        var games: [GameInfo] = []
+        for romsDirectory in romDirectories {
+            guard let enumerator = fileManager.enumerator(at: romsDirectory, includingPropertiesForKeys: nil) else {
+                continue
+            }
+            
+            for case let fileURL as URL in enumerator {
+                guard GameFileType.isSupported(fileExtension: fileURL.pathExtension) else { continue }
+                
+                do {
+                    let handle = try FileHandle(forReadingFrom: fileURL)
+                    let fileExtension = fileURL.pathExtension as NSString
+                    games.append(Ryujinx.getGameInfo(arg0: handle.fileDescriptor, arg1: fileExtension, path: fileURL))
+                } catch {
+                    print("Failed to read file at \(fileURL): \(error)")
+                }
+            }
+        }
+        
+        return games
+    }
+    
     
     func loadGames() {
         let fileManager = FileManager.default
@@ -418,6 +497,55 @@ class RyujinxController: ObservableObject {
         }
     }
     
+    
+    func clearShaderCacheWithConfirmation(_ game: GameInfo? = nil) {
+        AppAlerts.showAlert(title: "Shader Cache Deletion.", message: "Are you sure you want to delete \(game?.titleName ?+ "'s", default: "all") shader cache?", actions: [
+            (title: "Cancel", style: .cancel, handler: nil),
+            (title: "Delete", style: .destructive, handler: {
+                self.clearShaderCache(game, withConfirmation: true)
+            })
+        ])
+    }
+    
+    func clearShaderCache(_ game: GameInfo? = nil, withConfirmation: Bool = false) {
+        let fileManager = FileManager.default
+        
+        guard let game else {
+            let games = loadGamesArray()
+            
+            for game in games {
+                print("Clear Shader Cache: \(URL.cacheFolderURL(for: game).path), exists: \(fileManager.fileExists(atPath: URL.cacheFolderURL(for: game).path))")
+                try? fileManager.removeItem(at: .cacheFolderURL(for: game))
+            }
+            
+            if withConfirmation {
+                AppAlerts.showAlert(title: "Shader Cache Deleted.", message: "All cached shaders have been deleted.", actions: [
+                    (title: "OK", style: .default, handler: nil)
+                ])
+            }
+            
+            return
+        }
+        
+        do {
+            if fileManager.fileExists(atPath: URL.cacheFolderURL(for: game).path) {
+                try fileManager.removeItem(at: .cacheFolderURL(for: game))
+            }
+            
+            if withConfirmation {
+                AppAlerts.showAlert(title: "Shader Cache Deleted.", message: "Shader Cache for \(game.titleName) have been deleted.", actions: [
+                    (title: "OK", style: .default, handler: nil)
+                ])
+            }
+        } catch {
+            if withConfirmation {
+                AppAlerts.showAlert(title: "Failed to Delete Shader Cache.", message: "Failed to delete cached shaders for \(game.titleName).", actions: [
+                    (title: "OK", style: .default, handler: nil)
+                ])
+            }
+        }
+    }
+    
     static func attemptToMapDualMapping() -> Bool {
         if hasScript { return true }
         
@@ -427,6 +555,6 @@ class RyujinxController: ObservableObject {
     }
     
     func attemptToMapDualMapping() -> Bool {
-        Self.attemptToMapDualMapping()
+        return Self.attemptToMapDualMapping()
     }
 }

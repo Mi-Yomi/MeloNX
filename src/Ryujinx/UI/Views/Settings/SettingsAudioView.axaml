@@ -47,7 +47,7 @@
                             IsEnabled="{Binding IsSDL3Enabled}"
                             Content="{ext:Locale SettingsTabSystemAudioBackendSDL3}" />
                         <ComboBoxItem
-                            IsEnabled="{Binding IsAudioToolboxEnabled}"
+                            IsEnabled="{Binding IsAVFoundationEnabled}"
                             Content="{ext:Locale SettingsTabSystemAudioBackendAudioToolbox}" />
                     </ComboBox>
                 </StackPanel>

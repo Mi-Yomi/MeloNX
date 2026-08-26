@@ -1127,7 +1127,17 @@ namespace Ryujinx.HLE.HOS.Services.Ldn.UserServiceCreator
 
                                 break;
                             case MultiplayerMode.LdnMitm:
-                                NetworkClient = new LdnMitmClient(context.Device.Configuration);
+                                try
+                                {
+                                    NetworkClient = new LdnMitmClient(context.Device.Configuration);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.Error?.Print(LogClass.ServiceLdn, "Could not initialize ldn_mitm. Defaulting to stubbed wireless.");
+                                    Logger.Error?.Print(LogClass.ServiceLdn, ex.Message);
+                                    NetworkClient = new LdnDisabledClient();
+                                }
+
                                 break;
                             case MultiplayerMode.Disabled:
                                 NetworkClient = new LdnDisabledClient();

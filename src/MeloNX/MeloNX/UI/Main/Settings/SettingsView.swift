@@ -19,7 +19,6 @@ struct SettingsView: View {
     
     @AppStorage("useTrollStore") var useTrollStore: Bool = false
     @AppStorage("OldView") var oldView = true
-    @AppStorage("LDN_MITM") var ldn = printAllIPv4Addresses().first ?? "Unknown"
     @AppStorage("hasSetupFinished") var hasSetupFinished: Bool = false
     
     @Environment(\.colorScheme) var colorScheme
@@ -31,6 +30,7 @@ struct SettingsView: View {
     @State private var isShowingGameController = false
     @State private var showOSIcon = true
     @State private var showingAppIconSwitcher = false
+    @State private var showingMemoryLimit = false
     @State private var showingThemePicker = false
     @State private var showingKeyboardConfig = false
     @FocusState private var isArgumentsKeyboardVisible: Bool
@@ -44,6 +44,34 @@ struct SettingsView: View {
                 ryujinxController.saveConfig()
             }
         )
+    }
+
+    private var networkInterfaces: [IPv4NetworkInterface] {
+        availableIPv4NetworkInterfaces()
+    }
+
+    private var selectedNetworkInterfaceId: Binding<String> {
+        Binding(
+            get: {
+                let configuredId = config.wrappedValue.multiplayerLanInterfaceId
+                return networkInterfaces.contains(where: { $0.name == configuredId })
+                    ? configuredId
+                    : networkInterfaces.first?.name ?? "0"
+            },
+            set: { interfaceId in
+                var options = config.wrappedValue
+                options.resolveMultiplayerLanInterface(preferredInterfaceId: interfaceId)
+                config.wrappedValue = options
+            }
+        )
+    }
+
+    private func resolveConfiguredNetworkInterface() {
+        var options = config.wrappedValue
+
+        if options.resolveMultiplayerLanInterface() {
+            config.wrappedValue = options
+        }
     }
     
     var currentResolution: String {
@@ -150,6 +178,7 @@ struct SettingsView: View {
                 iPadSettings
             }
         }
+        .onAppear { resolveConfiguredNetworkInterface() }
         .onDisappear { ryujinxController.saveConfig() }
     }
     
@@ -817,11 +846,31 @@ struct SettingsView: View {
             }
             
             Section("System Info") {
+                Button {
+                    showingMemoryLimit = true
+                } label: {
+                    Text("Memory Limit Tester")
+                }
+                .sheet(isPresented: $showingMemoryLimit) {
+                    RamLimitTestView()
+                }
+                
                 LabeledRow(label: "Page Size", value: String(Int(getpagesize())))
                 if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                    let bounds = scene.windows.first?.bounds {
                     LabeledRow(label: "App Resolution", value: "\(Int(bounds.width))×\(Int(bounds.height))")
                 }
+            }
+            
+            Section("Reference/Credits") {
+                Text("\"Nintendo Switch Cartridge\" Model:")
+                    .bold()
+                Text("https://skfb.ly/oL6So by crocoman2019 is licensed under Creative Commons Attribution (https://creativecommons.org/licenses/by/4.0/).")
+                Text("https://www.printables.com/model/31474-nintendo-switch-cartridge by @link270_69760 is licensed under Creative Commons Attribution (https://creativecommons.org/licenses/by/4.0/).")
+                
+                Text("3D Cartridge Inspiration:")
+                    .bold()
+                Text("Socket by @depmots (https://depmots.com/socket) was the inspiration for the 3D cartridge look.")
             }
             
             Section {
@@ -848,11 +897,19 @@ struct SettingsView: View {
                 FolderListView()
             }
             
+            Section("Cache") {
+                Button {
+                    ryujinxController.clearShaderCacheWithConfirmation()
+                } label: {
+                    Label("Clear All Shader Cache", systemImage: "document.on.trash")
+                }
+            }
+            
             // Network
             Section {
-                Picker("Network Interface", selection: $ldn) {
-                    ForEach(printAllIPv4Addresses(), id: \.self) { option in
-                        Text(option).tag(option)
+                Picker("Network Interface", selection: selectedNetworkInterfaceId) {
+                    ForEach(networkInterfaces, id: \.self) { interface in
+                        Text(interface.displayName).tag(interface.name)
                     }
                 }
                 .pickerStyle(.menu)
@@ -957,11 +1014,6 @@ struct SettingsView: View {
                             Text("Always On (iOS 26)")
                                 .foregroundColor(.secondary)
                         }
-                    } else {
-                        NativeToggleRow("Dual Mapped JIT", icon: "light.strip.2",
-                                        isOn: nativeSettingsManager.setting(forKey: "DUAL_MAPPED_JIT", default: false).projectedValue,
-                                        info: "iOS 26 / Non-TXM JIT.")
-                        .disabled(ProcessInfo.processInfo.hasTXM)
                     }
                 } else {
                     NativeToggleRow("Dual Mapped JIT", icon: "light.strip.2",
@@ -1055,39 +1107,6 @@ struct FolderListView: View {
             .padding(.vertical, 4)
         }
     }
-}
-
-
-func printAllIPv4Addresses() -> [String] {
-    var ifaddr: UnsafeMutablePointer<ifaddrs>?
-    var cool: [String] = []
-    
-    guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return [] }
-    
-    var ptr: UnsafeMutablePointer<ifaddrs>? = firstAddr
-    while ptr != nil {
-        let interface = ptr!.pointee
-        let name = String(cString: interface.ifa_name)
-        
-        if let addr = interface.ifa_addr, addr.pointee.sa_family == UInt8(AF_INET) {
-            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-            if getnameinfo(addr, socklen_t(addr.pointee.sa_len),
-                           &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST) == 0 {
-                let address = String(cString: hostname)
-                if !cool.contains(where: { $0.contains(address) }), address != "127.0.0.1" {
-                    cool.append("\(name): \(address)")
-                }
-            }
-        }
-        ptr = interface.ifa_next
-    }
-    freeifaddrs(ifaddr)
-    
-    if let idx = cool.firstIndex(where: { $0.contains("en0") }), idx != 0 {
-        let el = cool.remove(at: idx)
-        cool.insert(el, at: 0)
-    }
-    return cool
 }
 
 

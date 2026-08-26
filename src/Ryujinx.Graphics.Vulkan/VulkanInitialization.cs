@@ -47,7 +47,8 @@ namespace Ryujinx.Graphics.Vulkan
             "VK_KHR_8bit_storage",
             "VK_KHR_maintenance2",
             "VK_EXT_attachment_feedback_loop_layout",
-            "VK_EXT_attachment_feedback_loop_dynamic_state"
+            "VK_EXT_attachment_feedback_loop_dynamic_state",
+            "VK_EXT_pipeline_creation_cache_control"
         ];
 
         private static readonly string[] _requiredExtensions =

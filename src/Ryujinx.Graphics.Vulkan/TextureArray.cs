@@ -56,14 +56,21 @@ namespace Ryujinx.Graphics.Vulkan
         {
             for (int i = 0; i < samplers.Length; i++)
             {
-                ISampler sampler = samplers[i];
+                try 
+                {
+                    ISampler sampler = samplers[i];
 
-                if (sampler is SamplerHolder samplerHolder)
-                {
-                    _textureRefs[index + i].Sampler = samplerHolder.GetSampler();
-                }
-                else
-                {
+                    if (sampler is SamplerHolder samplerHolder)
+                    {
+                        _textureRefs[index + i].Sampler = samplerHolder.GetSampler();
+                    }
+                    else
+                    {
+                        _textureRefs[index + i].Sampler = default;
+                    }
+                } 
+                catch
+                 {
                     _textureRefs[index + i].Sampler = default;
                 }
             }

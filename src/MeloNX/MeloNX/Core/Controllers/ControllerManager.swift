@@ -23,13 +23,13 @@ class ControllerManager: ObservableObject {
     @Published var selectedControllers: [String] = [] 
     private var didInitControllerObservers = false
     
+    
     func initAll() {
         refreshControllersList()
         initControllerObservers()
     }
     
     private init() {
-        
         controllerQueue.async(flags: .barrier) { [weak self] in
             guard let self = self else { return }
             self._privAllControllers.append(self.virtualController)
@@ -67,10 +67,11 @@ class ControllerManager: ObservableObject {
                 }
             }
             
-            // _privAllControllers.append(KBController())
+            // Full Keyboard Support may come eventually, i'm just too lazy :3
+            // _privAllControllers.append(KBController()) // This was just an experiment, yes it did work, no i'm not bothered to fully implement it.
             
-            let physicalControllers = self._privAllControllers.filter { !$0.virtual }.compactMap(\.id) as [String]
-            let controllers = self._privAllControllers
+            let physicalControllers = self._privAllControllers.prefix(7).filter { !$0.virtual }.compactMap(\.id) as [String]
+            let controllers = Array(self._privAllControllers.prefix(7))
             
             let selectedControllerIds: [String]
             
@@ -85,7 +86,9 @@ class ControllerManager: ObservableObject {
                 self.allControllers = controllers
                 self.selectedControllers = selectedControllerIds
                 
-                if RyujinxController.shared.isRunning.isRunning() {
+                let isRunning = RyujinxController.shared.isRunning.isRunning()
+                
+                if isRunning {
                     self.attachAllControllers(selectedControllerIds: selectedControllerIds)
                 }
             }
@@ -106,11 +109,16 @@ class ControllerManager: ObservableObject {
             
             for (index, controllerId) in selectedControllerIds.enumerated() {
                 let cont = _privAllControllers.first(where: { $0.id == controllerId })
+                guard let cont else { continue }
+                if cont.controllerType != config.controllerType(for: index) {
+                    cont.controllerType ?= config.controllerType(for: index)
+                }
                 
-                cont?.attach(index, controllerType: config.controllerType(for: index) ?? .proController)
+                cont.attach(index, controllerType: cont.controllerType)
             }
         }
     }
+    
     
     private func selectedControllerIdsSnapshot() -> [String] {
         if Thread.isMainThread {

@@ -30,6 +30,7 @@ namespace Ryujinx.Graphics.Vulkan
         private WindowBase _window;
 
         private bool _initialized;
+        private readonly HashSet<TextureStorage> _presentationStorages = new();
 
         public uint ProgramCount { get; set; } = 0;
 
@@ -58,6 +59,7 @@ namespace Ryujinx.Graphics.Vulkan
         internal HostMemoryAllocator HostMemoryAllocator { get; private set; }
         internal CommandBufferPool CommandBufferPool { get; private set; }
         internal PipelineLayoutCache PipelineLayoutCache { get; private set; }
+        internal PipelineCacheManager PipelineCacheManager { get; private set; }
         internal BackgroundCompilationScheduler BackgroundCompilationScheduler { get; private set; }
         internal BackgroundResources BackgroundResources { get; private set; }
         internal Action<Action> InterruptAction { get; private set; }
@@ -76,6 +78,43 @@ namespace Ryujinx.Graphics.Vulkan
 
         internal HelperShader HelperShader { get; private set; }
         internal PipelineFull PipelineInternal => _pipeline;
+
+        internal void RegisterPresentationTexture(TextureView view)
+        {
+            if (view != null)
+            {
+                _presentationStorages.RemoveWhere(storage => storage.Disposed);
+                _presentationStorages.Add(view.Storage);
+            }
+        }
+
+        internal void UnregisterPresentationStorage(TextureStorage storage)
+        {
+            _presentationStorages.Remove(storage);
+        }
+
+        internal bool IsCriticalOffscreenTarget(FramebufferParams framebuffer)
+        {
+            if (framebuffer == null || framebuffer.AttachmentsCount == 0)
+            {
+                return false;
+            }
+
+            foreach (TextureStorage storage in _presentationStorages)
+            {
+                if (framebuffer.HasAttachment(storage))
+                {
+                    return false;
+                }
+            }
+
+            if (_presentationStorages.Count == 0)
+            {
+                return false;
+            }
+
+            return framebuffer.HasIncompleteAttachments();
+        }
 
         internal BarrierBatch Barriers { get; private set; }
 
@@ -517,7 +556,12 @@ namespace Ryujinx.Graphics.Vulkan
             Queue = queue;
             QueueLock = new();
             PipelineCreationLock = new();
-            BackgroundCompilationScheduler = new();
+            PipelineCacheManager = new(
+                Api,
+                _physicalDevice,
+                _device,
+                BackgroundCompilationScheduler.PipelineWorkerCount);
+            BackgroundCompilationScheduler = new(PipelineCacheManager);
 
             LoadFeatures(maxQueueCount, queueFamilyIndex);
 
@@ -573,7 +617,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             bool isCompute = sources.Length == 1 && sources[0].Stage == ShaderStage.Compute;
             bool compileInBackground = info.EnableAsyncCompile;
-            bool highPriorityBackgroundCompilation = info.AllowAsyncCompileSkip && !info.FromCache;
+            bool highPriorityBackgroundCompilation = compileInBackground && !info.FromCache;
 
             if (info.State.HasValue || isCompute)
             {
@@ -1082,7 +1126,11 @@ namespace Ryujinx.Graphics.Vulkan
                 shader.WaitForBackgroundCompilation();
             }
 
+            BackgroundCompilationScheduler.Dispose();
+
             Api.DeviceWaitIdle(_device);
+
+            PipelineCacheManager.MergeAndSave();
 
             CommandBufferPool.Dispose();
             BackgroundResources.Dispose();
@@ -1101,7 +1149,9 @@ namespace Ryujinx.Graphics.Vulkan
                 shader.Dispose();
             }
 
-            BackgroundCompilationScheduler.Dispose();
+            PipelineCacheManager.Dispose();
+
+            _presentationStorages.Clear();
 
             foreach (ITexture texture in Textures)
             {

@@ -48,33 +48,22 @@ struct ControllerRow: View {
             }
             .contextMenu {
                 ForEach(ControllerType.allCases) { type in
-                    if ryujinxController.settings.controllerType(for: index) == type {
+                    if controller.controllerType == type {
                         Button {
-                            updateControllerType(to: type)
+                            controller.controllerType = type
                         } label: {
                             Label(type.displayName, systemImage: "checkmark")
                         }
                     } else {
                         Button(type.displayName) {
-                            updateControllerType(to: type)
+                            controller.controllerType = type
+                            Options.updateControllerType(index: index, to: controller.controllerType, options: &ryujinxController.settings)
+                            
                         }
                         .tag(type.rawValue)
                     }
                 }
             }
         )
-    }
-
-    private func updateControllerType(to type: ControllerType) {
-        switch index {
-        case 0: ryujinxController.settings.controllerType1 = type
-        case 1: ryujinxController.settings.controllerType2 = type
-        case 2: ryujinxController.settings.controllerType3 = type
-        case 3: ryujinxController.settings.controllerType4 = type
-        case 4: ryujinxController.settings.controllerType5 = type
-        case 5: ryujinxController.settings.controllerType6 = type
-        case 6: ryujinxController.settings.controllerType7 = type
-        default: break
-        }
     }
 }

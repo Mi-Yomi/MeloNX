@@ -53,6 +53,51 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             return -1;
         }
 
+        public int AllocateAligned(int size, int alignment)
+        {
+            Debug.Assert(alignment > 0 && (alignment & (alignment - 1)) == 0);
+
+            for (int i = 0; i < _blocks.Count; i++)
+            {
+                MemoryBlock block = _blocks[i];
+                int alignedOffset = checked(block.Offset + (alignment - 1)) & ~(alignment - 1);
+                int padding = alignedOffset - block.Offset;
+
+                if (padding > block.Size || size > block.Size - padding)
+                {
+                    continue;
+                }
+
+                int remaining = block.Size - padding - size;
+
+                if (padding == 0)
+                {
+                    if (remaining == 0)
+                    {
+                        _blocks.RemoveAt(i);
+                    }
+                    else
+                    {
+                        _blocks[i] = new(alignedOffset + size, remaining);
+                    }
+                }
+                else
+                {
+                    _blocks[i] = new(block.Offset, padding);
+
+                    if (remaining != 0)
+                    {
+                        _blocks.Insert(i + 1, new(alignedOffset + size, remaining));
+                    }
+                }
+
+                return alignedOffset;
+            }
+
+            // We don't have enough free memory to perform the allocation.
+            return -1;
+        }
+
         public void ForceAllocation(int offset, int size)
         {
             int index = _blocks.BinarySearch(new(offset, size));

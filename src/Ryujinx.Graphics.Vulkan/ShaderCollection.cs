@@ -72,8 +72,8 @@ namespace Ryujinx.Graphics.Vulkan
         private bool _firstBackgroundUse;
         private readonly object _initializeLock;
         private readonly object _pipelineCacheLock;
+        private readonly bool _highPriorityBackgroundCompilation;
         private bool _disposed;
-        private bool _failLinkOnBackgroundPipelineFailure;
 
         public ShaderCollection(
             VulkanRenderer gd,
@@ -93,6 +93,7 @@ namespace Ryujinx.Graphics.Vulkan
             AllowAsyncCompileSkip = allowAsyncCompileSkip;
             _initializeLock = new object();
             _pipelineCacheLock = new object();
+            _highPriorityBackgroundCompilation = highPriorityBackgroundCompilation;
 
             if (specDescription != null && specDescription.Length != shaders.Length)
             {
@@ -195,9 +196,7 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
-            _failLinkOnBackgroundPipelineFailure = fromCache;
-
-            bool warmUpInitialPipeline = compileInBackground && (!allowAsyncCompileSkip || fromCache);
+            bool warmUpInitialPipeline = compileInBackground;
 
             _compileTask = compileInBackground
                 ? warmUpInitialPipeline
@@ -208,6 +207,11 @@ namespace Ryujinx.Graphics.Vulkan
             if (warmUpInitialPipeline)
             {
                 RegisterInitialBackgroundPipelineTask(_compileTask);
+
+                if (_compileTask.IsCompleted)
+                {
+                    ClearInitialBackgroundPipelineTask();
+                }
             }
 
             _firstBackgroundUse = !fromCache;
@@ -561,17 +565,17 @@ namespace Ryujinx.Graphics.Vulkan
                     return;
                 }
 
-                await RunBackgroundPipelineCompile(() =>
+                await RunBackgroundPipelineCompile(pipelineCache =>
                 {
                     if (IsCompute)
                     {
-                        CreateBackgroundComputePipeline();
+                        CreateBackgroundComputePipeline(pipelineCache);
                     }
                     else
                     {
-                        CreateBackgroundGraphicsPipeline();
+                        CreateBackgroundGraphicsPipeline(pipelineCache);
                     }
-                }, highPriority: false);
+                }, highPriority: _highPriorityBackgroundCompilation);
             }
             catch (VulkanException e)
             {
@@ -635,7 +639,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         private static SpecData GetInitialComputePipelineKey()
         {
-            return new(ReadOnlySpan<byte>.Empty);
+            return SpecData.Empty;
         }
 
         private PipelineUid GetInitialGraphicsPipelineKey()
@@ -644,6 +648,8 @@ namespace Ryujinx.Graphics.Vulkan
 
             try
             {
+                pipeline.StagesCount = (uint)_shaders.Length;
+
                 return pipeline.Internal;
             }
             finally
@@ -652,24 +658,14 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        private Task RunBackgroundPipelineCompile(Action compileAction, bool highPriority)
+        private Task RunBackgroundPipelineCompile(Action<PipelineCache> compileAction, bool highPriority)
         {
             return _gd.BackgroundCompilationScheduler.SchedulePipelineCompile(compileAction, highPriority);
         }
 
         private void LogBackgroundPipelineFailure(Exception exception)
         {
-            string message = $"Background shader pipeline warm-up failed: {exception.Message}";
-
-            if (_failLinkOnBackgroundPipelineFailure)
-            {
-                Logger.Error?.PrintMsg(LogClass.Gpu, message);
-                LinkStatus = ProgramLinkStatus.Failure;
-            }
-            else
-            {
-                Logger.Warning?.PrintMsg(LogClass.Gpu, message);
-            }
+            Logger.Warning?.PrintMsg(LogClass.Gpu, $"Background shader pipeline warm-up failed: {exception.Message}");
         }
 
         private async Task<bool> WaitForShaderModuleCompilation()
@@ -791,6 +787,18 @@ namespace Ryujinx.Graphics.Vulkan
             return false;
         }
 
+        public bool WaitForShaderModules(int timeoutMs)
+        {
+            try
+            {
+                return Task.WaitAll(_shaders.Select(shader => shader.CompileTask).ToArray(), timeoutMs);
+            }
+            catch (AggregateException)
+            {
+                return true;
+            }
+        }
+
         public PipelineShaderStageCreateInfo[] GetInfos()
         {
             if (!CompilesInBackground)
@@ -815,7 +823,7 @@ namespace Ryujinx.Graphics.Vulkan
             return _dummyRenderPass = _state.ToRenderPass(_gd, _device);
         }
 
-        public void CreateBackgroundComputePipeline()
+        public void CreateBackgroundComputePipeline(PipelineCache backgroundCache = default)
         {
             PipelineState pipeline = new();
             pipeline.Initialize();
@@ -830,8 +838,8 @@ namespace Ryujinx.Graphics.Vulkan
                     _gd,
                     _device,
                     this,
-                    (_gd.Pipeline as PipelineBase).PipelineCache,
-                    throwOnError: _failLinkOnBackgroundPipelineFailure,
+                    backgroundCache,
+                    throwOnError: false,
                     cachePipelineFailure: false);
             }
             else
@@ -841,7 +849,7 @@ namespace Ryujinx.Graphics.Vulkan
             pipeline.Dispose();
         }
 
-        public void CreateBackgroundGraphicsPipeline()
+        public void CreateBackgroundGraphicsPipeline(PipelineCache backgroundCache = default)
         {
             // To compile shaders in the background in Vulkan, we need to create valid pipelines using the shader modules.
             // The GPU provides pipeline state via the GAL that can be converted into our internal Vulkan pipeline state.
@@ -872,9 +880,9 @@ namespace Ryujinx.Graphics.Vulkan
                     _gd,
                     _device,
                     this,
-                    (_gd.Pipeline as PipelineBase).PipelineCache,
+                    backgroundCache,
                     renderPass.Value,
-                    throwOnError: _failLinkOnBackgroundPipelineFailure,
+                    throwOnError: false,
                     cachePipelineFailure: false);
             }
             else
@@ -1060,7 +1068,34 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        public bool QueueBackgroundComputePipeline(ref PipelineState state, PipelineCache cache)
+        public bool TryWaitForBackgroundGraphicsPipeline(
+            ref PipelineUid key,
+            int timeoutMs,
+            out Auto<DisposablePipeline> pipeline)
+        {
+            Task task = null;
+
+            lock (_pipelineCacheLock)
+            {
+                _graphicsPipelineBackgroundQueue?.TryGetValue(ref key, out task);
+            }
+
+            if (task != null && !task.IsCompleted)
+            {
+                try
+                {
+                    task.Wait(timeoutMs);
+                }
+                catch (AggregateException)
+                {
+                    // The normal pipeline failure path handles a failed background task.
+                }
+            }
+
+            return TryGetGraphicsPipeline(ref key, out pipeline) && pipeline != null;
+        }
+
+        public bool QueueBackgroundComputePipeline(ref PipelineState state)
         {
             if (!CompilesInBackground || !AllowAsyncCompileSkip)
             {
@@ -1085,26 +1120,26 @@ namespace Ryujinx.Graphics.Vulkan
                     return true;
                 }
 
-                task = CompileQueuedComputePipeline(state.Clone(), cache, key);
+                task = CompileQueuedComputePipeline(state.Clone(), key);
                 (_computePipelineBackgroundQueue ??= new()).Add(ref key, task);
             }
 
             return true;
         }
 
-        private async Task CompileQueuedComputePipeline(PipelineState state, PipelineCache cache, SpecData key)
+        private async Task CompileQueuedComputePipeline(PipelineState state, SpecData key)
         {
             Auto<DisposablePipeline> pipeline = null;
 
             try
             {
-                await RunBackgroundPipelineCompile(() =>
+                await RunBackgroundPipelineCompile(pipelineCache =>
                 {
                     pipeline = state.CreateComputePipeline(
                         _gd,
                         _device,
                         this,
-                        cache,
+                        pipelineCache,
                         throwOnError: false,
                         cachePipelineFailure: false);
                 }, highPriority: true);
@@ -1148,7 +1183,6 @@ namespace Ryujinx.Graphics.Vulkan
 
         public bool QueueBackgroundGraphicsPipeline(
             ref PipelineState state,
-            PipelineCache cache,
             Auto<DisposableRenderPass> renderPass)
         {
             if (!CompilesInBackground || !AllowAsyncCompileSkip)
@@ -1179,7 +1213,7 @@ namespace Ryujinx.Graphics.Vulkan
                     return false;
                 }
 
-                task = CompileQueuedGraphicsPipeline(state.Clone(), cache, renderPass, key);
+                task = CompileQueuedGraphicsPipeline(state.Clone(), renderPass, key);
                 (_graphicsPipelineBackgroundQueue ??= new()).Add(ref key, task);
             }
 
@@ -1188,7 +1222,6 @@ namespace Ryujinx.Graphics.Vulkan
 
         private async Task CompileQueuedGraphicsPipeline(
             PipelineState state,
-            PipelineCache cache,
             Auto<DisposableRenderPass> renderPass,
             PipelineUid key)
         {
@@ -1196,13 +1229,13 @@ namespace Ryujinx.Graphics.Vulkan
 
             try
             {
-                await RunBackgroundPipelineCompile(() =>
+                await RunBackgroundPipelineCompile(pipelineCache =>
                 {
                     pipeline = state.CreateGraphicsPipeline(
                         _gd,
                         _device,
                         this,
-                        cache,
+                        pipelineCache,
                         renderPass.GetUnsafe().Value,
                         throwOnError: false,
                         cachePipelineFailure: false);

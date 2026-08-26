@@ -8,6 +8,7 @@ using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading;
 using BlendOp = Silk.NET.Vulkan.BlendOp;
 using Buffer = Silk.NET.Vulkan.Buffer;
 using CompareOp = Ryujinx.Graphics.GAL.CompareOp;
@@ -64,6 +65,8 @@ namespace Ryujinx.Graphics.Vulkan
         private Auto<DisposableRenderPass> _renderPass;
         private RenderPassHolder _nullRenderPass;
         private int _writtenAttachmentCount;
+        private bool _renderPassHadSuccessfulDraw;
+        private bool _renderPassHadSkippedDraw;
 
         private bool _framebufferUsingColorWriteMask;
 
@@ -105,12 +108,7 @@ namespace Ryujinx.Graphics.Vulkan
             AutoFlush = new AutoFlushCounter(gd);
             EndRenderPassDelegate = EndRenderPass;
 
-            PipelineCacheCreateInfo pipelineCacheCreateInfo = new()
-            {
-                SType = StructureType.PipelineCacheCreateInfo,
-            };
-
-            gd.Api.CreatePipelineCache(device, in pipelineCacheCreateInfo, null, out PipelineCache).ThrowOnError();
+            PipelineCache = gd.PipelineCacheManager.MainCache;
 
             _descriptorSetUpdater = new DescriptorSetUpdater(gd, device);
             _vertexBufferUpdater = new VertexBufferUpdater(gd);
@@ -1068,6 +1066,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         private void SetRenderTargetsInternal(Span<ITexture> colors, ITexture depthStencil, bool filterWriteMasked)
         {
+            EndRenderPass();
             CreateFramebuffer(colors, depthStencil, filterWriteMasked);
             CreateRenderPass();
             SignalStateChange();
@@ -1650,9 +1649,18 @@ namespace Ryujinx.Graphics.Vulkan
 
         private bool RecreateGraphicsPipelineIfNeeded()
         {
-            if (CanSkipForBackgroundCompile(allowAsyncSkip: true) && !UpdateProgramStagesIfReady(blocking: false))
+            bool canSkipForBackgroundCompile = CanSkipForBackgroundCompile(allowAsyncSkip: true);
+            bool requiresCompletePass = canSkipForBackgroundCompile && Gd.IsCriticalOffscreenTarget(FramebufferParams);
+
+            if (canSkipForBackgroundCompile && !UpdateProgramStagesIfReady(blocking: false))
             {
-                return false;
+                if (!requiresCompletePass ||
+                    !_program.WaitForShaderModules(Timeout.Infinite) ||
+                    !UpdateProgramStagesIfReady(blocking: false))
+                {
+                    _renderPassHadSkippedDraw = true;
+                    return false;
+                }
             }
 
             if (AutoFlush.ShouldFlushDraw(DrawCount))
@@ -1717,6 +1725,8 @@ namespace Ryujinx.Graphics.Vulkan
 
             _descriptorSetUpdater.UpdateAndBindDescriptorSets(Cbs, PipelineBindPoint.Graphics);
 
+            _renderPassHadSuccessfulDraw = true;
+
             return true;
         }
 
@@ -1766,6 +1776,11 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (!UpdateProgramStagesIfReady(blocking: !canSkipForBackgroundCompile))
             {
+                if (pbp == PipelineBindPoint.Graphics && canSkipForBackgroundCompile)
+                {
+                    _renderPassHadSkippedDraw = true;
+                }
+
                 return false;
             }
 
@@ -1794,7 +1809,7 @@ namespace Ryujinx.Graphics.Vulkan
                     if (!_program.TryGetComputePipeline(ref key, out pipeline))
                     {
                         if (canSkipForBackgroundCompile &&
-                            _program.QueueBackgroundComputePipeline(ref _newState, PipelineCache))
+                            _program.QueueBackgroundComputePipeline(ref _newState))
                         {
                             return false;
                         }
@@ -1811,12 +1826,22 @@ namespace Ryujinx.Graphics.Vulkan
                         Auto<DisposableRenderPass> renderPass = _renderPass;
 
                         if (canSkipForBackgroundCompile &&
-                            _program.QueueBackgroundGraphicsPipeline(ref _newState, PipelineCache, renderPass))
+                            _program.QueueBackgroundGraphicsPipeline(ref _newState, renderPass))
                         {
-                            return false;
+                            if (!Gd.IsCriticalOffscreenTarget(FramebufferParams) ||
+                                !_program.TryWaitForBackgroundGraphicsPipeline(
+                                    ref key,
+                                    Timeout.Infinite,
+                                    out pipeline))
+                            {
+                                _renderPassHadSkippedDraw = true;
+                                return false;
+                            }
                         }
-
-                        pipeline = _newState.CreateGraphicsPipeline(Gd, Device, _program, PipelineCache, renderPass.Get(Cbs).Value);
+                        else
+                        {
+                            pipeline = _newState.CreateGraphicsPipeline(Gd, Device, _program, PipelineCache, renderPass.Get(Cbs).Value);
+                        }
                     }
                 }
 
@@ -1847,7 +1872,9 @@ namespace Ryujinx.Graphics.Vulkan
             return allowAsyncSkip &&
                 _program != null &&
                 _program.CompilesInBackground &&
-                _program.AllowAsyncCompileSkip;
+                _program.AllowAsyncCompileSkip &&
+                !_tfEnabled &&
+                !_newState.RasterizerDiscardEnable;
         }
 
         private bool UpdateProgramStagesIfReady(bool blocking)
@@ -1903,7 +1930,15 @@ namespace Ryujinx.Graphics.Vulkan
                 Gd.Api.CmdEndRenderPass(CommandBuffer);
                 SignalRenderPassEnd();
                 RenderPassActive = false;
+
+                if (_renderPassHadSuccessfulDraw && !_renderPassHadSkippedDraw)
+                {
+                    FramebufferParams.MarkAttachmentsComplete();
+                }
             }
+
+            _renderPassHadSuccessfulDraw = false;
+            _renderPassHadSkippedDraw = false;
         }
 
         protected virtual void SignalRenderPassEnd()
@@ -1959,10 +1994,6 @@ namespace Ryujinx.Graphics.Vulkan
 
                 Pipeline?.Dispose();
 
-                unsafe
-                {
-                    Gd.Api.DestroyPipelineCache(Device, PipelineCache, null);
-                }
             }
         }
 

@@ -317,6 +317,7 @@ namespace Ryujinx.Graphics.Vulkan
         {
             HasTessellationControlShader = false;
             Stages = new NativeArray<PipelineShaderStageCreateInfo>(Constants.MaxShaderStages);
+            SpecializationData = SpecData.Empty;
 
             AdvancedBlendSrcPreMultiplied = true;
             AdvancedBlendDstPreMultiplied = true;
@@ -393,7 +394,14 @@ namespace Ryujinx.Graphics.Vulkan
 
                 Result result;
 
-                lock (gd.PipelineCreationLock)
+                if (cache.Handle != 0 && !gd.PipelineCacheManager.IsWorkerCache(cache))
+                {
+                    lock (gd.PipelineCreationLock)
+                    {
+                        result = gd.Api.CreateComputePipelines(device, cache, 1, &pipelineCreateInfo, null, &pipelineHandle);
+                    }
+                }
+                else
                 {
                     result = gd.Api.CreateComputePipelines(device, cache, 1, &pipelineCreateInfo, null, &pipelineHandle);
                 }
@@ -693,7 +701,14 @@ namespace Ryujinx.Graphics.Vulkan
 
                 Result result;
 
-                lock (gd.PipelineCreationLock)
+                if (cache.Handle != 0 && !gd.PipelineCacheManager.IsWorkerCache(cache))
+                {
+                    lock (gd.PipelineCreationLock)
+                    {
+                        result = gd.Api.CreateGraphicsPipelines(device, cache, 1, &pipelineCreateInfo, null, &pipelineHandle);
+                    }
+                }
+                else
                 {
                     result = gd.Api.CreateGraphicsPipelines(device, cache, 1, &pipelineCreateInfo, null, &pipelineHandle);
                 }

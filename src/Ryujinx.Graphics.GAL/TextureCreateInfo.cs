@@ -88,6 +88,21 @@ namespace Ryujinx.Graphics.GAL
             return GetMipStride(level) * GetLevelHeight(level);
         }
 
+        /// <summary>
+        /// Estimates the complete host texture storage size, including mip levels, layers and samples.
+        /// </summary>
+        public ulong GetTotalSize()
+        {
+            ulong size = 0;
+
+            for (int level = 0; level < Levels; level++)
+            {
+                size += (ulong)GetMipSize(level);
+            }
+
+            return size * (ulong)Math.Max(Samples, 1);
+        }
+
         public int GetMipStride(int level)
         {
             return BitUtils.AlignUp(GetLevelWidth(level) * BytesPerPixel, 4);

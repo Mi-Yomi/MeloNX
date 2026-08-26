@@ -278,7 +278,7 @@ namespace Ryujinx.Ava.UI.ViewModels
         public bool IsOpenAlEnabled { get; set; }
         public bool IsSoundIoEnabled { get; set; }
         public bool IsSDL3Enabled { get; set; }
-        public bool IsAudioToolboxEnabled { get; set; }
+        public bool IsAVFoundationEnabled { get; set; }
         public bool IsCustomResolutionScaleActive => _resolutionScale == 4;
         public bool IsScalingFilterActive => _scalingFilter == (int)Ryujinx.Common.Configuration.ScalingFilter.Fsr;
 
@@ -526,14 +526,14 @@ namespace Ryujinx.Ava.UI.ViewModels
             IsOpenAlEnabled = OpenALHardwareDeviceDriver.IsSupported;
             IsSoundIoEnabled = SoundIoHardwareDeviceDriver.IsSupported;
             IsSDL3Enabled = SDL3HardwareDeviceDriver.IsSupported;
-            IsAudioToolboxEnabled = OperatingSystem.IsMacOS() && AppleHardwareDeviceDriver.IsSupported;
+            IsAVFoundationEnabled = OperatingSystem.IsMacOS() && AppleHardwareDeviceDriver.IsSupported;
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
                 OnPropertyChanged(nameof(IsOpenAlEnabled));
                 OnPropertyChanged(nameof(IsSoundIoEnabled));
                 OnPropertyChanged(nameof(IsSDL3Enabled));
-                OnPropertyChanged(nameof(IsAudioToolboxEnabled));
+                OnPropertyChanged(nameof(IsAVFoundationEnabled));
             });
         }
 

@@ -79,7 +79,7 @@ struct ContentView: View {
     func emulationView(game: GameInfo, state: StartedState) -> some View {
         switch state {
         case .none:
-            EmulationView()
+            EmulationView(game: game)
         case .entitlement:
             ControllerView(controller: VirtualControllerManager.shared, isEditing: false)
                 .allowsHitTesting(false)

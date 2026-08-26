@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Silk.NET.Vulkan;
 
 namespace Ryujinx.Graphics.Vulkan
 {
@@ -9,11 +10,15 @@ namespace Ryujinx.Graphics.Vulkan
     {
         private readonly WorkerQueue _shaderQueue;
         private readonly WorkerQueue _pipelineQueue;
+        private readonly PipelineCacheManager _pipelineCacheManager;
 
-        public BackgroundCompilationScheduler()
+        public static int PipelineWorkerCount => GetBackgroundPipelineCompileThreadCount();
+
+        public BackgroundCompilationScheduler(PipelineCacheManager pipelineCacheManager)
         {
+            _pipelineCacheManager = pipelineCacheManager;
             _shaderQueue = new("Shader", GetBackgroundShaderCompileThreadCount());
-            _pipelineQueue = new("Pipeline", 1);
+            _pipelineQueue = new("Pipeline", PipelineWorkerCount);
         }
 
         private static int GetBackgroundShaderCompileThreadCount()
@@ -21,14 +26,29 @@ namespace Ryujinx.Graphics.Vulkan
             return Math.Max(1, Math.Min(2, Environment.ProcessorCount / 4));
         }
 
-        public Task ScheduleShaderCompile(Action action, bool highPriority = false)
+        private static int GetBackgroundPipelineCompileThreadCount()
         {
-            return _shaderQueue.Schedule(action, highPriority);
+            return Math.Max(1, Math.Min(2, Environment.ProcessorCount / 4));
         }
 
-        public Task SchedulePipelineCompile(Action action, bool highPriority = false)
+        public Task ScheduleShaderCompile(Action action, bool highPriority = false)
         {
-            return _pipelineQueue.Schedule(action, highPriority);
+            return _shaderQueue.Schedule(_ => action(), highPriority);
+        }
+
+        public Task SchedulePipelineCompile(Action<PipelineCache> action, bool highPriority = false)
+        {
+            return _pipelineQueue.Schedule(workerIndex =>
+            {
+                try
+                {
+                    action(_pipelineCacheManager.GetWorkerCache(workerIndex));
+                }
+                finally
+                {
+                    _pipelineCacheManager.NotifyWorkerPipelineCreated(workerIndex);
+                }
+            }, highPriority);
         }
 
         public void Dispose()
@@ -41,21 +61,21 @@ namespace Ryujinx.Graphics.Vulkan
         {
             private sealed class WorkItem
             {
-                private readonly Action _action;
+                private readonly Action<int> _action;
 
                 public TaskCompletionSource<bool> Completion { get; }
 
-                public WorkItem(Action action)
+                public WorkItem(Action<int> action)
                 {
                     _action = action;
                     Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
                 }
 
-                public void Execute()
+                public void Execute(int workerIndex)
                 {
                     try
                     {
-                        _action();
+                        _action(workerIndex);
                         Completion.TrySetResult(true);
                     }
                     catch (Exception ex)
@@ -86,7 +106,8 @@ namespace Ryujinx.Graphics.Vulkan
 
                 for (int index = 0; index < workerCount; index++)
                 {
-                    Thread worker = new(WorkerLoop)
+                    int workerIndex = index;
+                    Thread worker = new(() => WorkerLoop(workerIndex))
                     {
                         IsBackground = true,
                         Name = $"Vulkan {name} Compile {index}",
@@ -98,7 +119,7 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             }
 
-            public Task Schedule(Action action, bool highPriority)
+            public Task Schedule(Action<int> action, bool highPriority)
             {
                 WorkItem item = new(action);
 
@@ -114,14 +135,14 @@ namespace Ryujinx.Graphics.Vulkan
                     {
                         _lowPriorityQueue.Enqueue(item);
                     }
-                }
 
-                _signal.Release();
+                    _signal.Release();
+                }
 
                 return item.Completion.Task;
             }
 
-            private void WorkerLoop()
+            private void WorkerLoop(int workerIndex)
             {
                 while (true)
                 {
@@ -149,7 +170,7 @@ namespace Ryujinx.Graphics.Vulkan
                         }
                     }
 
-                    item.Execute();
+                    item.Execute(workerIndex);
                 }
             }
 

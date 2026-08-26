@@ -1,14 +1,11 @@
 using Ryujinx.Audio.Common;
 using Ryujinx.Audio.Integration;
-using Ryujinx.Common.Logging;
 using Ryujinx.Memory;
 using System;
 using System.Collections.Concurrent;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Runtime.Versioning;
 using Ryujinx.Audio.Backends.Apple.Native;
-using static Ryujinx.Audio.Backends.Apple.Native.AudioToolbox;
 using static Ryujinx.Audio.Integration.IHardwareDeviceDriver;
 
 namespace Ryujinx.Audio.Backends.Apple
@@ -20,9 +17,21 @@ namespace Ryujinx.Audio.Backends.Apple
         private readonly ManualResetEvent _updateRequiredEvent;
         private readonly ManualResetEvent _pauseEvent;
         private readonly ConcurrentDictionary<AppleHardwareDeviceSession, byte> _sessions;
-        private readonly bool _supportSurroundConfiguration;
+        private float _volume;
 
-        public float Volume { get; set; }
+        public float Volume
+        {
+            get => _volume;
+            set
+            {
+                _volume = value;
+
+                foreach (AppleHardwareDeviceSession session in _sessions.Keys)
+                {
+                    session.UpdateEffectiveVolume();
+                }
+            }
+        }
 
         public AppleHardwareDeviceDriver()
         {
@@ -30,60 +39,10 @@ namespace Ryujinx.Audio.Backends.Apple
             _pauseEvent = new ManualResetEvent(true);
             _sessions = new ConcurrentDictionary<AppleHardwareDeviceSession, byte>();
 
-            _supportSurroundConfiguration = TestSurroundSupport();
-
             Volume = 1f;
         }
 
-        private bool TestSurroundSupport()
-        {
-            try
-            {
-                AudioStreamBasicDescription format =
-                    GetAudioFormat(SampleFormat.PcmFloat, Constants.TargetSampleRate, 6);
-
-                int result = AudioQueueNewOutput(
-                    ref format,
-                    nint.Zero,
-                    nint.Zero,
-                    nint.Zero,
-                    nint.Zero,
-                    0,
-                    out nint testQueue);
-
-                if (result == 0)
-                {
-                    AudioChannelLayout layout = new AudioChannelLayout
-                    {
-                        AudioChannelLayoutTag = kAudioChannelLayoutTag_MPEG_5_1_A,
-                        AudioChannelBitmap = 0,
-                        NumberChannelDescriptions = 0
-                    };
-
-                    int layoutResult = AudioQueueSetProperty(
-                        testQueue,
-                        kAudioQueueProperty_ChannelLayout,
-                        ref layout,
-                        (uint)Marshal.SizeOf<AudioChannelLayout>());
-
-                    if (layoutResult == 0)
-                    {
-                        AudioQueueDispose(testQueue, true);
-                        return true;
-                    }
-
-                    AudioQueueDispose(testQueue, true);
-                }
-
-                return false;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        public static bool IsSupported => OperatingSystem.IsMacOSVersionAtLeast(10, 5);
+        public static bool IsSupported => OperatingSystem.IsMacOSVersionAtLeast(10, 10) || OperatingSystem.IsIOSVersionAtLeast(8, 0);
 
         public ManualResetEvent GetUpdateRequiredEvent()
             => _updateRequiredEvent;
@@ -119,47 +78,12 @@ namespace Ryujinx.Audio.Backends.Apple
         internal bool Unregister(AppleHardwareDeviceSession session)
             => _sessions.TryRemove(session, out _);
 
-        internal static AudioStreamBasicDescription GetAudioFormat(SampleFormat sampleFormat, uint sampleRate,
-            uint channelCount)
+        internal static AVFoundation.AVAudioCommonFormat GetAudioFormat(SampleFormat sampleFormat)
         {
-            uint formatFlags;
-            uint bitsPerChannel;
-
-            switch (sampleFormat)
+            return sampleFormat switch
             {
-                case SampleFormat.PcmInt8:
-                    formatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-                    bitsPerChannel = 8;
-                    break;
-                case SampleFormat.PcmInt16:
-                    formatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-                    bitsPerChannel = 16;
-                    break;
-                case SampleFormat.PcmInt32:
-                    formatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-                    bitsPerChannel = 32;
-                    break;
-                case SampleFormat.PcmFloat:
-                    formatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
-                    bitsPerChannel = 32;
-                    break;
-                default:
-                    throw new ArgumentException($"Unsupported sample format {sampleFormat}");
-            }
-
-            uint bytesPerFrame = (bitsPerChannel / 8) * channelCount;
-
-            return new AudioStreamBasicDescription
-            {
-                SampleRate = sampleRate,
-                FormatID = kAudioFormatLinearPCM,
-                FormatFlags = formatFlags,
-                BytesPerPacket = bytesPerFrame,
-                FramesPerPacket = 1,
-                BytesPerFrame = bytesPerFrame,
-                ChannelsPerFrame = channelCount,
-                BitsPerChannel = bitsPerChannel,
-                Reserved = 0
+                SampleFormat.PcmFloat => AVFoundation.AVAudioCommonFormat.PcmFormatFloat32,
+                _ => throw new ArgumentException($"Unsupported sample format {sampleFormat}"),
             };
         }
 
@@ -188,9 +112,9 @@ namespace Ryujinx.Audio.Backends.Apple
         public bool SupportsSampleRate(uint sampleRate) => true;
 
         public bool SupportsSampleFormat(SampleFormat sampleFormat)
-            => sampleFormat != SampleFormat.PcmInt24;
+            => sampleFormat == SampleFormat.PcmFloat;
 
         public bool SupportsChannelCount(uint channelCount)
-            => channelCount != 6 || _supportSurroundConfiguration;
+            => channelCount is 1 or 2 || (channelCount == 6 && OperatingSystem.IsMacOS());
     }
 }

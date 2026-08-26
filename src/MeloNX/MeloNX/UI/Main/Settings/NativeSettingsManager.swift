@@ -10,6 +10,7 @@ import SwiftUI
 import Combine
 
 infix operator ?=
+infix operator ?+
 
 @discardableResult
 func ?=<T>(lhs: inout T, rhs: T?) -> T {
@@ -18,6 +19,13 @@ func ?=<T>(lhs: inout T, rhs: T?) -> T {
     }
     
     return lhs
+}
+
+
+@discardableResult
+func ?+(lhs: String?, rhs: String) -> String? {
+    guard let lhs else { return nil }
+    return lhs + rhs
 }
 
 @dynamicMemberLookup

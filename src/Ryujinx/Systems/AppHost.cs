@@ -951,7 +951,7 @@ namespace Ryujinx.Ava.Systems
             ];
 
             if (OperatingSystem.IsMacOS())
-                availableBackends.Insert(0, AudioBackend.AudioToolbox);
+                availableBackends.Insert(0, AudioBackend.AVFoundation);
 
             AudioBackend preferredBackend = ConfigurationState.Instance.System.AudioBackend.Value;
 
@@ -990,7 +990,7 @@ namespace Ryujinx.Ava.Systems
                 deviceDriver = currentBackend switch
                 {
 #pragma warning disable CA1416 // Platform compatibility is enforced in AppleHardwareDeviceDriver.IsSupported, before any potentially platform-sensitive code can run.
-                    AudioBackend.AudioToolbox => InitializeAudioBackend<AppleHardwareDeviceDriver>(AudioBackend.AudioToolbox, nextBackend),
+                    AudioBackend.AVFoundation => InitializeAudioBackend<AppleHardwareDeviceDriver>(AudioBackend.AVFoundation, nextBackend),
 #pragma warning restore CA1416
                     AudioBackend.SDL3 => InitializeAudioBackend<SDL3HardwareDeviceDriver>(AudioBackend.SDL3, nextBackend),
                     AudioBackend.SoundIo => InitializeAudioBackend<SoundIoHardwareDeviceDriver>(AudioBackend.SoundIo, nextBackend),

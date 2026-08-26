@@ -62,8 +62,17 @@ namespace Ryujinx.Graphics.Vulkan
         private int _viewsCount;
         private readonly ulong _size;
 
+        private volatile bool _hasCompleteRenderPass;
+
+        public bool HasCompleteRenderPass => _hasCompleteRenderPass;
+
         private int _bindCount;
         private readonly TextureSliceInfo[] _slices;
+
+        public void MarkRenderPassComplete()
+        {
+            _hasCompleteRenderPass = true;
+        }
 
         public VkFormat VkFormat { get; }
 
@@ -320,7 +329,7 @@ namespace Ryujinx.Graphics.Vulkan
                 usage |= ImageUsageFlags.ColorAttachmentBit;
             }
 
-            if ((format.IsImageCompatible && isMsImageStorageSupported) || extendedUsage)
+            if ((format.IsImageCompatible || extendedUsage) && isMsImageStorageSupported)
             {
                 usage |= ImageUsageFlags.StorageBit;
             }
@@ -597,7 +606,13 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void Dispose()
         {
+            if (Disposed)
+            {
+                return;
+            }
+
             Disposed = true;
+            _gd.UnregisterPresentationStorage(this);
 
             if (_aliasedStorages != null)
             {

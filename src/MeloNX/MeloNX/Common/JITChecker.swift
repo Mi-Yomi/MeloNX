@@ -40,7 +40,7 @@ let CS_DEBUGGED = 0x10000000
 @_silgen_name("csops")
 func csops(pid: Int32, ops: Int32, useraddr: UnsafeMutableRawPointer?, usersize: Int32) -> Int32
 
-func jitEnabled(_ runDualMapped: Bool = false) -> Bool {
+func jitEnabled() -> Bool {
     if checkAppEntitlement("dynamic-codesigning") {
         return allocateTest()
     }
@@ -109,6 +109,7 @@ func testDualMappedExecution() -> Bool {
         &maxProt,
         VM_INHERIT_NONE
     )
+    
     guard remapResult == KERN_SUCCESS else {
         return false
     }
@@ -185,6 +186,7 @@ struct ChipInfo {
 }
 
 
+
 public extension ProcessInfo {
     var hasTXMClassic: Bool {
         ProcessInfo.processInfo.isiOSAppOnMac ? false :
@@ -192,6 +194,8 @@ public extension ProcessInfo {
     }
     
     var hasTXM: Bool {
+        guard !isTXMIOKit() else { return true }
+        
         if #available(iOS 27, *) {
             let lastNonTXM = 12 // A12
             let chipInfo = parseChipInfo()
@@ -220,6 +224,18 @@ public extension ProcessInfo {
         }
         
         return hasTXMClassic
+    }
+    
+    func isTXMIOKit() -> Bool {
+        let memory_map: io_registry_entry_t = IORegistryEntryFromPath(kIOMainPortDefault, "IODeviceTree:/chosen/memory-map")
+        guard memory_map != 0 else { return false }
+        
+        let keysCF = IORegistryEntryCreateCFProperty(memory_map, kIORegistryEntryPropertyKeysKey as CFString, kCFAllocatorDefault, 0)?.takeUnretainedValue()
+        IOObjectRelease(memory_map)
+        guard let keys = keysCF as? [String] else { return false }
+        CFRelease(keysCF)
+        
+        return keys.contains("TXM")
     }
     
     private func parseChipInfo() -> ChipInfo? {

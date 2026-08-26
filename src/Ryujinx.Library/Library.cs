@@ -512,10 +512,14 @@ namespace Ryujinx.Library
                         return nint.Zero;
                 }
 
-                if (playerIndex < 0 || playerIndex > 7)
+                if (playerIndex < 0 || playerIndex > 8)
                 {
                     Logger.Warning?.Print(LogClass.Application, $"AttachGamepad: invalid playerIndex {playerIndex} for \"{inputId}\"");
                     return result;
+                } 
+                else if (playerIndex == 8)
+                {
+                    Logger.Info?.Print(LogClass.Application, $"AttachGamepad: Using Handheld for \"{inputId}\"");
                 }
 
                 var assignedIndex = (PlayerIndex)playerIndex;
@@ -917,6 +921,9 @@ namespace Ryujinx.Library
                 0,
                 false,
                 options.CustomVSyncInterval
+            ).ConfigureMultiplayerLanInterface(
+                options.MultiplayerLanInterfaceAddress,
+                options.MultiplayerLanInterfaceSubnetMask
             ).Configure(
                 _virtualFileSystem,
                 _libHacHorizonManager,
@@ -924,7 +931,7 @@ namespace Ryujinx.Library
                 _accountManager,
                 _userChannelPersistence,
                 renderer,
-                new SDL3HardwareDeviceDriver(),
+                new AppleHardwareDeviceDriver(),
                 window
             );
 

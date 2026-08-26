@@ -229,6 +229,10 @@ namespace Ryujinx.Library
         [Option("lan-interface-id", Required = false, Default = "0", HelpText = "GUID for the network interface used by LAN.")]
         public string MultiplayerLanInterfaceId { get; set; }
 
+        public string MultiplayerLanInterfaceAddress { get; set; }
+
+        public string MultiplayerLanInterfaceSubnetMask { get; set; }
+
         // Logging
 
         [Option("disable-file-logging", Required = false, Default = false, HelpText = "Disables logging to a file on disk.")]
@@ -424,6 +428,8 @@ namespace Ryujinx.Library
         public bool   UseHypervisor;
         public bool   LdnMitm;
         public byte*  MultiplayerLanInterfaceId;
+        public byte*  MultiplayerLanInterfaceAddress;
+        public byte*  MultiplayerLanInterfaceSubnetMask;
 
         public bool   DisableFileLog;
         public bool   LoggingEnableDebug;
@@ -549,6 +555,8 @@ namespace Ryujinx.Library
                 UseHypervisor              = n->UseHypervisor,
                 ldnMitm                    = n->LdnMitm,
                 MultiplayerLanInterfaceId  = FromUtf8(n->MultiplayerLanInterfaceId),
+                MultiplayerLanInterfaceAddress = FromUtf8(n->MultiplayerLanInterfaceAddress),
+                MultiplayerLanInterfaceSubnetMask = FromUtf8(n->MultiplayerLanInterfaceSubnetMask),
 
                 DisableFileLog            = n->DisableFileLog,
                 LoggingEnableDebug        = n->LoggingEnableDebug,
@@ -618,6 +626,8 @@ namespace Ryujinx.Library
             System.Runtime.InteropServices.NativeMemory.Free(n->InputDSUServerHandheld);
             System.Runtime.InteropServices.NativeMemory.Free(n->SystemTimeZone);
             System.Runtime.InteropServices.NativeMemory.Free(n->MultiplayerLanInterfaceId);
+            System.Runtime.InteropServices.NativeMemory.Free(n->MultiplayerLanInterfaceAddress);
+            System.Runtime.InteropServices.NativeMemory.Free(n->MultiplayerLanInterfaceSubnetMask);
             System.Runtime.InteropServices.NativeMemory.Free(n->GraphicsShadersDumpPath);
             System.Runtime.InteropServices.NativeMemory.Free(n->PreferredGPUVendor);
             System.Runtime.InteropServices.NativeMemory.Free(n->InputPath);

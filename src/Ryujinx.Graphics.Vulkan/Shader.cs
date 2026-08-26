@@ -98,17 +98,7 @@ namespace Ryujinx.Graphics.Vulkan
                         PCode = (uint*)pCode,
                     };
 
-                    if (_gd != null)
-                    {
-                        lock (_gd.PipelineCreationLock)
-                        {
-                            _api.CreateShaderModule(_device, in shaderModuleCreateInfo, null, out _module).ThrowOnError();
-                        }
-                    }
-                    else
-                    {
-                        _api.CreateShaderModule(_device, in shaderModuleCreateInfo, null, out _module).ThrowOnError();
-                    }
+                    _api.CreateShaderModule(_device, in shaderModuleCreateInfo, null, out _module).ThrowOnError();
                 }
 
                 CompileStatus = ProgramLinkStatus.Success;
@@ -206,17 +196,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                 if (_module.Handle != 0)
                 {
-                    if (_gd != null)
-                    {
-                        lock (_gd.PipelineCreationLock)
-                        {
-                            _api.DestroyShaderModule(_device, _module, null);
-                        }
-                    }
-                    else
-                    {
-                        _api.DestroyShaderModule(_device, _module, null);
-                    }
+                    _api.DestroyShaderModule(_device, _module, null);
                 }
 
                 _disposed = true;

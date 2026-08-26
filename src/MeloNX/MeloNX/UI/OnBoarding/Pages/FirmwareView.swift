@@ -16,6 +16,7 @@ struct FirmwareView: View {
     let fileManager: FileManager = .default
     
     @State var fwAdded: Bool = false
+    @State var fwLoading: Bool = false
     
     var body: some View {
         ScrollView {
@@ -56,8 +57,13 @@ struct FirmwareView: View {
                     .multilineTextAlignment(.center)
                     .padding()
                 
-                ContinueButton(text: "Import", action: importFirmware, success: fwAdded, enabled: .constant(!fwAdded))
-                    .padding()
+                if fwLoading {
+                    ProgressView()
+                        .padding()
+                } else {
+                    ContinueButton(text: "Import", action: importFirmware, success: fwAdded, enabled: .constant(!fwAdded))
+                        .padding()
+                }
             }
         }
         .padding()
@@ -85,7 +91,9 @@ struct FirmwareView: View {
     
     func importFirmware() {
         fileImporter.importFiles(types: [.folder, .zip, .xci], allowMultiple: false) { result in
+            fwLoading = true
             ryujinxController.handleFirmwareImport(result: result)
+            fwLoading = false
             checkForFirmware()
         }
     }

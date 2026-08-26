@@ -196,6 +196,8 @@ typedef struct OptionsNative {
     bool   UseHypervisor;
     bool   LdnMitm;
     char*  MultiplayerLanInterfaceId;
+    char*  MultiplayerLanInterfaceAddress;
+    char*  MultiplayerLanInterfaceSubnetMask;
 
     bool   DisableFileLog;
     bool   LoggingEnableDebug;

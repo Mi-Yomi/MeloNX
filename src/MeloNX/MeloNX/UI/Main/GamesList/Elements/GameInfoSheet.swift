@@ -16,8 +16,7 @@ struct GameInfoSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {}
-                header: {
+                Section {
                     VStack(alignment: .center) {
                         if let icon = game.icon {
                             Image(uiImage: icon)
@@ -50,6 +49,23 @@ struct GameInfoSheet: View {
                         .padding(.vertical, 3)
                     }
                     .frame(maxWidth: .infinity)
+                    .listRowBackground(Color.clear)
+                }
+                
+                
+                Section {
+                    Button {
+                        UIPasteboard.general.url = URL(string: "melonx://game?id=\(game.titleId)")
+                        
+                        AppAlerts.showSyncAlert(title: "Copied to clipboard!", message: "Launch Link has sucessfully copied to your clipboard.", hasCancel: false)
+                    } label: {
+                        Label {
+                            Text("Copy Launch Link to Clipboard")
+                        } icon: {
+                            Image(systemName: "link.badge.plus")
+                        }
+
+                    }
                 }
                 
                 Section {
@@ -59,6 +75,7 @@ struct GameInfoSheet: View {
                         Text(game.version)
                             .foregroundColor(Color.secondary)
                     }
+                    
                     HStack {
                         Text("**Title ID**")
                             .contextMenu {
@@ -72,18 +89,21 @@ struct GameInfoSheet: View {
                         Text(game.titleId)
                             .foregroundColor(Color.secondary)
                     }
+                    
                     HStack {
                         Text("**Game Size**")
                         Spacer()
                         Text("\(fetchFileSize(for: game.fileURL) ?? 0) bytes")
                             .foregroundColor(Color.secondary)
                     }
+                    
                     HStack {
                         Text("**File Type**")
                         Spacer()
                         Text(getFileType(game.fileURL))
                             .foregroundColor(Color.secondary)
                     }
+                    
                     VStack(alignment: .leading, spacing: 4) {
                         Text("**Game URL**")
                         Text(trimGameURL(game.fileURL))

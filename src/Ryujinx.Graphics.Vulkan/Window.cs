@@ -311,6 +311,9 @@ namespace Ryujinx.Graphics.Vulkan
 
         public unsafe override void Present(ITexture texture, ImageCrop crop, Action swapBuffersCallback)
         {
+            TextureView view = (TextureView)texture;
+
+            _gd.RegisterPresentationTexture(view);
             _gd.PipelineInternal.AutoFlush.Present();
 
             uint nextImage = 0;
@@ -353,8 +356,6 @@ namespace Ryujinx.Graphics.Vulkan
                 AccessFlags.TransferWriteBit,
                 ImageLayout.Undefined,
                 ImageLayout.General);
-
-            TextureView view = (TextureView)texture;
 
             UpdateEffect();
 

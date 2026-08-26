@@ -1,4 +1,5 @@
 using Ryujinx.Common.Logging;
+using Ryujinx.Graphics.GAL;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -46,17 +47,20 @@ namespace Ryujinx.Graphics.Gpu.Image
     /// </summary>
     class AutoDeleteCache : IEnumerable<Texture>
     {
-        private const int MinCountForDeletion = 32;
         private const int MaxCapacity = 2048;
+        private const ulong MiB = 1024 * 1024;
         private const ulong GiB = 1024 * 1024 * 1024;
         private ulong MaxTextureSizeCapacity = 4UL * GiB;
         private const ulong MinTextureSizeCapacity = 512 * 1024 * 1024;
         private const ulong DefaultTextureSizeCapacity = 1 * GiB;
+        private const ulong MinUnifiedTextureSizeCapacity = 256 * MiB;
+        private const ulong MaxUnifiedTextureSizeCapacity = 768 * MiB;
         private const ulong TextureSizeCapacity6GiB = 4 * GiB;
         private const ulong TextureSizeCapacity8GiB = 6 * GiB;
         private const ulong TextureSizeCapacity12GiB = 12 * GiB;
 
         private const float MemoryScaleFactor = 0.50f;
+        private const int UnifiedMemoryDivisor = 16;
         private ulong _maxCacheMemoryUsage = DefaultTextureSizeCapacity;
 
         private readonly LinkedList<Texture> _textures;
@@ -79,6 +83,20 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="cpuMemorySize">The amount of physical CPU Memory Avaiable on the device.</param>
         public void Initialize(GpuContext context, ulong cpuMemorySize)
         {
+            bool isAppleUnifiedMemory = (OperatingSystem.IsIOS() || OperatingSystem.IsMacOS()) &&
+                                        context.Capabilities.MemoryType == SystemMemoryType.UnifiedMemory;
+
+            if (isAppleUnifiedMemory)
+            {
+                _maxCacheMemoryUsage = Math.Clamp(
+                    cpuMemorySize / UnifiedMemoryDivisor,
+                    MinUnifiedTextureSizeCapacity,
+                    MaxUnifiedTextureSizeCapacity);
+
+                Logger.Info?.Print(LogClass.Gpu, $"AutoDelete cache memory limit: {_maxCacheMemoryUsage / MiB} MiB (me when apple unified memory)");
+                return;
+            }
+
             ulong cpuMemorySizeGiB = cpuMemorySize / GiB;
 
             if (cpuMemorySizeGiB < 6 || context.Capabilities.MaximumGpuMemory == 0)
@@ -103,7 +121,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             _maxCacheMemoryUsage = Math.Clamp(cacheMemory, MinTextureSizeCapacity, MaxTextureSizeCapacity);
 
-            Logger.Info?.Print(LogClass.Gpu, $"AutoDelete Cache Allocated VRAM : {_maxCacheMemoryUsage / GiB} GiB");
+            Logger.Info?.Print(LogClass.Gpu, $"AutoDelete cache memory limit: {_maxCacheMemoryUsage / MiB} MiB");
         }
 
         /// <summary>
@@ -129,16 +147,13 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="texture">The texture to be added to the cache</param>
         public void Add(Texture texture)
         {
-            _totalSize += texture.Size;
+            texture.CacheSize = texture.GetEstimatedHostSize();
+            _totalSize += texture.CacheSize;
 
             texture.IncrementReferenceCount();
             texture.CacheNode = _textures.AddLast(texture);
 
-            if (_textures.Count > MaxCapacity ||
-                (_totalSize > _maxCacheMemoryUsage && _textures.Count >= MinCountForDeletion))
-            {
-                RemoveLeastUsedTexture();
-            }
+            EnforceCapacity();
         }
 
         /// <summary>
@@ -154,16 +169,17 @@ namespace Ryujinx.Graphics.Gpu.Image
         {
             if (texture.CacheNode != null)
             {
+                ulong oldSize = texture.CacheSize;
+                texture.CacheSize = texture.GetEstimatedHostSize();
+                _totalSize = _totalSize - oldSize + texture.CacheSize;
+
                 if (texture.CacheNode != _textures.Last)
                 {
                     _textures.Remove(texture.CacheNode);
                     _textures.AddLast(texture.CacheNode);
                 }
 
-                if (_totalSize > _maxCacheMemoryUsage && _textures.Count >= MinCountForDeletion)
-                {
-                    RemoveLeastUsedTexture();
-                }
+                EnforceCapacity();
             }
             else
             {
@@ -178,7 +194,8 @@ namespace Ryujinx.Graphics.Gpu.Image
         {
             Texture oldestTexture = _textures.First.Value;
 
-            _totalSize -= oldestTexture.Size;
+            _totalSize -= oldestTexture.CacheSize;
+            oldestTexture.CacheSize = 0;
 
             if (!oldestTexture.CheckModified(false))
             {
@@ -194,6 +211,18 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             oldestTexture.DecrementReferenceCount();
             oldestTexture.CacheNode = null;
+        }
+
+        /// <summary>
+        /// Removes old textures until both the entry-count and memory limits are satisfied.
+        /// </summary>
+        private void EnforceCapacity()
+        {
+            while (_textures.Count > MaxCapacity ||
+                   (_totalSize > _maxCacheMemoryUsage && _textures.Count > 0))
+            {
+                RemoveLeastUsedTexture();
+            }
         }
 
         /// <summary>
@@ -217,7 +246,8 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             _textures.Remove(texture.CacheNode);
 
-            _totalSize -= texture.Size;
+            _totalSize -= texture.CacheSize;
+            texture.CacheSize = 0;
 
             texture.CacheNode = null;
 

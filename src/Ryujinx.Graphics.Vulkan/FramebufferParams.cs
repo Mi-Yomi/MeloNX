@@ -473,6 +473,59 @@ namespace Ryujinx.Graphics.Vulkan
             _depthStencil?.Storage?.AddStoreOpUsage(true);
         }
 
+        public bool HasIncompleteAttachments()
+        {
+            if (_colors != null)
+            {
+                int count = ColorAttachmentsCount;
+
+                for (int i = 0; i < count; i++)
+                {
+                    TextureStorage storage = _colors[i].Storage;
+
+                    if (storage != null && !storage.HasCompleteRenderPass)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return _depthStencil?.Storage is TextureStorage depthStorage && !depthStorage.HasCompleteRenderPass;
+        }
+
+        public bool HasAttachment(TextureStorage storage)
+        {
+            if (_colors != null)
+            {
+                int count = ColorAttachmentsCount;
+
+                for (int i = 0; i < count; i++)
+                {
+                    if (_colors[i].Storage == storage)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return _depthStencil?.Storage == storage;
+        }
+
+        public void MarkAttachmentsComplete()
+        {
+            if (_colors != null)
+            {
+                int count = ColorAttachmentsCount;
+
+                for (int i = 0; i < count; i++)
+                {
+                    _colors[i].Storage?.MarkRenderPassComplete();
+                }
+            }
+
+            _depthStencil?.Storage?.MarkRenderPassComplete();
+        }
+
         public void ClearBindings()
         {
             _depthStencil?.Storage.ClearBindings();
