@@ -187,3 +187,7 @@ distribution/macos/temp/
 distribution/macos/output/
 
 src/MeloNX/MeloNX.xcodeproj/project.xcworkspace/xcuserdata/*
+
+# Local build dependencies and generated artifacts
+/.tools/
+/artifacts/

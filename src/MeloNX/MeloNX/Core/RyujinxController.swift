@@ -249,12 +249,12 @@ class RyujinxController: ObservableObject {
         
         let nativeSettingsManager = NativeSettingsManager.shared
         
-        if !(nativeSettingsManager.writeStdout.value as Bool) {
-            redirectStdIOToFile()
-        }
+        let coreLogURL = (nativeSettingsManager.writeStdout.value as Bool) ? nil : redirectStdIOToFile()
+        MemoryDiagnostics.shared.startSession(coreLogURL: coreLogURL)
         
         Thread.detachNewThread {
             let response = Ryujinx.mainRyu(settings)
+            MemoryDiagnostics.shared.stopSession(exitCode: response)
             
             DispatchQueue.main.async {
                 self.emulationThreadActive = false
@@ -269,7 +269,8 @@ class RyujinxController: ObservableObject {
     }
     
     
-    func redirectStdIOToFile() {
+    @discardableResult
+    func redirectStdIOToFile() -> URL? {
         let fileManager = FileManager.default
         
         let logsDir = URL.logsFolderURL
@@ -286,12 +287,13 @@ class RyujinxController: ObservableObject {
         fileManager.createFile(atPath: logURL.path, contents: nil)
         
         let fd = open(logURL.path, O_WRONLY | O_APPEND, 0o644)
-        guard fd >= 0 else { return }
+        guard fd >= 0 else { return nil }
         
         dup2(fd, STDOUT_FILENO)
         dup2(fd, STDERR_FILENO)
         
         close(fd)
+        return logURL
     }
     
     func cleanupOldLogs(in directory: URL, keep: Int) {

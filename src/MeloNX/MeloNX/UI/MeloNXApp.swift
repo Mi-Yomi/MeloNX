@@ -78,6 +78,7 @@ struct MeloNXApp: App {
         SDL_Init(SDL_INIT_EVENTS)
         JIT26BreakpointHandler()
         initEnvironmentVariables()
+        JitCacheSettings.applyAtLaunch()
         Ryujinx.initialize()
         ThemeManager.shared.applyUIKitAppearance()
     }

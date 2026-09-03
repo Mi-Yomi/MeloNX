@@ -803,6 +803,14 @@ struct SettingsView: View {
     
     var advancedForm: some View {
         Form {
+            Section("Experimental") {
+                NavigationLink {
+                    ExperimentalMemorySettingsView()
+                } label: {
+                    Label("JIT Cache & Memory Diagnostics", systemImage: "memorychip")
+                }
+            }
+
             Section("Debug Logging") {
                 NativeToggleRow("Debug Logs", icon: "exclamationmark.bubble",
                                 isOn: config.loggingEnableDebug,

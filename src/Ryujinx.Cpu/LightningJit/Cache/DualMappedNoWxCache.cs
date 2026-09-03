@@ -1,4 +1,5 @@
 using Ryujinx.Common;
+using Ryujinx.Common.Logging;
 using Ryujinx.Memory;
 using System;
 using System.Diagnostics;
@@ -11,48 +12,34 @@ namespace Ryujinx.Cpu.LightningJit.Cache
     [SupportedOSPlatform("ios")]
     class DualMappedNoWxCache : IDisposable
     {
-        private const int CodeAlignment = 4; // Bytes.
-        private static readonly ulong SharedCacheSize = DualMappedJitAllocator.hasTXM ? (ulong)512 * 1024 * 1024 : 1024 * 1024 * 1024;
+        // Capture the setting on the first mapping attempt, before game launch. Live code cannot be resized safely.
+        private static readonly Lazy<DualMappedJitCacheConfiguration> CacheConfiguration = new(() =>
+            DualMappedJitCacheConfiguration.Resolve(
+                Environment.GetEnvironmentVariable(DualMappedJitCacheConfiguration.EnvironmentVariable),
+                DualMappedJitAllocator.hasTXM));
+        private static readonly Lock InitializationLock = new();
 
         private class MemoryCache : IDisposable
         {
             private readonly DualMappedJitAllocator _allocator;
-            private readonly CacheMemoryAllocator _cacheAllocator;
+            private readonly SharedJitCacheAllocator _cacheAllocator;
             public IntPtr RwPointer => _allocator.RwPtr;
             public IntPtr RxPointer => _allocator.RxPtr;
 
-            public MemoryCache(DualMappedJitAllocator alloc, ulong size)
+            public MemoryCache(DualMappedJitAllocator alloc, int size)
             {
                 _allocator = alloc;
-                _cacheAllocator = new((int)size);
+                _cacheAllocator = new(size, LogUsageThreshold);
             }
 
             public int Allocate(int codeSize)
             {
-                codeSize = AlignCodeSize(codeSize);
-
-                int allocOffset = _cacheAllocator.Allocate(codeSize);
-
-                if (allocOffset < 0)
-                {
-                    throw new OutOfMemoryException("JIT Cache exhausted.");
-                }
-
-                return allocOffset;
+                return _cacheAllocator.Allocate(codeSize);
             }
 
             public int AllocateAligned(int codeSize, int alignment)
             {
-                codeSize = AlignCodeSize(codeSize);
-
-                int allocOffset = _cacheAllocator.AllocateAligned(codeSize, alignment);
-
-                if (allocOffset < 0)
-                {
-                    throw new OutOfMemoryException("JIT Cache exhausted.");
-                }
-
-                return allocOffset;
+                return _cacheAllocator.AllocateAligned(codeSize, alignment);
             }
 
             public void SysIcacheInvalidate(int offset, int size)
@@ -67,9 +54,12 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 }
             }
 
-            private static int AlignCodeSize(int codeSize)
+            private static void LogUsageThreshold(int threshold, SharedJitCacheAllocator allocator)
             {
-                return checked(codeSize + (CodeAlignment - 1)) & ~(CodeAlignment - 1);
+                Logger.Warning?.Print(LogClass.Cpu,
+                    $"Dual-mapped JIT cache reached {threshold}% usage: used={allocator.UsedBytes} bytes, " +
+                    $"capacity={allocator.CapacityBytes} bytes, free={allocator.FreeBytes} bytes, " +
+                    $"addressHighWater={allocator.AddressHighWaterBytes} bytes.");
             }
 
             protected virtual void Dispose(bool disposing)
@@ -77,7 +67,6 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 if (disposing)
                 {
                     _allocator.Dispose();
-                    _cacheAllocator.Clear();
                 }
             }
 
@@ -96,15 +85,35 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         public DualMappedNoWxCache(Translator translator)
         {
             _translator = translator;
-            _sharedCache = new(_sharedCacheAlloc, SharedCacheSize);
+            InitMemoryCache();
+            DualMappedJitCacheConfiguration configuration = CacheConfiguration.Value;
+            _sharedCache = new(_sharedCacheAlloc, configuration.CapacityBytes);
+
+            // Mapping normally happens before the app configures file logging; repeat the effective setting at game launch.
+            if (configuration.InvalidOverride)
+            {
+                Logger.Warning?.Print(LogClass.Cpu,
+                    $"Invalid {DualMappedJitCacheConfiguration.EnvironmentVariable}; expected 512, 768 or 1024. " +
+                    $"Using the default {configuration.SizeMiB} MiB JIT cache.");
+            }
+
+            Logger.Info?.Print(LogClass.Cpu,
+                $"Dual-mapped JIT cache: {configuration.SizeMiB} MiB " +
+                $"({(configuration.IsOverride ? "process-start override" : "default")}). " +
+                "Changing the size requires restarting the app; this does not change guest RAM.");
         }
 
         public static void InitMemoryCache() 
         {
-            if (_sharedCacheAlloc != null)
-                return;
+            lock (InitializationLock)
+            {
+                if (_sharedCacheAlloc != null)
+                {
+                    return;
+                }
 
-            _sharedCacheAlloc = new(SharedCacheSize);
+                _sharedCacheAlloc = new((ulong)CacheConfiguration.Value.CapacityBytes);
+            }
         }
 
         public unsafe nint Map(ReadOnlySpan<byte> code, ulong guestAddress, ulong guestSize)

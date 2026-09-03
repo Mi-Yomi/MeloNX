@@ -1,0 +1,61 @@
+name: Experimental iOS package
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-experimental-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Standard Apple Silicon runner; no paid larger runner is requested.
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+      DOTNET_INSTALL_DIR: ${{ runner.temp }}/melonx-dotnet
+      NUGET_PACKAGES: ${{ github.workspace }}/.tools/nuget/packages
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Record build request
+        shell: bash
+        run: |
+          mkdir -p artifacts/ios/logs
+          printf 'source_commit=%s\nrun_url=%s/%s/actions/runs/%s\n' \
+            "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" \
+            > artifacts/ios/build-info.txt
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.400'
+          architecture: arm64
+
+      - name: Build package for re-signing
+        shell: bash
+        run: bash distribution/ios/build-unsigned-ipa.sh
+
+      - name: Upload package, source and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: MeloNX-ios-experimental-${{ github.sha }}
+          path: |
+            artifacts/ios/*.ipa
+            artifacts/ios/*.tar.gz
+            artifacts/ios/*.txt
+            artifacts/ios/*.plist
+            artifacts/ios/*.entitlements
+            artifacts/ios/Package.resolved
+            artifacts/ios/logs/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 7
