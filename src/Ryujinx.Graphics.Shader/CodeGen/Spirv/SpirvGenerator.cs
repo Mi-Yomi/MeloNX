@@ -55,6 +55,15 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             context.AddCapability(Capability.ImageQuery);
             context.AddCapability(Capability.SampledBuffer);
 
+            foreach (IoDefinition ioDefinition in info.IoDefinitions)
+            {
+                if (ioDefinition.IoVariable == IoVariable.ClipDistance)
+                {
+                    context.AddCapability(Capability.ClipDistance);
+                    break;
+                }
+            }
+
             if (parameters.HostCapabilities.SupportsShaderFloat64)
             {
                 context.AddCapability(Capability.Float64);
