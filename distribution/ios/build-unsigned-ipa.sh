@@ -98,7 +98,7 @@ xcrun lipo "$APP/Frameworks/Ryujinx.Library.dylib" -verify_arch arm64
 # Ad-hoc sign the main Mach-O only to preserve the requested memory entitlement
 # for the sideload tool. This does not create a device provisioning profile.
 codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP/$EXECUTABLE"
-codesign --display --entitlements :- "$APP/$EXECUTABLE" \
+codesign --display --entitlements - --xml "$APP/$EXECUTABLE" \
   > "$OUTPUT_ROOT/embedded-entitlements.plist" 2> "$OUTPUT_ROOT/logs/codesign.log"
 test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.kernel.increased-memory-limit' "$OUTPUT_ROOT/embedded-entitlements.plist")" = true
 
