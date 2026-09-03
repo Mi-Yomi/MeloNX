@@ -174,7 +174,7 @@ namespace Ryujinx.HLE.Loaders.Processes
 
             if (Path.GetExtension(path).Equals(".nro", StringComparison.OrdinalIgnoreCase))
             {
-                FileStream input = new(path, FileMode.Open);
+                FileStream input = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 NroExecutable nro = new(input.AsStorage());
 
                 executable = nro;

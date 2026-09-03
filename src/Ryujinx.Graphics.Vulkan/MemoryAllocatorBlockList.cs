@@ -227,7 +227,18 @@ namespace Ryujinx.Graphics.Vulkan
             if (map)
             {
                 void* pointer = null;
-                _api.MapMemory(_device, deviceMemory, 0, blockAlignedSize, 0, ref pointer).ThrowOnError();
+
+                try
+                {
+                    _api.MapMemory(_device, deviceMemory, 0, blockAlignedSize, 0, ref pointer).ThrowOnError();
+                }
+                catch
+                {
+                    // No registered block owns this allocation yet.
+                    _api.FreeMemory(_device, deviceMemory, null);
+                    throw;
+                }
+
                 hostPointer = (nint)pointer;
             }
 

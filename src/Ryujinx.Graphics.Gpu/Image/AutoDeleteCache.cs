@@ -214,12 +214,14 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
-        /// Removes old textures until both the entry-count and memory limits are satisfied.
+        /// Removes old textures until the limits are satisfied, retaining the most recently used texture.
         /// </summary>
         private void EnforceCapacity()
         {
+            // Add/Lift may hold the only reference to a texture still needed by the caller.
+            // A single oversized texture must remain alive until it can be replaced or explicitly removed.
             while (_textures.Count > MaxCapacity ||
-                   (_totalSize > _maxCacheMemoryUsage && _textures.Count > 0))
+                   (_totalSize > _maxCacheMemoryUsage && _textures.Count > 1))
             {
                 RemoveLeastUsedTexture();
             }
@@ -323,7 +325,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="texture">Texture to add to the short cache</param>
         public void AddShortCache(Texture texture)
         {
-            if (texture.ShortCacheEntry != null)
+            if (texture.ShortCacheEntry == null)
             {
                 ShortTextureCacheEntry entry = new(texture);
 

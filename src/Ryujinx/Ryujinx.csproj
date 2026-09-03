@@ -66,6 +66,8 @@
     <PackageReference Include="Silk.NET.Vulkan.Extensions.KHR" />
     <PackageReference Include="SPB" />
     <PackageReference Include="SharpZipLib" />
+    <!-- Use the security backport for Avalonia's transitive D-Bus dependency (GHSA-xrw6-gwf8-vvr9). -->
+    <PackageReference Include="Tmds.DBus.Protocol" />
   </ItemGroup>
   
   <ItemGroup>

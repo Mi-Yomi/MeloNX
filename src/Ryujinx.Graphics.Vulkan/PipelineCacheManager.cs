@@ -3,20 +3,17 @@ using Ryujinx.Common.Logging;
 using Silk.NET.Vulkan;
 using System;
 using System.IO;
-using System.Threading;
 
 namespace Ryujinx.Graphics.Vulkan
 {
     internal sealed class PipelineCacheManager : IDisposable
     {
-        private const int WorkerSaveInterval = 64;
         private const long MaximumCacheSize = 128L * 1024 * 1024;
 
         private readonly Vk _api;
         private readonly Device _device;
-        private readonly PipelineCacheCreateFlags _createFlags;
         private readonly PipelineCache[] _workerCaches;
-        private readonly int[] _workerPipelineCounts;
+        private readonly PipelineCacheCheckpointPolicy _checkpointPolicy;
         private readonly string _cacheDirectory;
         private readonly string _mainCachePath;
         private readonly string[] _workerCachePaths;
@@ -30,11 +27,8 @@ namespace Ryujinx.Graphics.Vulkan
         {
             _api = api;
             _device = device;
-            _createFlags = physicalDevice.IsDeviceExtensionPresent("VK_EXT_pipeline_creation_cache_control")
-                ? PipelineCacheCreateFlags.ExternallySynchronizedBitExt
-                : 0;
             _workerCaches = new PipelineCache[workerCount];
-            _workerPipelineCounts = new int[workerCount];
+            _checkpointPolicy = new(workerCount);
             _workerCachePaths = new string[workerCount];
 
             PhysicalDeviceProperties properties = physicalDevice.PhysicalDeviceProperties;
@@ -108,11 +102,21 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void NotifyWorkerPipelineCreated(int workerIndex)
         {
-            int count = Interlocked.Increment(ref _workerPipelineCounts[workerIndex]);
-
-            if (count % WorkerSaveInterval == 0)
+            // Independently implemented checkpoint pacing inspired by Eden PR #4294:
+            // https://git.eden-emu.dev/eden-emu/eden/pulls/4294
+            // Keep snapshots on the owning worker, between its pipeline creation operations.
+            if (_checkpointPolicy.TryBegin(workerIndex))
             {
-                SaveCache(_workerCaches[workerIndex], _workerCachePaths[workerIndex], final: false);
+                bool saved = false;
+
+                try
+                {
+                    saved = SaveCache(_workerCaches[workerIndex], _workerCachePaths[workerIndex], final: false);
+                }
+                finally
+                {
+                    _checkpointPolicy.Complete(workerIndex, saved);
+                }
             }
         }
 
@@ -132,7 +136,8 @@ namespace Ryujinx.Graphics.Vulkan
             PipelineCacheCreateInfo createInfo = new()
             {
                 SType = StructureType.PipelineCacheCreateInfo,
-                Flags = _createFlags,
+                // Use core synchronization; pipelineCreationCacheControl is not enabled on the device.
+                Flags = 0,
             };
 
             Result result;
@@ -224,11 +229,11 @@ namespace Ryujinx.Graphics.Vulkan
             return null;
         }
 
-        private unsafe void SaveCache(PipelineCache cache, string path, bool final)
+        private unsafe bool SaveCache(PipelineCache cache, string path, bool final)
         {
             if (string.IsNullOrEmpty(path))
             {
-                return;
+                return false;
             }
 
             nuint dataSize = 0;
@@ -239,7 +244,7 @@ namespace Ryujinx.Graphics.Vulkan
                 Logger.Warning?.PrintMsg(
                     LogClass.Gpu,
                     $"Unable to size Vulkan pipeline cache for persistence: {result}, {dataSize} bytes.");
-                return;
+                return false;
             }
 
             byte[] data = new byte[(int)dataSize];
@@ -249,15 +254,10 @@ namespace Ryujinx.Graphics.Vulkan
                 result = _api.GetPipelineCacheData(_device, cache, &dataSize, dataPointer);
             }
 
-            if (result != Result.Success)
+            if (result != Result.Success || dataSize == 0 || dataSize > (nuint)data.Length)
             {
                 Logger.Warning?.PrintMsg(LogClass.Gpu, $"Unable to read Vulkan pipeline cache for persistence: {result}.");
-                return;
-            }
-
-            if (dataSize != (nuint)data.Length)
-            {
-                Array.Resize(ref data, checked((int)dataSize));
+                return false;
             }
 
             try
@@ -265,10 +265,15 @@ namespace Ryujinx.Graphics.Vulkan
                 Directory.CreateDirectory(_cacheDirectory);
 
                 string temporaryPath = path + ".tmp";
-                File.WriteAllBytes(temporaryPath, data);
+
+                using (FileStream file = new(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    file.Write(data.AsSpan(0, checked((int)dataSize)));
+                }
+
                 File.Move(temporaryPath, path, overwrite: true);
 
-                string message = $"Vulkan pipeline cache {(final ? "saved" : "checkpointed")}: {FormatSize(data.LongLength)}.";
+                string message = $"Vulkan pipeline cache {(final ? "saved" : "checkpointed")}: {FormatSize((long)dataSize)}.";
 
                 if (final)
                 {
@@ -278,6 +283,8 @@ namespace Ryujinx.Graphics.Vulkan
                 {
                     Logger.Info?.PrintMsg(LogClass.Gpu, message);
                 }
+
+                return true;
             }
             catch (IOException exception)
             {
@@ -287,6 +294,8 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 Logger.Warning?.PrintMsg(LogClass.Gpu, $"Failed to persist Vulkan pipeline cache: {exception.Message}");
             }
+
+            return false;
         }
 
         private static string FormatSize(long size)
