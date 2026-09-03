@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Ryujinx.Common\Ryujinx.Common.csproj" />
+    <InternalsVisibleTo Include="Ryujinx.Tests.Memory" />
   </ItemGroup>
 
 </Project>

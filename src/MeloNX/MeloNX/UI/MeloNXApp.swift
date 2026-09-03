@@ -94,9 +94,12 @@ struct MeloNXApp: App {
                     
                     configureAudioSession()
                     
-                    let versionNumber = lastAppversion.withUnsafeBytes { $0.load(as: Float.self) }
+                    // A fresh install has no saved bytes; Data also has no Float alignment guarantee.
+                    let versionNumber: Float = lastAppversion.count == MemoryLayout<Float>.size
+                        ? lastAppversion.withUnsafeBytes { $0.loadUnaligned(as: Float.self) }
+                        : .zero
                     
-                    if versionNumber < Float(Bundle.main.versionNumber) ?? .zero {
+                    if !versionNumber.isFinite || versionNumber < Float(Bundle.main.versionNumber) ?? .zero {
                         lastAppversion = encodeFloatToData(Float(Bundle.main.versionNumber) ?? .zero)
                          hasSetupFinished = false
                     }

@@ -1,6 +1,7 @@
 > **Experimental iPhone fork:** configurable JIT cache, persistent memory diagnostics, and a manual iOS build workflow. GTA V compatibility on iPhone 16 Pro Max is still being investigated.
 >
 > [Инструкция для iPhone и облачной сборки](docs/GTAV-EXPERIMENT.ru.md) · [Подготовка зависимостей](docs/BUILD-PREPARATION.ru.md) · [Build an experimental IPA](../../actions/workflows/ios-experimental.yml)
+> [Аудит Eden: сохранение Vulkan-кэша, исправления и результаты проверок](docs/EDEN-AUDIT.ru.md)
 
 <body>
   <p align="center">

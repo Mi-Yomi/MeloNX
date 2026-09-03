@@ -1,6 +1,7 @@
 using Ryujinx.Common.Memory;
 using Ryujinx.Cpu;
 using Ryujinx.Graphics.Device;
+using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Image;
 using Ryujinx.Graphics.Gpu.Shader;
 using Ryujinx.Memory;
@@ -23,6 +24,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private readonly GpuContext _context;
         private readonly IVirtualMemoryManagerTracked _cpuMemory;
         private int _referenceCount;
+        private ulong _cpuMemorySize;
+        private bool _hasCpuMemorySize;
 
         /// <summary>
         /// In-memory shader cache.
@@ -86,6 +89,39 @@ namespace Ryujinx.Graphics.Gpu.Memory
         public DeviceMemoryManager CreateDeviceMemoryManager()
         {
             return new DeviceMemoryManager(_cpuMemory);
+        }
+
+        /// <summary>
+        /// Stores the host memory size and configures GPU cache budgets with the capabilities currently available.
+        /// </summary>
+        public void InitializeCacheMemoryBudgets(ulong cpuMemorySize)
+        {
+            _cpuMemorySize = cpuMemorySize;
+            _hasCpuMemorySize = true;
+
+            RefreshCacheMemoryBudgets();
+        }
+
+        /// <summary>
+        /// Recomputes cache budgets after renderer capabilities become available.
+        /// This updates limits only; normal cache maintenance performs any later eviction.
+        /// </summary>
+        public void RefreshCacheMemoryBudgets()
+        {
+            if (!_hasCpuMemorySize)
+            {
+                return;
+            }
+
+            bool isApplePlatform = OperatingSystem.IsIOS() || OperatingSystem.IsMacOS();
+            CacheMemoryBudget budget = CacheMemoryBudgetPolicy.Calculate(
+                _cpuMemorySize,
+                _context.Capabilities.MaximumGpuMemory,
+                _context.Capabilities.MemoryType,
+                isApplePlatform);
+
+            BufferCache.ConfigureMemoryBudget(budget.BufferCapacity, budget.IsAppleUnifiedMemory);
+            TextureCache.ConfigureMemoryBudget(budget.TextureCapacity, budget.IsAppleUnifiedMemory);
         }
 
         /// <summary>

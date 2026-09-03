@@ -1760,7 +1760,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
                     {
                         (_, varType) = IoMap.GetSpirvBuiltIn(ioVariable);
 
-                        if (IoMap.IsPerVertexBuiltIn(ioVariable))
+                        if (IoMap.IsPerVertexBuiltIn(ioVariable, context.Definitions.Stage, isOutput))
                         {
                             perVertexBuiltIn = ioVariable;
                             ioVariable = IoVariable.Position;

@@ -350,6 +350,7 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             foreach (IoDefinition ioDefinition in info.IoDefinitions)
             {
                 PixelImap iq = PixelImap.Unused;
+                bool isOutput = ioDefinition.StorageKind.IsOutput();
 
                 if (context.Definitions.Stage == ShaderStage.Fragment)
                 {
@@ -369,12 +370,11 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
                         }
                     }
                 }
-                else if (IoMap.IsPerVertexBuiltIn(ioDefinition.IoVariable))
+                else if (IoMap.IsPerVertexBuiltIn(ioDefinition.IoVariable, context.Definitions.Stage, isOutput))
                 {
                     continue;
                 }
 
-                bool isOutput = ioDefinition.StorageKind.IsOutput();
                 bool isPerPatch = ioDefinition.StorageKind.IsPerPatch();
 
                 DeclareInputOrOutput(context, ioDefinition, isOutput, isPerPatch, iq, firstLocation);

@@ -894,8 +894,15 @@ namespace Ryujinx.Library
             else
                 appleHV = options.UseHypervisor;
 
+            MemoryConfiguration memoryConfiguration = options.ExpandRAM
+                ? MemoryConfiguration.MemoryConfiguration8GiB
+                : MemoryConfiguration.MemoryConfiguration4GiB;
+
+            Logger.Info?.Print(LogClass.Application,
+                $"Guest memory configuration: {memoryConfiguration} (Expand RAM: {options.ExpandRAM}).");
+
             var configuration = new HleConfiguration(
-                MemoryConfiguration.MemoryConfiguration4GiB,
+                memoryConfiguration,
                 options.SystemLanguage,
                 options.SystemRegion,
                 options.DisableVSync ? Ryujinx.Common.Configuration.VSyncMode.Unbounded : options.VSyncMode,

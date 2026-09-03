@@ -23,6 +23,21 @@ namespace Ryujinx.Graphics.Gpu.Memory
         public MultiRange Range { get; }
 
         /// <summary>
+        /// Host memory allocated exclusively for this buffer. Sparse buffers alias physical buffer storage.
+        /// </summary>
+        public ulong CacheSize { get; }
+
+        /// <summary>
+        /// Indicates whether this buffer aliases physical buffer storage instead of owning a duplicate allocation.
+        /// </summary>
+        public bool IsSparse { get; }
+
+        /// <summary>
+        /// Node used to track this buffer in the cache's least-recently-used list.
+        /// </summary>
+        public LinkedListNode<MultiRangeBuffer> CacheNode { get; set; }
+
+        /// <summary>
         /// Ever increasing counter value indicating when the buffer was modified relative to other buffers.
         /// </summary>
         public int ModificationSequenceNumber { get; private set; }
@@ -71,6 +86,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private List<PhysicalDependency> _dependencies;
         private List<Buffer> _cacheDependencies;
         private BufferModifiedRangeList _modifiedRanges = null;
+        private int _lastUseSequence;
+        private bool _hasBeenUsed;
 
         /// <summary>
         /// Creates a new instance of the buffer.
@@ -81,6 +98,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             _context = context;
             Range = range;
+            CacheSize = range.GetSize();
+            IsSparse = false;
             Handle = context.Renderer.CreateBuffer((int)range.GetSize());
         }
 
@@ -94,6 +113,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             _context = context;
             Range = range;
+            CacheSize = 0;
+            IsSparse = true;
             Handle = context.Renderer.CreateBufferSparse(storages);
         }
 
@@ -107,6 +128,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <returns>The buffer sub-range</returns>
         public BufferRange GetRange(MultiRange range)
         {
+            MarkUsed(_context.SequenceNumber);
+
             int offset = Range.FindOffset(range);
 
             return new BufferRange(Handle, offset, (int)range.GetSize());
@@ -146,6 +169,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 buffer.IncrementCacheDependency();
             }
         }
+
+        /// <summary>
+        /// Physical buffers whose storage is pinned by this sparse alias.
+        /// </summary>
+        public IReadOnlyList<Buffer> CacheDependencies => _cacheDependencies is null ? Array.Empty<Buffer>() : _cacheDependencies;
 
         /// <summary>
         /// Tries to get the physical range corresponding to the given physical buffer.
@@ -190,13 +218,17 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="modifiedSequenceNumber">ModificationSequenceNumber</param>
         public void AddModifiedRegion(MultiRange range, int modifiedSequenceNumber)
         {
+            MarkUsed(_context.SequenceNumber);
             _modifiedRanges ??= new(_context, null, null);
 
             for (int i = 0; i < range.Count; i++)
             {
                 MemoryRange subRange = range.GetSubRange(i);
 
-                _modifiedRanges.SignalModified(subRange.Address, subRange.Size);
+                if (subRange.Address != MemoryManager.PteUnmapped)
+                {
+                    _modifiedRanges.SignalModified(subRange.Address, subRange.Size);
+                }
             }
 
             ModificationSequenceNumber = modifiedSequenceNumber;
@@ -222,9 +254,28 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             if (_modifiedRanges != null)
             {
+                MarkUsed(_context.SequenceNumber);
                 _modifiedRanges.GetRanges(address, size, rangeAction);
                 _modifiedRanges.Clear(address, size);
             }
+        }
+
+        /// <summary>
+        /// Prevents the buffer from being evicted during the GPU sequence that uses it.
+        /// </summary>
+        public void MarkUsed(int sequenceNumber)
+        {
+            _lastUseSequence = sequenceNumber;
+            _hasBeenUsed = true;
+        }
+
+        /// <summary>
+        /// Returns whether this virtual buffer can be discarded without losing GPU-written data.
+        /// </summary>
+        public bool CanEvict(int currentSequence)
+        {
+            return (!_hasBeenUsed || _lastUseSequence != currentSequence) &&
+                   _modifiedRanges is not { HasRanges: true };
         }
 
         /// <summary>
@@ -235,6 +286,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="size">Size of the data in bytes</param>
         public void GetData(Span<byte> output, int offset, int size)
         {
+            MarkUsed(_context.SequenceNumber);
             using PinnedSpan<byte> data = _context.Renderer.GetBufferData(Handle, offset, size);
             data.Get().CopyTo(output);
         }

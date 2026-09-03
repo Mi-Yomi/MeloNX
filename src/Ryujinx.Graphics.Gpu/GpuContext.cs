@@ -313,6 +313,11 @@ namespace Ryujinx.Graphics.Gpu
             _gpuThread = Thread.CurrentThread;
 
             Capabilities = Renderer.GetCapabilities();
+
+            foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
+            {
+                physicalMemory.RefreshCacheMemoryBudgets();
+            }
         }
 
         /// <summary>
@@ -342,6 +347,11 @@ namespace Ryujinx.Graphics.Gpu
         internal void AdvanceSequence()
         {
             SequenceNumber++;
+
+            foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
+            {
+                physicalMemory.BufferCache.TrimToCapacity();
+            }
         }
 
         /// <summary>

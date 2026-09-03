@@ -93,6 +93,9 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private int _cacheDependencyCount;
         private readonly ReaderWriterLockSlim _virtualDependenciesLock;
 
+        private int _lastUseSequence;
+        private bool _hasBeenUsed;
+
         private int _sequenceNumber;
 
         private readonly bool _useGranular;
@@ -526,9 +529,19 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <summary>
         /// Returns whether the host copy can be discarded and recreated from guest memory.
         /// </summary>
-        public bool CanEvict()
+        public bool CanEvict(int currentSequence)
         {
-            if (_syncActionRegistered || _cacheDependencyCount != 0 || _modifiedRanges is { HasRanges: true })
+            return _cacheDependencyCount == 0 && CanEvictAfterReleasingCacheDependencies(currentSequence);
+        }
+
+        /// <summary>
+        /// Returns whether releasing all sparse aliases would make this buffer evictable.
+        /// </summary>
+        public bool CanEvictAfterReleasingCacheDependencies(int currentSequence)
+        {
+            if ((_hasBeenUsed && _lastUseSequence == currentSequence) ||
+                _syncActionRegistered ||
+                _modifiedRanges is { HasRanges: true })
             {
                 return false;
             }
@@ -543,6 +556,30 @@ namespace Ryujinx.Graphics.Gpu.Memory
             {
                 _virtualDependenciesLock.ExitReadLock();
             }
+        }
+
+        /// <summary>
+        /// Number of sparse aliases that currently reference this buffer's storage.
+        /// </summary>
+        public int CacheDependencyCount => _cacheDependencyCount;
+
+        /// <summary>
+        /// Prevents the buffer from being evicted during the GPU sequence that uses it.
+        /// </summary>
+        /// <param name="sequenceNumber">Current GPU sequence number</param>
+        public void MarkUsed(int sequenceNumber)
+        {
+            _lastUseSequence = sequenceNumber;
+            _hasBeenUsed = true;
+        }
+
+        /// <summary>
+        /// Invalidates fast cache entries that refer to this buffer after it stops being a cache resident.
+        /// The host storage may remain alive temporarily while an in-flight migration owns a reference.
+        /// </summary>
+        public void SignalCacheRemoved()
+        {
+            UnmappedSequence++;
         }
 
         /// <summary>
@@ -962,6 +999,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             foreach (MultiRangeBuffer virtualBuffer in _virtualDependencies.OrderBy(x => x.ModificationSequenceNumber))
             {
+                virtualBuffer.MarkUsed(_context.SequenceNumber);
                 virtualBuffer.ConsumeModifiedRegion(this, (mAddress, mSize) =>
                 {
                     // Get offset inside both this and the virtual buffer.
@@ -1001,6 +1039,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
                     foreach (MultiRangeBuffer virtualBuffer in _virtualDependencies.OrderBy(x => x.ModificationSequenceNumber))
                     {
+                        virtualBuffer.MarkUsed(_context.SequenceNumber);
                         virtualBuffer.ConsumeModifiedRegion(address, size, (mAddress, mSize) =>
                         {
                             // Get offset inside both this and the virtual buffer.
@@ -1049,6 +1088,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="size">Size of the range in bytes</param>
         public void CopyToDependantVirtualBuffer(MultiRangeBuffer virtualBuffer, ulong address, ulong size)
         {
+            virtualBuffer.MarkUsed(_context.SequenceNumber);
+
             // Broadcast data to all ranges of the virtual buffer that are contained inside this buffer.
 
             ulong lastOffset = 0;

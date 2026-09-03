@@ -83,8 +83,15 @@ namespace Ryujinx.Graphics.Shader.CodeGen.Spirv
             return false;
         }
 
-        public static bool IsPerVertexBuiltIn(IoVariable ioVariable)
+        public static bool IsPerVertexBuiltIn(IoVariable ioVariable, ShaderStage stage, bool isOutput)
         {
+            // The gl_PerVertex input block does not exist on the vertex stage, and
+            // neither input nor output blocks exist outside the vertex pipeline.
+            if (!stage.IsVtg || (!isOutput && stage == ShaderStage.Vertex))
+            {
+                return false;
+            }
+
             switch (ioVariable)
             {
                 case IoVariable.Position:

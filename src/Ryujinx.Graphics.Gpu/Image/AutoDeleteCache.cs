@@ -1,6 +1,4 @@
 using Ryujinx.Common.Logging;
-using Ryujinx.Graphics.GAL;
-using System;
 using System.Collections;
 using System.Collections.Generic;
 
@@ -49,19 +47,10 @@ namespace Ryujinx.Graphics.Gpu.Image
     {
         private const int MaxCapacity = 2048;
         private const ulong MiB = 1024 * 1024;
-        private const ulong GiB = 1024 * 1024 * 1024;
-        private ulong MaxTextureSizeCapacity = 4UL * GiB;
-        private const ulong MinTextureSizeCapacity = 512 * 1024 * 1024;
-        private const ulong DefaultTextureSizeCapacity = 1 * GiB;
-        private const ulong MinUnifiedTextureSizeCapacity = 256 * MiB;
-        private const ulong MaxUnifiedTextureSizeCapacity = 768 * MiB;
-        private const ulong TextureSizeCapacity6GiB = 4 * GiB;
-        private const ulong TextureSizeCapacity8GiB = 6 * GiB;
-        private const ulong TextureSizeCapacity12GiB = 12 * GiB;
-
-        private const float MemoryScaleFactor = 0.50f;
-        private const int UnifiedMemoryDivisor = 16;
+        private const ulong DefaultTextureSizeCapacity = 1UL * 1024 * MiB;
         private ulong _maxCacheMemoryUsage = DefaultTextureSizeCapacity;
+        private bool _memoryBudgetConfigured;
+        private bool _isAppleUnifiedMemory;
 
         private readonly LinkedList<Texture> _textures;
         private ulong _totalSize;
@@ -72,56 +61,25 @@ namespace Ryujinx.Graphics.Gpu.Image
         private readonly Dictionary<TextureDescriptor, ShortTextureCacheEntry> _shortCacheLookup;
 
         /// <summary>
-        /// Initializes the cache, setting the maximum texture capacity for the specified GPU context.
+        /// Configures the cache memory budget without modifying resident entries.
         /// </summary>
-        /// <remarks>
-        /// If the backend GPU has 0 memory capacity, the cache size defaults to `DefaultTextureSizeCapacity`.
-        /// 
-        /// Reads the current Device total CPU Memory, to determine the maximum amount of Vram available. Capped to 50% of Current GPU Memory.
-        /// </remarks>
-        /// <param name="context">The GPU context that the cache belongs to</param>
-        /// <param name="cpuMemorySize">The amount of physical CPU Memory Avaiable on the device.</param>
-        public void Initialize(GpuContext context, ulong cpuMemorySize)
+        /// <param name="capacity">Maximum number of resident texture bytes</param>
+        /// <param name="isAppleUnifiedMemory">Whether the budget targets Apple unified memory</param>
+        public void ConfigureMemoryBudget(ulong capacity, bool isAppleUnifiedMemory)
         {
-            bool isAppleUnifiedMemory = (OperatingSystem.IsIOS() || OperatingSystem.IsMacOS()) &&
-                                        context.Capabilities.MemoryType == SystemMemoryType.UnifiedMemory;
-
-            if (isAppleUnifiedMemory)
+            if (_memoryBudgetConfigured &&
+                _maxCacheMemoryUsage == capacity &&
+                _isAppleUnifiedMemory == isAppleUnifiedMemory)
             {
-                _maxCacheMemoryUsage = Math.Clamp(
-                    cpuMemorySize / UnifiedMemoryDivisor,
-                    MinUnifiedTextureSizeCapacity,
-                    MaxUnifiedTextureSizeCapacity);
-
-                Logger.Info?.Print(LogClass.Gpu, $"AutoDelete cache memory limit: {_maxCacheMemoryUsage / MiB} MiB (me when apple unified memory)");
                 return;
             }
 
-            ulong cpuMemorySizeGiB = cpuMemorySize / GiB;
+            _maxCacheMemoryUsage = capacity;
+            _memoryBudgetConfigured = true;
+            _isAppleUnifiedMemory = isAppleUnifiedMemory;
 
-            if (cpuMemorySizeGiB < 6 || context.Capabilities.MaximumGpuMemory == 0)
-            {
-                _maxCacheMemoryUsage = DefaultTextureSizeCapacity;
-                return;
-            }
-            else if (cpuMemorySizeGiB == 6)
-            {
-                MaxTextureSizeCapacity = TextureSizeCapacity6GiB;
-            }
-            else if (cpuMemorySizeGiB == 8)
-            {
-                MaxTextureSizeCapacity = TextureSizeCapacity8GiB;
-            }
-            else
-            {
-                MaxTextureSizeCapacity = TextureSizeCapacity12GiB;
-            }
-
-            ulong cacheMemory = (ulong)(context.Capabilities.MaximumGpuMemory * MemoryScaleFactor);
-
-            _maxCacheMemoryUsage = Math.Clamp(cacheMemory, MinTextureSizeCapacity, MaxTextureSizeCapacity);
-
-            Logger.Info?.Print(LogClass.Gpu, $"AutoDelete cache memory limit: {_maxCacheMemoryUsage / MiB} MiB");
+            string memoryKind = isAppleUnifiedMemory ? " (Apple unified memory)" : string.Empty;
+            Logger.Info?.Print(LogClass.Gpu, $"AutoDelete cache memory limit: {_maxCacheMemoryUsage / MiB} MiB{memoryKind}");
         }
 
         /// <summary>
@@ -214,12 +172,14 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
-        /// Removes old textures until both the entry-count and memory limits are satisfied.
+        /// Removes old textures until the limits are satisfied, retaining the most recently used texture.
         /// </summary>
         private void EnforceCapacity()
         {
+            // Add/Lift may hold the only reference to a texture still needed by the caller.
+            // A single oversized texture must remain alive until it can be replaced or explicitly removed.
             while (_textures.Count > MaxCapacity ||
-                   (_totalSize > _maxCacheMemoryUsage && _textures.Count > 0))
+                   (_totalSize > _maxCacheMemoryUsage && _textures.Count > 1))
             {
                 RemoveLeastUsedTexture();
             }
@@ -323,7 +283,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="texture">Texture to add to the short cache</param>
         public void AddShortCache(Texture texture)
         {
-            if (texture.ShortCacheEntry != null)
+            if (texture.ShortCacheEntry == null)
             {
                 ShortTextureCacheEntry entry = new(texture);
 

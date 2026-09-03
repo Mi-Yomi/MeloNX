@@ -20,9 +20,12 @@ namespace Ryujinx.Memory
     [SupportedOSPlatform("ios")]
     public class DualMappedJitAllocator : IDisposable
     {
+        private readonly Action<nint, ulong> _unmap;
+        private nint? _rwPtr;
+        private nint? _rxPtr;
 
-        public nint RwPtr { get; private set; }
-        public nint RxPtr { get; private set; }
+        public nint RwPtr => _rwPtr.GetValueOrDefault();
+        public nint RxPtr => _rxPtr.GetValueOrDefault();
         public ulong Size { get; private set; }
 
         [DllImport("BreakpointJIT.framework/BreakpointJIT", EntryPoint = "BreakGetJITMapping")]
@@ -48,10 +51,24 @@ namespace Ryujinx.Memory
             Logger.Info?.Print(LogClass.Cpu,
                 $"Allocating dual-mapped JIT memory of size {size} bytes, called by {callingMethod?.DeclaringType?.FullName}.{callingMethod?.Name} with {hasTXM}, {dualMappingEnabled}");
             Size = size;
-            AllocateDualMapping();
+            _unmap = Unmap;
+            AllocateDualMapping(AllocateRxMapping, RemapRxMapping, ProtectRwMapping);
         }
 
-        nint? BreakGetJITMapping(nuint bytes)
+        // Inject only native operations; ownership and failure cleanup use the same path as production.
+        internal DualMappedJitAllocator(
+            ulong size,
+            Func<ulong, nint?> map,
+            Func<nint, ulong, nint> remap,
+            Action<nint, ulong> protect,
+            Action<nint, ulong> unmap)
+        {
+            Size = size;
+            _unmap = unmap;
+            AllocateDualMapping(map, remap, protect);
+        }
+
+        static nint? BreakGetJITMapping(nuint bytes)
         {
             unsafe
             {
@@ -72,48 +89,90 @@ namespace Ryujinx.Memory
             }
         }
 
-        private void AllocateDualMapping()
+        private static nint? AllocateRxMapping(ulong size)
         {
-            nint? _mmapPtr = null;
-
             if (hasTXM)
             {
-                _mmapPtr = BreakGetJITMapping((nuint)Size);
+                return BreakGetJITMapping((nuint)size);
             }
-            else
+
+            return Mmap(0, size, MmapProts.PROT_READ | MmapProts.PROT_EXEC, MmapFlags.MAP_ANONYMOUS | MmapFlags.MAP_PRIVATE, -1, 0);
+        }
+
+        private void AllocateDualMapping(
+            Func<ulong, nint?> map,
+            Func<nint, ulong, nint> remap,
+            Action<nint, ulong> protect)
+        {
+            nint? rxPtr = map(Size);
+            if (rxPtr == null || rxPtr == MAP_FAILED)
             {
-                _mmapPtr = Mmap(0, Size, MmapProts.PROT_READ | MmapProts.PROT_EXEC, MmapFlags.MAP_ANONYMOUS | MmapFlags.MAP_PRIVATE, -1, 0);
+                throw new Exception("Failed to mmap memory");
             }
 
-             if (_mmapPtr == null || _mmapPtr == MAP_FAILED)
-                throw new Exception("Failed to mmap memory");
+            // Record ownership immediately, so a later native failure cannot abandon a mapping.
+            _rxPtr = rxPtr;
+            try
+            {
+                _rwPtr = remap(rxPtr.Value, Size);
+                protect(_rwPtr.Value, Size);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
 
-            var bufRX = (ulong)_mmapPtr;
+        private static nint RemapRxMapping(nint rxPtr, ulong size)
+        {
             ulong bufRW = 0;
             uint curProt = 0, maxProt = 0;
 
-            int remapResult = vm_remap(mach_task_self(), ref bufRW, Size, 0, VM_FLAGS_ANYWHERE,
-                                      mach_task_self(), bufRX, 0, ref curProt, ref maxProt, VM_INHERIT_NONE);
+            int remapResult = vm_remap(mach_task_self(), ref bufRW, size, 0, VM_FLAGS_ANYWHERE,
+                                      mach_task_self(), (ulong)rxPtr, 0, ref curProt, ref maxProt, VM_INHERIT_NONE);
             if (remapResult != KERN_SUCCESS)
+            {
                 throw new Exception($"Failed to remap RX region: {remapResult}");
+            }
 
-            int protectRWResult = vm_protect(mach_task_self(), bufRW, Size, 0, VM_PROT_READ | VM_PROT_WRITE);
+            return (nint)bufRW;
+        }
+
+        private static void ProtectRwMapping(nint rwPtr, ulong size)
+        {
+            int protectRWResult = vm_protect(mach_task_self(), (ulong)rwPtr, size, 0, VM_PROT_READ | VM_PROT_WRITE);
             if (protectRWResult != KERN_SUCCESS)
+            {
                 throw new Exception($"Failed to set RW protection: {protectRWResult}");
+            }
+        }
 
-            RwPtr = (nint)bufRW;
-            RxPtr = (nint)_mmapPtr;
+        private static void Unmap(nint pointer, ulong size)
+        {
+            munmap(pointer, size);
         }
 
         public void Dispose()
         {
-            if (RxPtr != IntPtr.Zero)
-            {
-                munmap(RxPtr, Size);
-                RxPtr = IntPtr.Zero;
+            nint? rwPtr = _rwPtr;
+            nint? rxPtr = _rxPtr;
+            _rwPtr = null;
+            _rxPtr = null;
 
-                munmap(RwPtr, Size);
-                RwPtr = IntPtr.Zero;
+            try
+            {
+                if (rwPtr.HasValue)
+                {
+                    _unmap(rwPtr.Value, Size);
+                }
+            }
+            finally
+            {
+                if (rxPtr.HasValue)
+                {
+                    _unmap(rxPtr.Value, Size);
+                }
             }
         }
 

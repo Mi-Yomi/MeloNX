@@ -13,8 +13,6 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
 {
     class ParallelDiskCacheLoader
     {
-        private const int ThreadCount = 8;
-
         private readonly GpuContext _context;
         private readonly ShaderCacheHashTable _graphicsCache;
         private readonly ComputeShaderCacheHashTable _computeCache;
@@ -190,6 +188,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         private readonly BlockingCollection<AsyncProgramTranslation> _asyncTranslationQueue;
         private readonly SortedList<int, (CachedShaderProgram, byte[])> _programList;
 
+        private readonly int _translationThreadCount;
         private readonly int _backendParallelCompileThreads;
         private int _compiledCount;
         private int _totalCount;
@@ -216,11 +215,16 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
             _hostStorage = hostStorage;
             _stateChangeCallback = stateChangeCallback;
             _cancellationToken = cancellationToken;
+            _translationThreadCount = DiskCacheLoadPolicy.GetTranslationThreadCount(
+                OperatingSystem.IsIOS(),
+                Environment.ProcessorCount);
             _validationQueue = new Queue<ProgramEntry>();
             _compilationQueue = new ConcurrentQueue<ProgramCompilation>();
-            _asyncTranslationQueue = new BlockingCollection<AsyncProgramTranslation>(ThreadCount);
+            _asyncTranslationQueue = new BlockingCollection<AsyncProgramTranslation>(_translationThreadCount);
             _programList = new SortedList<int, (CachedShaderProgram, byte[])>();
-            _backendParallelCompileThreads = Math.Min(Environment.ProcessorCount, 8); // Must be kept in sync with the backend code.
+            _backendParallelCompileThreads = DiskCacheLoadPolicy.GetBackendParallelCompileThreadCount(
+                OperatingSystem.IsIOS(),
+                Environment.ProcessorCount); // On non-iOS platforms, this must be kept in sync with the backend code.
         }
 
         /// <summary>
@@ -228,9 +232,9 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
         /// </summary>
         public void LoadShaders()
         {
-            Thread[] workThreads = new Thread[ThreadCount];
+            Thread[] workThreads = new Thread[_translationThreadCount];
 
-            for (int index = 0; index < ThreadCount; index++)
+            for (int index = 0; index < _translationThreadCount; index++)
             {
                 workThreads[index] = new Thread(ProcessAsyncQueue)
                 {
@@ -245,9 +249,10 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
 
             _stateChangeCallback(ShaderCacheState.Start, 0, programCount);
 
-            Logger.Info?.Print(LogClass.Gpu, $"Loading {programCount} shaders from the cache...");
+            Logger.Info?.Print(LogClass.Gpu,
+                $"Loading {programCount} shaders from the cache with {_translationThreadCount} translation workers...");
 
-            for (int index = 0; index < ThreadCount; index++)
+            for (int index = 0; index < _translationThreadCount; index++)
             {
                 workThreads[index].Start(_cancellationToken);
             }
@@ -279,7 +284,7 @@ namespace Ryujinx.Graphics.Gpu.Shader.DiskCache
 
             _asyncTranslationQueue.CompleteAdding();
 
-            for (int index = 0; index < ThreadCount; index++)
+            for (int index = 0; index < _translationThreadCount; index++)
             {
                 workThreads[index].Join();
             }

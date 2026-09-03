@@ -63,12 +63,12 @@ namespace Ryujinx.Graphics.Gpu
 
             if (oldMemoryManager != null)
             {
-                oldMemoryManager.Physical.BufferCache.NotifyBuffersModified -= BufferManager.Rebind;
+                oldMemoryManager.Physical.BufferCache.NotifyBuffersModified -= Rebind;
                 oldMemoryManager.Physical.DecrementReferenceCount();
                 oldMemoryManager.MemoryUnmapped -= MemoryUnmappedHandler;
             }
 
-            memoryManager.Physical.BufferCache.NotifyBuffersModified += BufferManager.Rebind;
+            memoryManager.Physical.BufferCache.NotifyBuffersModified += Rebind;
             memoryManager.MemoryUnmapped += MemoryUnmappedHandler;
 
             // Since the memory manager changed, make sure we will get pools from addresses of the new memory manager.
@@ -87,6 +87,15 @@ namespace Ryujinx.Graphics.Gpu
 
             MemoryManager memoryManager = Volatile.Read(ref _memoryManager);
             memoryManager?.Physical.BufferCache.QueuePrune();
+        }
+
+        /// <summary>
+        /// Rebinds resources whose host buffer storage may have changed.
+        /// </summary>
+        private void Rebind()
+        {
+            BufferManager.Rebind();
+            TextureManager.Rebind();
         }
 
         /// <summary>
@@ -141,7 +150,7 @@ namespace Ryujinx.Graphics.Gpu
             MemoryManager oldMemoryManager = Interlocked.Exchange(ref _memoryManager, null);
             if (oldMemoryManager != null)
             {
-                oldMemoryManager.Physical.BufferCache.NotifyBuffersModified -= BufferManager.Rebind;
+                oldMemoryManager.Physical.BufferCache.NotifyBuffersModified -= Rebind;
                 oldMemoryManager.Physical.DecrementReferenceCount();
                 oldMemoryManager.MemoryUnmapped -= MemoryUnmappedHandler;
             }

@@ -168,13 +168,15 @@ namespace Ryujinx.HLE.Loaders.Processes
 
             string programName = string.Empty;
             ulong programId = 0000000000000000;
+            bool diskCacheEnabled = false;
+            string diskCacheSelector = null;
 
             // Load executable.
             IExecutable executable;
 
             if (Path.GetExtension(path).Equals(".nro", StringComparison.OrdinalIgnoreCase))
             {
-                FileStream input = new(path, FileMode.Open);
+                FileStream input = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
                 NroExecutable nro = new(input.AsStorage());
 
                 executable = nro;
@@ -228,6 +230,16 @@ namespace Ryujinx.HLE.Loaders.Processes
                     }
                 }
 
+                string titleId = HomebrewCacheIdentity.GetTitleId(programId);
+                GraphicsConfig.TitleId = titleId;
+                diskCacheEnabled = titleId != null &&
+                    _device.System.EnablePtc &&
+                    HomebrewCacheIdentity.TryGetCacheSelector(nro.Header.BuildId, out diskCacheSelector);
+
+                bool shaderDiskCacheEnabled = GraphicsConfig.EnableShaderCache && titleId != null;
+                Logger.Info?.Print(LogClass.Loader,
+                    $"NRO cache identity: {titleId ?? "unavailable"}; shader disk cache: {shaderDiskCacheEnabled}; PTC requested: {diskCacheEnabled}.");
+
                 // TODO: Add icon maybe ?
             }
             else
@@ -235,18 +247,17 @@ namespace Ryujinx.HLE.Loaders.Processes
                 programName = Path.GetFileNameWithoutExtension(path);
 
                 executable = new NsoExecutable(new LocalStorage(path, FileAccess.Read), programName);
+                GraphicsConfig.TitleId = null;
             }
 
-            // Explicitly null TitleId to disable the shader cache.
-            GraphicsConfig.TitleId = null;
             _device.Gpu.HostInitalized.Set();
 
             ProcessResult processResult = ProcessLoaderHelper.LoadNsos(_device,
                                                                        _device.System.KernelContext,
                                                                        dummyExeFs.GetNpdm(),
                                                                        nacpData,
-                                                                       diskCacheEnabled: false,
-                                                                       diskCacheSelector: null,
+                                                                       diskCacheEnabled,
+                                                                       diskCacheSelector,
                                                                        allowCodeMemoryForJit: true,
                                                                        programName,
                                                                        programId,
