@@ -68,6 +68,10 @@ struct EmulationView: View {
     private var air = Air.shared
     
     @State var isConnected = false
+
+    init(game: GameInfo) {
+        self.game = game
+    }
     
     @ViewBuilder
     func emulationView(_ airplay: Bool = false) -> some View {
