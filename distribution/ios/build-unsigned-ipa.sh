@@ -92,8 +92,8 @@ EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.
 case "$EXECUTABLE" in
   ''|*/*|.|..) echo 'Invalid CFBundleExecutable in built app.' >&2; exit 1 ;;
 esac
-xcrun lipo -verify_arch arm64 "$APP/$EXECUTABLE"
-xcrun lipo -verify_arch arm64 "$APP/Frameworks/Ryujinx.Library.dylib"
+xcrun lipo "$APP/$EXECUTABLE" -verify_arch arm64
+xcrun lipo "$APP/Frameworks/Ryujinx.Library.dylib" -verify_arch arm64
 
 # Ad-hoc sign the main Mach-O only to preserve the requested memory entitlement
 # for the sideload tool. This does not create a device provisioning profile.
