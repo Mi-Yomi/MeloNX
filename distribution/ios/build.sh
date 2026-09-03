@@ -41,7 +41,7 @@ fi
 
 PUBLISH_ARGUMENTS=(publish -c Release -r ios-arm64 -p:ExtraDefineConstants=DISABLE_UPDATER src/Ryujinx.Library --self-contained true)
 if [ -n "${DEVELOPER_DIR:-}" ]; then
-  PUBLISH_ARGUMENTS+=("-p:XCodePath=$DEVELOPER_DIR")
+  PUBLISH_ARGUMENTS+=("-p:XCodePath=${DEVELOPER_DIR%/}/")
 fi
 if [ -n "${MELO_NX_NATIVE_BINLOG:-}" ]; then
   PUBLISH_ARGUMENTS+=("-bl:$MELO_NX_NATIVE_BINLOG")
