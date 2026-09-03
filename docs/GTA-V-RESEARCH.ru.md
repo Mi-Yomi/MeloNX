@@ -31,6 +31,50 @@
 Инженерная гипотеза: ограничение исполняемого JIT-кэша может мешать отдельным крупным играм.
 Для GTA V на iPhone 16 Pro Max её ещё нужно подтвердить логом; одного вылета или видео с iPad недостаточно.
 
+## Что показали полные видео
+
+- [Mali / Dimensity 8350](https://www.youtube.com/watch?v=-NJke9Ye5Io): Eden nightly без SHA,
+  8 GB LPDDR5X; импорт `atmosphere/contents` и save/preset; frame generation; Low; изменённые
+  clocks/ticks; guest 4/6 GB; не выше 1x; Immediate VSync; Aggressive VRAM; disk cache;
+  buffer history; 2–4 workers. Автор сообщает 20–30 FPS на Low и 10–11 на High. Начальные
+  «около 60 FPS» относятся к предыдущему Snapdragon-ролику.
+- [Snapdragon 8 Elite](https://www.youtube.com/watch?v=2PByj8X5p7I): 16 GB host RAM;
+  guest 4/6 GB; 0,7x/720p или ниже; два workers; custom driver; frame generation 2x.
+  Внутренний оверлей Eden около 4:45 показывает примерно 27,5 FPS при внешних 57, а High
+  заканчивается вылетом около 6:32. Guest 4 GB и физические 4 GB здесь не одно и то же.
+- [Eden 0.2.1 black-screen guide](https://www.youtube.com/watch?v=m8MeodqWAwU): 0,25x;
+  исправление состоит в выдаче доступа корню порта с `romfs` и запуске через per-game Start.
+  Частота в показанном отрезке меняется примерно от 30 до 17 FPS. Это проверяемый content-path
+  шаг, а не алгоритм экономии RAM.
+- [Короткий open-world тест](https://www.youtube.com/watch?v=1pWNUauEGoM): оверлей в поездке
+  меняется примерно от 30 до 22 FPS; модель/память/экран настроек не показаны. Заголовок 1080p
+  и «full speed» нельзя превратить в воспроизводимый профиль.
+
+Переносимые настройки: guest 4 GB, Low, handheld, низкое разрешение, постоянный shader cache,
+малое число workers и правильная раскладка внешних данных. Frame generation, overclock,
+Android custom driver и Aggressive VRAM нельзя напрямую перенести в MoltenVK/iOS; большой
+JIT-кэш следует включать только при подтверждённом исчерпании.
+
+## Проверенные публичные форки
+
+[MeloVertex](https://github.com/VertexSelection/MeloVertex) действительно содержит изменение
+texture cache. На устройствах с доступной памятью до 8 GiB оно выбирает 30% доступной памяти,
+но оставляет минимум 512 MiB и начинает принудительную очистку после 32 записей. В нашей ветке
+лимит Apple unified texture cache для гостевых 4 GiB равен 256 MiB, используются оценочные
+host-размеры и очистка до бюджета без порога в 32 записи. Поэтому копирование этого патча
+увеличило бы расход памяти на iPhone. Его JIT-изменения относятся к более старому дереву,
+StikDebug и entitlements; воспроизводимого GTA-специфичного исправления там не найдено.
+
+[MeloNX-DRAM-Fallback](https://github.com/KavrixIDK/MeloNX-DRAM-Fallback) предназначен для
+устройств с примерно 3,5 GiB физической памяти и ниже. Он подменяет гостевую конфигурацию
+на 2 GiB и ограничивает отдельные пути 36-битным адресным пространством. Это отличается от
+обычной 4 GiB модели Switch и уже сопровождалось сбоем при guest shared memory на высоком
+адресе. Для iPhone 16 Pro Max и GTA V такой режим ухудшает совместимость, поэтому не перенесён.
+
+Публичный форк из поста My_Work_Computer_SFW по состоянию на дату проверки не найден.
+Совпадение слова «fork» или размера JIT-кэша не позволяет приписать ему изменения MeloVertex
+или DRAM-Fallback.
+
 ## Связь с текущим кодом
 
 | Участок | Значение для проверки |
@@ -41,6 +85,9 @@
 | [DualMappedJitCacheSupport.cs](../src/Ryujinx.Cpu/LightningJit/Cache/DualMappedJitCacheSupport.cs) | Разрешает `MELONX_JIT_CACHE_MIB=512/768/1024`; без override сохраняет 512 MiB с TXM и 1024 MiB без TXM. Считает выделения и исчерпание. |
 | [JitCacheSettings.swift](../src/MeloNX/MeloNX/Common/Diagnostics/JitCacheSettings.swift) | Передаёт сохранённый выбор до инициализации runtime; изменение требует перезапуска процесса. |
 | [MemoryDiagnostics.swift](../src/MeloNX/MeloNX/Common/Diagnostics/MemoryDiagnostics.swift) | Измеряет память процесса с начала загрузки игры, сохраняет сессию и экспортирует её вместе с доступным логом эмуляции. |
+| [BufferCache.cs](../src/Ryujinx.Graphics.Gpu/Memory/BufferCache.cs) | Ограничивает host GPU buffers для Apple unified memory; новая политика откладывает безопасное вытеснение до границы GPU sequence и восстанавливает физический buffer после LRU eviction. |
+| [ParallelDiskCacheLoader.cs](../src/Ryujinx.Graphics.Gpu/Shader/DiskCache/ParallelDiskCacheLoader.cs) | На iOS загружает shader cache максимум двумя потоками и держит не более двух ожидающих backend-компиляции host-программ. |
+| [ProcessLoader.cs](../src/Ryujinx.HLE/Loaders/Processes/ProcessLoader.cs) | Разрешает постоянный GPU shader cache для NRO при достоверном NACP program ID; PTC дополнительно требует NRO build ID и действует только на fallback-пути обычного JIT, поскольку LightningJit на iPhone пока возвращает заглушку. |
 
 Гостевые 4 GiB, исполняемый JIT-кэш и память процесса iOS — разные величины.
 Текущая настройка JIT и Get More RAM не меняют выбранные гостевые 4 GiB/3285 MiB.

@@ -70,12 +70,13 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
 
         /// <summary>
-        /// Initializes the cache, setting the maximum texture capacity for the specified GPU context.
+        /// Configures the cache memory budget without modifying resident entries.
         /// </summary>
-        /// <param name="cpuMemorySize">The amount of physical CPU Memory Avaiable on the device.</param>
-        public void Initialize(ulong cpuMemorySize)
+        /// <param name="capacity">Maximum number of resident texture bytes</param>
+        /// <param name="isAppleUnifiedMemory">Whether the budget targets Apple unified memory</param>
+        internal void ConfigureMemoryBudget(ulong capacity, bool isAppleUnifiedMemory)
         {
-            _cache.Initialize(_context, cpuMemorySize);
+            _cache.ConfigureMemoryBudget(capacity, isAppleUnifiedMemory);
         }
 
         /// <summary>

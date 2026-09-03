@@ -32,11 +32,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
         private const ulong MaxDynamicGrowthSize = 0x100000;
         private const ulong MiB = 1024 * 1024;
-        private const ulong GiB = 1024 * MiB;
-        private const ulong DefaultMaxCachedBufferBytes = 2 * GiB;
-        private const ulong MinUnifiedBufferBytes = 256 * MiB;
-        private const ulong MaxUnifiedBufferBytes = 768 * MiB;
-        private const int UnifiedMemoryDivisor = 16;
+        private const ulong DefaultMaxCachedBufferBytes = 2UL * 1024 * MiB;
 
         private readonly GpuContext _context;
         private readonly PhysicalMemory _physicalMemory;
@@ -47,11 +43,10 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// </remarks>
         private readonly NonOverlappingRangeList<Buffer> _buffers;
         private readonly MultiRangeList<MultiRangeBuffer> _multiRangeBuffers;
-        private readonly LinkedList<Buffer> _lruBuffers;
-
-        private ulong _maxCachedBufferBytes = DefaultMaxCachedBufferBytes;
-        private ulong _cachedBufferBytes;
-        private bool _initialized;
+        private readonly CacheEvictionPolicy<Buffer> _evictionPolicy;
+        private readonly CacheEvictionPolicy<MultiRangeBuffer> _multiRangeEvictionPolicy;
+        private bool _memoryBudgetConfigured;
+        private bool _isAppleUnifiedMemory;
 
         private readonly Dictionary<ulong, BufferCacheEntry> _dirtyCache;
         private readonly Dictionary<ulong, BufferCacheEntry> _modifiedCache;
@@ -72,7 +67,16 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
             _buffers = [];
             _multiRangeBuffers = [];
-            _lruBuffers = [];
+            _evictionPolicy = new(
+                DefaultMaxCachedBufferBytes,
+                static buffer => buffer.Size,
+                static buffer => buffer.CacheNode,
+                static (buffer, node) => buffer.CacheNode = node);
+            _multiRangeEvictionPolicy = new(
+                DefaultMaxCachedBufferBytes,
+                static buffer => buffer.CacheSize,
+                static buffer => buffer.CacheNode,
+                static (buffer, node) => buffer.CacheNode = node);
 
             _dirtyCache = new Dictionary<ulong, BufferCacheEntry>();
 
@@ -81,49 +85,43 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
-        /// Initializes the buffer cache memory budget.
+        /// Configures the buffer cache memory budget without modifying resident entries.
         /// </summary>
-        /// <param name="cpuMemorySize">Configured CPU memory size, used as a conservative unified-memory budget proxy.</param>
-        public void Initialize(ulong cpuMemorySize)
+        /// <param name="capacity">Maximum number of resident buffer bytes</param>
+        /// <param name="isAppleUnifiedMemory">Whether the budget targets Apple unified memory</param>
+        internal void ConfigureMemoryBudget(ulong capacity, bool isAppleUnifiedMemory)
         {
-            if (_initialized)
+            if (_memoryBudgetConfigured &&
+                _evictionPolicy.Capacity == capacity &&
+                _isAppleUnifiedMemory == isAppleUnifiedMemory)
             {
                 return;
             }
 
-            bool isAppleUnifiedMemory = (OperatingSystem.IsIOS() || OperatingSystem.IsMacOS()) &&
-                                        _context.Capabilities.MemoryType == SystemMemoryType.UnifiedMemory;
-
-            if (isAppleUnifiedMemory)
-            {
-                _maxCachedBufferBytes = Math.Clamp(
-                    cpuMemorySize / UnifiedMemoryDivisor,
-                    MinUnifiedBufferBytes,
-                    MaxUnifiedBufferBytes);
-            }
-
-            _initialized = true;
+            _evictionPolicy.Capacity = capacity;
+            _memoryBudgetConfigured = true;
+            _isAppleUnifiedMemory = isAppleUnifiedMemory;
 
             string memoryKind = isAppleUnifiedMemory ? " (Apple unified memory)" : string.Empty;
-            Logger.Info?.Print(LogClass.Gpu, $"Buffer cache memory limit: {_maxCachedBufferBytes / MiB} MiB{memoryKind}");
+            Logger.Info?.Print(LogClass.Gpu, $"Buffer cache memory limit: {_evictionPolicy.Capacity / MiB} MiB{memoryKind}");
         }
 
         private void AddBuffer(Buffer buffer)
         {
             _buffers.Add(buffer);
-            _cachedBufferBytes += buffer.Size;
-            buffer.CacheNode = _lruBuffers.AddLast(buffer);
+            buffer.MarkUsed(_context.SequenceNumber);
+            _evictionPolicy.Add(buffer);
 
-            EnforceCapacity(buffer);
+            TrimToCapacity();
         }
 
         private void RemoveBufferTracking(Buffer buffer)
         {
             if (buffer.CacheNode != null)
             {
-                _lruBuffers.Remove(buffer.CacheNode);
-                buffer.CacheNode = null;
-                _cachedBufferBytes -= buffer.Size;
+                _evictionPolicy.Remove(buffer);
+                buffer.SignalCacheRemoved();
+                _pruneCaches = true;
             }
         }
 
@@ -139,37 +137,115 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
         private void Touch(Buffer buffer)
         {
-            LinkedListNode<Buffer> node = buffer.CacheNode;
-
-            if (node != null && node != _lruBuffers.Last)
+            if (buffer != null)
             {
-                _lruBuffers.Remove(node);
-                _lruBuffers.AddLast(node);
+                buffer.MarkUsed(_context.SequenceNumber);
+                _evictionPolicy.Touch(buffer);
             }
         }
 
-        private void EnforceCapacity(Buffer protectedBuffer)
+        private void AddMultiRangeBuffer(MultiRangeBuffer buffer)
         {
-            LinkedListNode<Buffer> node = _lruBuffers.First;
-            bool buffersEvicted = false;
+            _multiRangeBuffers.Add(buffer);
+            buffer.MarkUsed(_context.SequenceNumber);
+            _multiRangeEvictionPolicy.Add(buffer);
 
-            while (_cachedBufferBytes > _maxCachedBufferBytes && node != null)
+            TrimToCapacity();
+        }
+
+        private void RemoveMultiRangeBuffer(MultiRangeBuffer buffer)
+        {
+            _multiRangeBuffers.Remove(buffer);
+            _multiRangeEvictionPolicy.Remove(buffer);
+            buffer.Dispose();
+        }
+
+        private void Touch(MultiRangeBuffer buffer)
+        {
+            if (buffer != null)
             {
-                LinkedListNode<Buffer> next = node.Next;
-                Buffer buffer = node.Value;
+                buffer.MarkUsed(_context.SequenceNumber);
+                _multiRangeEvictionPolicy.Touch(buffer);
+            }
+        }
 
-                if (buffer != protectedBuffer && buffer.CanEvict())
-                {
-                    _buffers.Remove(buffer);
-                    RemoveBufferTracking(buffer);
-                    buffer.Dispose();
-                    buffersEvicted = true;
-                }
+        /// <summary>
+        /// Evicts clean least-recently-used buffers until the configured memory budget is met.
+        /// Buffers used by the current GPU sequence and buffers with outstanding data ownership are retained.
+        /// </summary>
+        internal void TrimToCapacity()
+        {
+            ulong capacity = _evictionPolicy.Capacity;
+            ulong physicalBytes = _evictionPolicy.CachedBytes;
+            ulong virtualBytes = _multiRangeEvictionPolicy.CachedBytes;
+            bool overCapacity = physicalBytes > capacity || virtualBytes > capacity - physicalBytes;
 
-                node = next;
+            bool virtualBuffersEvicted = false;
+
+            if (overCapacity)
+            {
+                ulong virtualCapacity = physicalBytes < capacity ? capacity - physicalBytes : 0;
+
+                // Prefer the oldest virtual buffers that own duplicate non-sparse storage.
+                virtualBuffersEvicted = _multiRangeEvictionPolicy.TrimTo(
+                    virtualCapacity,
+                    buffer => buffer.CanEvict(_context.SequenceNumber),
+                    buffer =>
+                    {
+                        _multiRangeBuffers.Remove(buffer);
+                        buffer.Dispose();
+                    });
             }
 
-            if (buffersEvicted)
+            virtualBytes = _multiRangeEvictionPolicy.CachedBytes;
+            ulong physicalCapacity = virtualBytes < capacity ? capacity - virtualBytes : 0;
+
+            bool physicalBuffersEvicted = _evictionPolicy.TrimTo(
+                physicalCapacity,
+                buffer => buffer.CanEvict(_context.SequenceNumber),
+                buffer =>
+                {
+                    _buffers.Remove(buffer);
+                    buffer.SignalCacheRemoved();
+                    buffer.Dispose();
+                });
+
+            if (_evictionPolicy.CachedBytes > physicalCapacity)
+            {
+                // Sparse virtual buffers use no duplicate storage, but their aliases pin physical buffers.
+                // Release only complete alias sets that actually unlock clean physical storage.
+                HashSet<MultiRangeBuffer> aliasesToRelease = CacheDependencyEvictionPolicy.SelectAliasesToRelease<MultiRangeBuffer, Buffer>(
+                    _multiRangeBuffers,
+                    _evictionPolicy.OldestFirst,
+                    _evictionPolicy.CachedBytes - physicalCapacity,
+                    buffer => buffer.IsSparse && buffer.CanEvict(_context.SequenceNumber),
+                    buffer => buffer.CacheDependencies,
+                    buffer => buffer.CacheDependencyCount,
+                    buffer => buffer.CanEvictAfterReleasingCacheDependencies(_context.SequenceNumber),
+                    buffer => buffer.Size);
+
+                virtualBuffersEvicted |= _multiRangeEvictionPolicy.EvictEligible(
+                    aliasesToRelease.Contains,
+                    buffer =>
+                    {
+                        _multiRangeBuffers.Remove(buffer);
+                        buffer.Dispose();
+                    });
+
+                virtualBytes = _multiRangeEvictionPolicy.CachedBytes;
+                physicalCapacity = virtualBytes < capacity ? capacity - virtualBytes : 0;
+                physicalBuffersEvicted |= _evictionPolicy.TrimTo(
+                    physicalCapacity,
+                    buffer => buffer.CanEvict(_context.SequenceNumber),
+                    buffer =>
+                    {
+                        _buffers.Remove(buffer);
+                        buffer.SignalCacheRemoved();
+                        buffer.Dispose();
+                    });
+            }
+
+            if (virtualBuffersEvicted || physicalBuffersEvicted)
             {
                 _pruneCaches = true;
                 NotifyBuffersModified?.Invoke();
@@ -240,15 +316,9 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 return new MultiRange(MemoryManager.PteUnmapped, size);
             }
 
-            // Fast path not taken for non-contiguous ranges,
-            // since multi-range buffers are not coalesced, so a buffer that covers
-            // the entire cached range might not actually exist.
-            if (memoryManager.VirtualRangeCache.TryGetOrAddRange(gpuVa, size, out MultiRange range) &&
-                range.Count == 1)
-            {
-                return range;
-            }
+            memoryManager.VirtualRangeCache.TryGetOrAddRange(gpuVa, size, out MultiRange range);
 
+            // A cached virtual translation does not guarantee that its physical host buffer is still resident.
             CreateBuffer(range, stage);
 
             return range;
@@ -270,15 +340,9 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 return new MultiRange(MemoryManager.PteUnmapped, size);
             }
 
-            // Fast path not taken for non-contiguous ranges,
-            // since multi-range buffers are not coalesced, so a buffer that covers
-            // the entire cached range might not actually exist.
-            if (memoryManager.VirtualRangeCache.TryGetOrAddRange(gpuVa, size, out MultiRange range) &&
-                range.Count == 1)
-            {
-                return range;
-            }
+            memoryManager.VirtualRangeCache.TryGetOrAddRange(gpuVa, size, out MultiRange range);
 
+            // Virtual translations outlive LRU entries, so always restore physical residency as needed.
             for (int i = 0; i < range.Count; i++)
             {
                 MemoryRange subRange = range.GetSubRange(i);
@@ -399,6 +463,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             {
                 if (overlaps[index].Range.Contains(range))
                 {
+                    Touch(overlaps[index]);
                     return;
                 }
             }
@@ -407,8 +472,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             {
                 if (range.Contains(overlaps[index].Range))
                 {
-                    _multiRangeBuffers.Remove(overlaps[index]);
-                    overlaps[index].Dispose();
+                    RemoveMultiRangeBuffer(overlaps[index]);
                 }
             }
 
@@ -495,7 +559,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 UpdateVirtualBufferDependencies(multiRangeBuffer);
             }
 
-            _multiRangeBuffers.Add(multiRangeBuffer);
+            AddMultiRangeBuffer(multiRangeBuffer);
         }
 
         /// <summary>
@@ -801,8 +865,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
             for (int index = 0; index < overlapCount; index++)
             {
-                _multiRangeBuffers.Remove(overlaps[index]);
-                overlaps[index].Dispose();
+                RemoveMultiRangeBuffer(overlaps[index]);
             }
 
             for (int index = 0; index < overlapCount; index++)
@@ -859,13 +922,44 @@ namespace Ryujinx.Graphics.Gpu.Memory
                     ulong dstSize = dstSubRange.Size - dstOffset;
                     ulong copySize = Math.Min(srcSize, dstSize);
 
-                    CopyBufferSingleRange(memoryManager, srcSubRange.Address + srcOffset, dstSubRange.Address + dstOffset, copySize);
+                    if (TryGetCopyChunkAddresses(srcSubRange, srcOffset, dstSubRange, dstOffset, out ulong srcAddress, out ulong dstAddress))
+                    {
+                        CopyBufferSingleRange(memoryManager, srcAddress, dstAddress, copySize);
+                    }
 
                     srcOffset += copySize;
                     dstOffset += copySize;
                     copiedSize += copySize;
                 }
             }
+        }
+
+        /// <summary>
+        /// Computes mapped addresses for one multi-range copy chunk without applying offsets to the unmapped sentinel.
+        /// </summary>
+        internal static bool TryGetCopyChunkAddresses(
+            MemoryRange srcRange,
+            ulong srcOffset,
+            MemoryRange dstRange,
+            ulong dstOffset,
+            out ulong srcAddress,
+            out ulong dstAddress)
+        {
+            srcAddress = MemoryManager.PteUnmapped;
+            dstAddress = MemoryManager.PteUnmapped;
+
+            if (srcRange.Address == MemoryManager.PteUnmapped ||
+                dstRange.Address == MemoryManager.PteUnmapped ||
+                srcOffset > ulong.MaxValue - srcRange.Address ||
+                dstOffset > ulong.MaxValue - dstRange.Address)
+            {
+                return false;
+            }
+
+            srcAddress = srcRange.Address + srcOffset;
+            dstAddress = dstRange.Address + dstOffset;
+
+            return true;
         }
 
         /// <summary>
@@ -880,6 +974,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="size">Size in bytes of the copy</param>
         private void CopyBufferSingleRange(MemoryManager memoryManager, ulong srcAddress, ulong dstAddress, ulong size)
         {
+            if (srcAddress == MemoryManager.PteUnmapped || dstAddress == MemoryManager.PteUnmapped)
+            {
+                return;
+            }
+
             Buffer srcBuffer = GetBuffer(srcAddress, size, BufferStage.Copy);
             Buffer dstBuffer = GetBuffer(dstAddress, size, BufferStage.Copy);
 
@@ -925,6 +1024,12 @@ namespace Ryujinx.Graphics.Gpu.Memory
             for (int index = 0; index < range.Count; index++)
             {
                 MemoryRange subRange = range.GetSubRange(index);
+
+                if (subRange.Address == MemoryManager.PteUnmapped)
+                {
+                    continue;
+                }
+
                 Buffer buffer = GetBuffer(subRange.Address, subRange.Size, BufferStage.Copy);
 
                 int offset = (int)(subRange.Address - buffer.Address);
@@ -946,6 +1051,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <returns>The buffer sub-range starting at the given memory address</returns>
         public BufferRange GetBufferRangeAligned(MultiRange range, BufferStage stage, bool write = false)
         {
+            if (range.IsUnmapped)
+            {
+                return BufferRange.Empty;
+            }
+
+            CreateBuffer(range, stage);
+
             if (range.Count > 1)
             {
                 return GetBuffer(range, stage, write).GetRange(range);
@@ -966,6 +1078,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <returns>The buffer sub-range for the given range</returns>
         public BufferRange GetBufferRange(MultiRange range, BufferStage stage, bool write = false)
         {
+            if (range.IsUnmapped)
+            {
+                return BufferRange.Empty;
+            }
+
+            CreateBuffer(range, stage);
+
             if (range.Count > 1)
             {
                 return GetBuffer(range, stage, write).GetRange(range);
@@ -990,6 +1109,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
             for (int i = 0; i < range.Count; i++)
             {
                 MemoryRange subRange = range.GetSubRange(i);
+
+                if (subRange.Address == MemoryManager.PteUnmapped)
+                {
+                    continue;
+                }
 
                 Buffer subBuffer = _buffers.FindOverlap(subRange.Address, subRange.Size);
                 Touch(subBuffer);
@@ -1021,6 +1145,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
             {
                 buffer.AddModifiedRegion(range, ++_virtualModifiedSequenceNumber);
             }
+
+            Touch(buffer);
 
             return buffer;
         }
@@ -1066,6 +1192,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="range">Physical regions of memory where the buffer is mapped</param>
         public void SynchronizeBufferRange(MultiRange range)
         {
+            if (range.IsUnmapped)
+            {
+                return;
+            }
+
+            CreateBuffer(range, BufferStage.None);
+
             if (range.Count == 1)
             {
                 MemoryRange subRange = range.GetSubRange(0);
@@ -1076,7 +1209,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 for (int index = 0; index < range.Count; index++)
                 {
                     MemoryRange subRange = range.GetSubRange(index);
-                    SynchronizeBufferRange(subRange.Address, subRange.Size, copyBackVirtual: false);
+
+                    if (subRange.Address != MemoryManager.PteUnmapped)
+                    {
+                        SynchronizeBufferRange(subRange.Address, subRange.Size, copyBackVirtual: false);
+                    }
                 }
             }
         }
@@ -1183,8 +1320,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
                     buffer.Dispose();
                 }
 
-                _lruBuffers.Clear();
-                _cachedBufferBytes = 0;
+                _evictionPolicy.Clear();
+                _multiRangeEvictionPolicy.Clear();
             }
         }
     }

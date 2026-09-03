@@ -20,7 +20,10 @@ Eden загружен из официального Forgejo: commit
 независимо реализованная в C# в архитектуре MeloNX. Дополнительно исправлены
 применение Expand RAM, доступ к NRO, время жизни текстур, освобождение JIT/Vulkan-памяти
 при ошибках, небезопасное чтение настройки первого запуска и Vulkan feature flag.
-Обновлена зависимость desktop-приложения с известной уязвимостью.
+Во втором проходе устранён дефект вытеснения GPU-буферов, ограничены пики параллельной
+загрузки shader cache на iOS и включена устойчивая дисковая идентичность NRO при наличии
+ненулевых NACP program ID и build ID. Обновлена зависимость desktop-приложения
+с известной уязвимостью.
 
 Это статический инженерный аудит запуска, iOS build pipeline, JIT, диагностики памяти,
 кэширования Vulkan и соответствующих подсистем Eden с компиляцией и целевыми тестами.
@@ -62,8 +65,36 @@ Mali G615 MC6, 8 GB RAM и Eden nightly без точного commit.
 
 В [посте Reddit](https://www.reddit.com/r/EmulationOniOS/comments/1w60csm/after_some_trial_and_error_made_a_fork_of_melonx/)
 автор сообщает о своём форке MeloNX на iPad M5, 1080p и 30–60 FPS. В доступном тексте
-нет воспроизводимого diff, версии порта и настроек. Комментарий про почти 10 GB принадлежит
-другому участнику и не устанавливает минимальную память игры.
+нет воспроизводимого diff, версии порта и настроек; на просьбы дать fork/GitHub автор
+не ответил. В более раннем [обсуждении Hogwarts Legacy](https://www.reddit.com/r/EmulationOniOS/comments/1v524xl/comment/ozfnha7/)
+тот же автор описывал изменение выделения JIT RAM и примерно 512 MiB исполняемого кэша.
+Это повышает доступный объём кода, но резервирует больше памяти и не является методом
+снижения общего расхода RAM. На оверлее приложенного GTA V изображения показано 8,68 GB;
+это снимок одного запуска, а не установленный минимум игры, но он не подтверждает low-RAM.
+
+В отдельном [отчёте о неудачном запуске](https://www.reddit.com/r/EmulationOniOS/comments/1w0ys3s/gta_v_port_melonx/)
+пользователь iPhone 17 Pro Max сообщает о повторяемом вылете при открытии двери/загрузке
+на MeloNX 2.5/2.6; участник с iPad M5 сообщает аналогичный результат. Эти сообщения не
+опровергают более поздний успех другого форка, но показывают, что только мощного устройства,
+JIT и внешних данных недостаточно для воспроизводимости.
+
+В полном [предыдущем Snapdragon-видео](https://www.youtube.com/watch?v=2PByj8X5p7I)
+используются 16 GB host RAM, guest layout 4/6 GB, 0,7x/720p или ниже, Aggressive VRAM,
+disk shader cache, async shaders, два worker, custom driver и 2x frame generation.
+Около 4:45 внутренний оверлей Eden показывает примерно 27,5 FPS при внешнем счётчике 57;
+около 5:00 — примерно 26,6 против 46. High preset заканчивается вылетом около 6:32.
+Следовательно, заявленные «60 FPS» создаются frame generation и не доказывают ни нативные
+60 FPS, ни достаточность 4 GB физической RAM.
+
+[Практическое видео исправления black screen](https://www.youtube.com/watch?v=m8MeodqWAwU)
+для Eden 0.2.1 показывает разрешение 0,25x и выдачу эмулятору доступа к корню порта с
+`romfs`, затем per-game Start. Наблюдаемая частота меняется примерно от 30 до 17 FPS.
+Это воспроизводимое исправление пути/доступа к контенту, а не оптимизация памяти.
+
+Пользователь Pixel 9a с 8 GB сообщает о заполнении памяти и OOM/crash в North Yankton
+в [отчёте о Mali](https://www.reddit.com/r/EmulationMediatekMali/comments/1w33whp/gta_5_on_eden_emulator/).
+Это отдельное пользовательское наблюдение, но оно показывает различие guest layout 4 GB
+и общего host footprint эмулятора, игры, GPU-драйвера и кэшей.
 
 [Тема Rutracker](https://rutracker.org/forum/viewtopic.php?t=6900804) ответила HTTP 403.
 Поэтому версия порта, формат NSP/NRO/XCI, набор внешних данных, firmware и требования
@@ -80,6 +111,21 @@ Mali G615 MC6, 8 GB RAM и Eden nightly без точного commit.
 | PR #4294, Vulkan pipeline caching | Периодическое сохранение ограничено временем и одновременной сериализацией | Применена общая идея ограничения checkpoint; постоянный кэш в MeloNX уже существовал |
 | Texture cache, `src/video_core/texture_cache/texture_cache.h` | Очистка по давлению памяти и возрасту; изменённые изображения требуют readback | Для переноса нужны эквивалентные гарантии согласованности данных и измерения Metal/MoltenVK |
 | PGO, Genshin Spoof и настройки Android | Зависят от сборки, драйвера и ОС | Не являются переносимой настройкой iPhone |
+
+Проверен и [MeloVertex](https://github.com/VertexSelection/MeloVertex), commit
+`fcd0dc995d3c7e104bcd8a2a0f779d91227be324`. Его memory commit задаёт при доступной
+памяти до 8 GiB бюджет texture cache около 30%, но не ниже 512 MiB, и начинает удаление
+только после накопления 32 текстур. Наша ветка для Apple unified memory при гостевых
+4 GiB ограничивает texture cache 256 MiB, считает оценочный host-размер и удаляет до
+достижения бюджета без минимального числа записей. Перенос MeloVertex повысил бы бюджет
+и ухудшил поставленную цель.
+
+Проверен [MeloNX-DRAM-Fallback](https://github.com/KavrixIDK/MeloNX-DRAM-Fallback), commit
+`a70b0012`. Он предлагает 2 GiB fake guest mode и 36-битные ограничения адресного
+пространства для устройств примерно до 3,5 GiB физической RAM. GTA V ожидает обычную
+модель памяти Switch, а iPhone 16 Pro Max не относится к этому классу устройств.
+Код форка содержит следы прежнего сбоя из-за отсечения допустимой guest shared memory;
+этот экспериментальный режим не перенесён.
 
 Источники: [PR #4294](https://git.eden-emu.dev/eden-emu/eden/pulls/4294/files),
 [PR #4303](https://git.eden-emu.dev/eden-emu/eden/pulls/4303/files),
@@ -198,34 +244,85 @@ Swift передавал `ExpandRAM` через ABI, но `Library.cs` всег�
 Это исправление проверяется обзором владения и компиляцией; ошибка реального
 драйвера в этой среде не воспроизводилась.
 
+### 8. Безопасное вытеснение GPU-буферов
+
+Первый вариант memory budget удалял чистый host buffer прямо при создании следующего.
+Сохранённая виртуальная трансляция при этом продолжала существовать, а source или binding
+текущей составной GPU-операции мог быть освобождён до её завершения. Это давало экономию
+памяти ценой возможного null lookup, use-after-dispose или неверного рендера.
+
+Теперь LRU учитывает последовательность GPU-команд: все буферы, использованные в текущей
+sequence, защищены до её границы. Очистка выполняется из `GpuContext.AdvanceSequence`
+на владеющем GPU-пути. Не вытесняются dirty/readback buffers и физические buffers,
+которыми владеют multi-range зависимости. После удаления следующий доступ всегда
+восстанавливает физический host buffer, даже если перевод virtual range найден в кэше;
+binding буферов и текстур запрашивается заново. Бюджет остаётся мягким: если безопасного
+кандидата нет, корректность важнее немедленного достижения лимита.
+
+Отдельно исправлен момент применения лимитов. `MemoryManager` создаётся до
+`Renderer.Initialize`, поэтому ранняя проверка `Capabilities.MemoryType` видела значение
+`BackendManaged`: фактически оставались fallback 2 GiB для buffers и 1 GiB для textures.
+Теперь `PhysicalMemory` сохраняет размер гостевой памяти, а `SetGpuThread` после
+`Renderer.GetCapabilities()` недеструктивно пересчитывает оба лимита. На Apple Unified
+Memory при гостевых 4 GiB получаются 256 MiB для buffers и 256 MiB для textures.
+Последующая обычная граница GPU sequence приводит resident caches к новым мягким бюджетам.
+
+Политика LRU вынесена в `CacheEvictionPolicy.cs`. Тесты проверяют защиту source/destination
+одной sequence, удаление на следующей, порядок после touch, полный набор sparse aliases,
+сохранение `PteUnmapped` до адресной арифметики, пересчёт 4 GiB → 256/256 MiB и точный
+учёт add/remove/clear. Реальный Vulkan submit/MoltenVK на Windows не исполняется.
+
+### 9. Ограничение загрузки shader cache на iOS
+
+`ParallelDiskCacheLoader` всегда создавал восемь потоков трансляции и очередь на восемь
+ожидающих программ. На iPhone это создаёт лишние одновременные рабочие наборы именно в
+момент загрузки большой игры. На iOS теперь используется один worker на одноядерном host
+и максимум два на остальных; очередь имеет ту же ограниченную ёмкость. Другие платформы
+сохраняют прежние восемь workers. На iOS число host-программ, одновременно ожидающих
+backend-компиляцию, также ограничено двумя; на других платформах сохраняется прежний лимит
+`min(processorCount, 8)`. Число translation workers записывается в лог.
+
+Это уменьшает пик и CPU contention ценой потенциально более долгого первого экрана загрузки
+shader cache. Пятнадцать тестовых случаев проверяют обе платформенные ветви. Ограничение не
+меняет число фоновых Vulkan pipeline workers, которое в текущем коде уже равно 1–2.
+
+### 10. Постоянный shader/PTC cache для NRO
+
+Раньше `ProcessLoader.LoadNxo` всегда сбрасывал `GraphicsConfig.TitleId`, поэтому NRO-порт
+не мог повторно использовать дисковый GPU shader cache даже с корректным NACP. Теперь
+ненулевой NACP program ID становится 16-значным title ID. GPU cache дополнительно уважает
+пользовательскую настройку Shader Cache. PTC включается только при разрешённом PTC и
+ненулевом NRO build ID, используемом как selector; raw NSO и NRO без достоверного program ID
+остаются без cache identity. Синтетический ID по пути или полному хэшу 46-гигабайтного набора
+не создаётся.
+
+GPU shader cache не ускоряет первую компиляцию, но позволяет последующим запускам не повторять
+всю работу. При смене build ID PTC получает другой selector. На основном iPhone-пути
+HostMapped/LightningJit вызов PTC пока возвращает `DummyDiskCacheLoadState`, поэтому реальный
+PTC работает только при выборе обычного JIT, например после fallback на software page table.
+Девятнадцать тестов проверяют платформенную политику workers, формат program ID, отказ при нуле
+и выбор build ID. Конкретный NACP порта GTA V пока не предоставлен, поэтому фактическое
+включение GPU shader cache нужно подтвердить строкой `NRO cache identity` в логе устройства.
+
 ## Оставшиеся риски и условные блокеры порта
 
-1. **P1, вытеснение GPU-буферов.** `BufferCache.EnforceCapacity` удаляет чистые буферы,
-   но cached ranges и сохранённые привязки могут продолжить ссылаться на них.
-   Fast paths `TranslateAndCreateMultiBuffers*` пропускают создание, затем `GetBuffer`
-   может получить отсутствующий объект. `NotifyBuffersModified` запрашивает rebind,
-   но не восстанавливает ресурс. Одной очистки `VirtualRangeCache` недостаточно:
-   создание destination также может вытеснить source текущей операции. Нужны
-   согласованные pinning/recreation и тесты bind/copy/multi-range при малом бюджете.
-   В этой ветке этот более широкий дефект не исправлен; сборка остаётся экспериментальной.
-2. **P2, повреждённый shader cache.** `DiskCacheHostStorage.ReadHostCode` выделяет
+1. **P1, повреждённый shader cache.** `DiskCacheHostStorage.ReadHostCode` выделяет
    массив по `UncompressedSize` из файла, а `ShaderBinarySerializer.Unpack` недостаточно
    проверяет длины/полноту данных. Ошибки могут выйти за штатные catch загрузчика;
    завершение его очередей не защищено общим `finally`. Нужны тесты испорченных файлов,
    проверки формата и ограничение ресурсов без произвольного отсечения корректных shaders.
-3. **NRO и постоянный shader cache.** `ProcessLoader` отключает дисковый shader cache
-   и сбрасывает TitleId для NRO даже при наличии NACP. Включение требует устойчивой
-   идентификации homebrew с отсутствующими/повторяющимися ID. Периодический Vulkan
-   pipeline cache является другим уровнем и не отменяет этого ограничения.
-4. **Внешние данные.** Импорт в библиотеку копирует исполняемый файл в `Documents/roms`,
+2. **Внешние данные.** Импорт в библиотеку копирует исполняемый файл в `Documents/roms`,
    SD размещается в `Documents/sdcard`. Порту с чтением `sdmc:/…` нужны соответствующие
    внешние файлы. Какая раскладка нужна версии из Rutracker, не установлено.
-5. **Аргументы homebrew.** MeloNX запускает NRO без `argv`; Eden имеет такой путь.
+3. **Аргументы homebrew.** MeloNX запускает NRO без `argv`; Eden имеет такой путь.
    Влияние зависит от того, использует ли конкретный порт аргументы для путей/настроек.
-6. **Диагностика GPU-памяти.** Apple cache budgets вычисляются из размера гостевой RAM,
+4. **Диагностика GPU-памяти.** Apple cache budgets вычисляются из размера гостевой RAM,
    а не `os_proc_available_memory`. Memory warning сейчас только записывается.
    Счётчиков native allocations/текстур/буферов/очередей компиляции нет; для их
    безопасного добавления нужны снимки на потоках-владельцах ресурсов.
+5. **Предел проверки buffer eviction.** Политика и компиляция проверяются управляемыми
+   тестами, но реальный submit с многодиапазонными buffers на MoltenVK ещё не прогнан.
+   При графическом повреждении или GPU fault нужен полный лог и участок воспроизведения.
 
 ## Подготовка зависимостей
 
@@ -262,9 +359,12 @@ Actions используют major-теги, `macos-26` — обновляемы
 | Проверка | Результат | Граница результата |
 | --- | --- | --- |
 | `scripts/prepare-build.ps1` | Успех; 177 каталогов NuGet-пакетов, два SDK и Swift pins | Подготовка Windows и Apple build packs |
-| `scripts/build-local.ps1`, Desktop Release | 0 ошибок, 4 предупреждения | Компиляция решения после исправлений |
+| `scripts/build-local.ps1`, Desktop Release | 0 ошибок, 2 предупреждения | Компиляция решения после исправлений |
 | Тот же скрипт, managed `ios-arm64` Release | 0 ошибок, 15 предупреждений | Компиляция C# части новой iOS-библиотеки |
 | `DualMappedJitCacheTests`, `PipelineCacheCheckpointTests`, `AutoDeleteCacheTests` | 30/30 | Конфигурация/учёт JIT, checkpoint, ссылки/expiry/oversized-текстура |
+| `CacheEvictionPolicyTests` | 13/13 | LRU, sequence, selective sparse aliases, PTE sentinel и budget refresh |
+| `DiskCacheLoadPolicyTests` | 15/15 | Translation и backend in-flight limits на iOS/других платформах |
+| `HomebrewCacheIdentityTests` | 4/4 | NACP program ID, нулевые ID и NRO build ID selector |
 | Новые `DualMappedJitAllocatorTests` | 8/8 | Владение mappings и освобождение на управляемых заглушках |
 | Desktop `project.assets.json` | `Tmds.DBus.Protocol/0.21.3` | Исправленная версия реально выбрана restore |
 | Прежний IPA и архив Actions | SHA256 совпали | Целостность скачанной контрольной сборки |
@@ -272,11 +372,12 @@ Actions используют major-теги, `macos-26` — обновляемы
 | Swift/Xcode/NativeAOT → IPA | Отдельный workflow после публикации commit | Сверять `source_commit` и `SHA256SUMS.txt` в его артефакте |
 | Запуск на iPhone / GTA V | Не выполнялся | Нужны конкретная сборка порта, внешние данные и диагностика устройства |
 
-Всего 38 целевых проверок пройдены, из них 19 добавлены в этой ветке. Предупреждения
+Всего 70 целевых проверок пройдены, из них 51 добавлена в этой ветке. Предупреждения
 компиляции остаются в существующих участках (nullable/неиспользуемые поля/анализ платформ);
 успешная C# компиляция не является подтверждением Swift или исполнения iOS.
-Логи: `artifacts/logs/build-windows.log`, `build-ios-managed.log`, `test-cache-audit.log`.
-Результаты: `artifacts/test-results/cache-audit.trx`, `jit-allocator-audit.trx`.
+Логи: `artifacts/logs/build-windows.log`, `build-ios-managed.log`.
+Результаты: `artifacts/test-results/low-memory-audit-final.trx`,
+`jit-allocator-audit-final.trx`.
 
 Повторяемые команды из каталога репозитория:
 
@@ -284,7 +385,7 @@ Actions используют major-теги, `macos-26` — обновляемы
 powershell -NoProfile -File scripts/prepare-build.ps1
 powershell -NoProfile -File scripts/build-local.ps1
 $env:NUGET_PACKAGES = Join-Path $PWD '.tools/nuget/packages'
-./.tools/dotnet/dotnet.exe test src/Ryujinx.Tests/Ryujinx.Tests.csproj -c Release --filter 'FullyQualifiedName~PipelineCacheCheckpointTests|FullyQualifiedName~DualMappedJitCacheTests|FullyQualifiedName~AutoDeleteCacheTests'
+./.tools/dotnet/dotnet.exe test src/Ryujinx.Tests/Ryujinx.Tests.csproj -c Release --filter 'FullyQualifiedName~PipelineCacheCheckpointTests|FullyQualifiedName~DualMappedJitCacheTests|FullyQualifiedName~AutoDeleteCacheTests|FullyQualifiedName~CacheEvictionPolicyTests|FullyQualifiedName~DiskCacheLoadPolicyTests|FullyQualifiedName~HomebrewCacheIdentityTests'
 ./.tools/dotnet/dotnet.exe test src/Ryujinx.Tests.Memory/Ryujinx.Tests.Memory.csproj -c Release --filter 'FullyQualifiedName~DualMappedJitAllocatorTests'
 ```
 

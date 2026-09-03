@@ -33,6 +33,35 @@ sideload, JIT и Get More RAM. Отдельный Apple-сертификат д�
 артефакте ожидаемо. Подробнее о сборке: [BUILD-PREPARATION.ru.md](BUILD-PREPARATION.ru.md).
 Исследование исходников и гипотез: [GTA-V-RESEARCH.ru.md](GTA-V-RESEARCH.ru.md).
 
+## Базовый профиль 4 GiB
+
+Для первой попытки после установки выставьте один стабильный профиль и не меняйте несколько
+параметров между запусками:
+
+1. **Expand Guest RAM — OFF.** Это оставляет обычную гостевую конфигурацию Switch 4 GiB;
+   включение создаёт 8 GiB guest и повышает давление на iOS.
+2. **Docked Mode — OFF**, **Resolution Scale — 0.5x**; при раннем GPU/JetSam-сбое отдельно
+   сравните 0.25x. Anti-Aliasing — None, anisotropic filtering — Automatic.
+3. **Shader Cache — ON.** Новая ветка даёт NRO устойчивый cache directory при ненулевом
+   NACP program ID и загружает его на iOS максимум двумя потоками/двумя ожидающими backend
+   программами. Первый запуск всё ещё компилирует shaders; выигрыш проверяется на втором.
+4. **Async Shader Compilation — OFF** для базового опыта: интерфейс самого MeloNX предупреждает
+   о возможных графических сбоях. Включать отдельно только после стабильного прохождения сцены.
+5. **VSync — Switch**, Memory Manager — Host Mapped Unsafe, JIT Cache — Automatic.
+   Увеличивать JIT до 768/1024 MiB только по строке `Dual-mapped JIT cache exhausted`.
+6. В настройках самого порта выбрать **Low** и штатный handheld/720p-or-lower preset.
+   Android overclock, custom GPU driver и frame generation из роликов на iOS не переносятся.
+
+Показанный Eden guest layout 4/6 GB задаёт память эмулируемого Switch, а не общий host
+footprint. В Snapdragon-видео использовались 16 GB физической RAM, в Mali-видео — 8 GB;
+на изображении iPad-форка оверлей показывает 8,68 GB. Поэтому этот профиль уменьшает пики,
+но не является доказательством, что весь эмулятор и порт помещаются в 4 GB host RAM.
+
+Внешние файлы должны сохранить ожидаемую портом структуру. В Eden black-screen guide доступ
+выдаётся корню с `romfs`; MeloNX монтирует гостевой SD из `Documents/sdcard`. Если порт ожидает
+`sdmc:/atmosphere/contents/...`, тот же относительный путь должен находиться под этим каталогом.
+Не подставляйте title ID из случайного сайта: возьмите его из реальной поставки порта или лога.
+
 ## Первый запуск — Automatic
 
 1. Откройте **Settings → Advanced → JIT Cache & Memory Diagnostics** (раздел **Experimental**).
