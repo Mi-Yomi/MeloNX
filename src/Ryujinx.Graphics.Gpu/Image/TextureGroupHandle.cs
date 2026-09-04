@@ -165,6 +165,11 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         private void DirtyAction()
         {
+            if (_group.IsDisposed)
+            {
+                return;
+            }
+
             // Notify all textures that belong to this handle.
 
             _group.Storage.SignalGroupDirty();
@@ -293,6 +298,11 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="context">The GPU context to register a sync action on</param>
         private void RegisterSync(GpuContext context)
         {
+            if (_group.IsDisposed)
+            {
+                return;
+            }
+
             if (!_syncActionRegistered)
             {
                 _modifiedSync = context.SyncNumber;
@@ -312,6 +322,11 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="context">The GPU context to register a sync action on</param>
         public void SignalModified(GpuContext context)
         {
+            if (_group.IsDisposed)
+            {
+                return;
+            }
+
             Modified = true;
 
             // If this handle has any copy dependencies, notify the other handle that a copy needs to be performed.
@@ -331,6 +346,11 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="context">The GPU context to register a sync action on</param>
         public void SignalModifying(bool bound, GpuContext context)
         {
+            if (_group.IsDisposed)
+            {
+                return;
+            }
+
             SignalModified(context);
 
             if (!bound && _syncActionRegistered && NextSyncCopies())
@@ -368,6 +388,11 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>True if the texture data can be read from the flush buffer</returns>
         public bool Sync(GpuContext context)
         {
+            if (_group.IsDisposed)
+            {
+                return false;
+            }
+
             // Currently assumes the calling thread is a guest thread.
 
             bool inBuffer = _registeredBufferGuestSync != ulong.MaxValue;
@@ -413,12 +438,19 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <inheritdoc/>
         public bool SyncPreAction(bool syncpoint)
         {
+            if (_group.IsDisposed)
+            {
+                return true;
+            }
+
             if (syncpoint || NextSyncCopies())
             {
                 if (ModifyFlushBalance(0) && _registeredBufferSync != _modifiedSync)
                 {
-                    _group.FlushIntoBuffer(this);
-                    _registeredBufferSync = _modifiedSync;
+                    if (_group.TryFlushIntoBuffer(this))
+                    {
+                        _registeredBufferSync = _modifiedSync;
+                    }
                 }
             }
 
@@ -432,6 +464,12 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <inheritdoc/>
         public bool SyncAction(bool syncpoint)
         {
+            if (_group.IsDisposed)
+            {
+                _syncActionRegistered = false;
+                return true;
+            }
+
             // The storage will need to signal modified again to update the sync number in future.
             _group.Storage.SignalModifiedDirty();
 

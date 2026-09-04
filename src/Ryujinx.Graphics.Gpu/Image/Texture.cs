@@ -1794,12 +1794,12 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         public void Dispose()
         {
-            DisposeTextures();
-
             if (Group.Storage == this)
             {
                 Group.Dispose();
             }
+
+            DisposeTextures();
         }
     }
 }

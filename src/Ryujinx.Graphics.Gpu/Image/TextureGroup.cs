@@ -9,6 +9,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace Ryujinx.Graphics.Gpu.Image
 {
@@ -50,6 +51,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         private readonly HandlesCallbackDelegate _signalModifyingCallback;
         private readonly HandlesCallbackDelegate _discardDataCallback;
         private readonly HandlesCallbackDelegate _checkDirtyCallback;
+        private readonly HandlesCallbackDelegate _hasGpuModifiedDataCallback;
 
         /// <summary>
         /// The storage texture associated with this group.
@@ -66,7 +68,12 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// Indicates if the texture group has a pre-emptive flush buffer.
         /// When one is present, the group must always be notified on unbind.
         /// </summary>
-        public bool HasFlushBuffer => _flushBuffer != BufferHandle.Null;
+        public bool HasFlushBuffer => !IsDisposed && _flushBuffer != BufferHandle.Null;
+
+        /// <summary>
+        /// Indicates that this group can no longer accept deferred sync or readback work.
+        /// </summary>
+        internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
 
         /// <summary>
         /// Indicates if this texture has any incompatible overlaps alive.
@@ -109,6 +116,8 @@ namespace Ryujinx.Graphics.Gpu.Image
         private BufferHandle _flushBuffer;
         private bool _flushBufferImported;
         private bool _flushBufferInvalid;
+        private readonly object _lifecycleLock = new();
+        private int _disposed;
 
         /// <summary>
         /// Create a new texture group.
@@ -134,6 +143,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             _signalModifyingCallback = SignalModifyingCallback;
             _discardDataCallback = DiscardDataCallback;
             _checkDirtyCallback = CheckDirtyCallback;
+            _hasGpuModifiedDataCallback = HasGpuModifiedDataCallback;
         }
 
         /// <summary>
@@ -275,19 +285,22 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>True if at least one relevant handle contains GPU-modified data</returns>
         public bool HasGpuModifiedData(Texture texture)
         {
-            bool modified = false;
-
-            EvaluateRelevantHandles(texture, (baseHandle, regionCount, split, bound) =>
-            {
-                for (int i = 0; i < regionCount; i++)
-                {
-                    modified |= _handles[baseHandle + i].Modified;
-                }
-
-                return true;
-            }, out _);
+            EvaluateRelevantHandles(texture, _hasGpuModifiedDataCallback, out bool modified);
 
             return modified;
+        }
+
+        private bool HasGpuModifiedDataCallback(int baseHandle, int regionCount, bool split, bool bound)
+        {
+            for (int i = 0; i < regionCount; i++)
+            {
+                if (_handles[baseHandle + i].Modified)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         bool CheckDirtyCallback(int baseHandle, int regionCount, bool split, bool consume)
@@ -661,50 +674,63 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// If the buffer does not exist, this method will create it.
         /// </summary>
         /// <param name="handle">Handle of the texture group to flush slices of</param>
-        public void FlushIntoBuffer(TextureGroupHandle handle)
+        /// <returns>True if every copy was queued, or false if the group cannot accept the work</returns>
+        public bool TryFlushIntoBuffer(TextureGroupHandle handle)
         {
-            // Ensure that the buffer exists.
-
-            if (_flushBufferInvalid && _flushBuffer != BufferHandle.Null)
+            lock (_lifecycleLock)
             {
-                _flushBufferInvalid = false;
-                _context.Renderer.DeleteBuffer(_flushBuffer);
-                _flushBuffer = BufferHandle.Null;
-            }
-
-            if (_flushBuffer == BufferHandle.Null)
-            {
-                if (!TextureCompatibility.CanTextureFlush(Storage.Info, _context.Capabilities))
+                if (IsDisposed)
                 {
-                    return;
+                    return false;
                 }
 
-                bool canImport = Storage.Info.IsLinear && Storage.Info.Stride >= Storage.Info.Width * Storage.Info.FormatInfo.BytesPerPixel;
+                // Ensure that the buffer exists.
 
-                nint hostPointer = canImport ? _physicalMemory.GetHostPointer(Storage.Range) : 0;
-
-                if (hostPointer != 0 && _context.Renderer.PrepareHostMapping(hostPointer, Storage.Size))
+                if (_flushBufferInvalid && _flushBuffer != BufferHandle.Null)
                 {
-                    _flushBuffer = _context.Renderer.CreateBuffer(hostPointer, (int)Storage.Size);
-                    _flushBufferImported = true;
-                }
-                else
-                {
-                    _flushBuffer = _context.Renderer.CreateBuffer((int)Storage.Size, BufferAccess.HostMemory);
+                    BufferHandle invalidBuffer = _flushBuffer;
+                    _flushBuffer = BufferHandle.Null;
                     _flushBufferImported = false;
+                    _flushBufferInvalid = false;
+                    _context.Renderer.DeleteBuffer(invalidBuffer);
                 }
 
-                Storage.BlacklistScale();
-            }
+                if (_flushBuffer == BufferHandle.Null)
+                {
+                    if (!TextureCompatibility.CanTextureFlush(Storage.Info, _context.Capabilities))
+                    {
+                        return false;
+                    }
 
-            int sliceStart = handle.BaseSlice;
-            int sliceEnd = sliceStart + handle.SliceCount;
+                    bool canImport = Storage.Info.IsLinear && Storage.Info.Stride >= Storage.Info.Width * Storage.Info.FormatInfo.BytesPerPixel;
 
-            for (int i = sliceStart; i < sliceEnd; i++)
-            {
-                (int layer, int level) = GetLayerLevelForView(i);
+                    nint hostPointer = canImport ? _physicalMemory.GetHostPointer(Storage.Range) : 0;
 
-                Storage.GetFlushTexture().CopyTo(new BufferRange(_flushBuffer, _allOffsets[i], _sliceSizes[level]), layer, level, _flushBufferImported ? Storage.Info.Stride : 0);
+                    if (hostPointer != 0 && _context.Renderer.PrepareHostMapping(hostPointer, Storage.Size))
+                    {
+                        _flushBuffer = _context.Renderer.CreateBuffer(hostPointer, (int)Storage.Size);
+                        _flushBufferImported = true;
+                    }
+                    else
+                    {
+                        _flushBuffer = _context.Renderer.CreateBuffer((int)Storage.Size, BufferAccess.HostMemory);
+                        _flushBufferImported = false;
+                    }
+
+                    Storage.BlacklistScale();
+                }
+
+                int sliceStart = handle.BaseSlice;
+                int sliceEnd = sliceStart + handle.SliceCount;
+
+                for (int i = sliceStart; i < sliceEnd; i++)
+                {
+                    (int layer, int level) = GetLayerLevelForView(i);
+
+                    Storage.GetFlushTexture().CopyTo(new BufferRange(_flushBuffer, _allOffsets[i], _sliceSizes[level]), layer, level, _flushBufferImported ? Storage.Info.Stride : 0);
+                }
+
+                return true;
             }
         }
 
@@ -861,7 +887,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                 {
                     // When there are no layer views, the mips are at a consistent offset.
 
-                    result = callback(firstLevel, targetLevelHandles, specialData: specialData);
+                    result |= callback(firstLevel, targetLevelHandles, specialData: specialData);
                 }
                 else
                 {
@@ -875,7 +901,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                         while (levels-- > 1)
                         {
-                            result = callback(firstLayer + levelIndex, slices, specialData: specialData);
+                            result |= callback(firstLayer + levelIndex, slices, specialData: specialData);
 
                             levelIndex += layerCount;
                             layerCount = Math.Max(layerCount >> 1, 1);
@@ -892,7 +918,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                             totalSize += layerCount;
                         }
 
-                        result = callback(firstLayer + levelIndex, totalSize, specialData: specialData);
+                        result |= callback(firstLayer + levelIndex, totalSize, specialData: specialData);
                     }
                 }
             }
@@ -909,12 +935,12 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                     for (int i = 0; i < slices; i++)
                     {
-                        result = callback(firstLevel + (firstLayer + i) * levelHandles, targetLevelHandles, true, specialData: specialData);
+                        result |= callback(firstLevel + (firstLayer + i) * levelHandles, targetLevelHandles, true, specialData: specialData);
                     }
                 }
                 else
                 {
-                    result = callback(firstLevel + firstLayer * levelHandles, targetLevelHandles + (targetLayerHandles - 1) * levelHandles, specialData: specialData);
+                    result |= callback(firstLevel + firstLayer * levelHandles, targetLevelHandles + (targetLayerHandles - 1) * levelHandles, specialData: specialData);
                 }
             }
         }
@@ -1694,7 +1720,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             handle.ClearActionRegistered();
 
-            if (!handle.Modified)
+            if (IsDisposed || !handle.Modified)
             {
                 return;
             }
@@ -1709,21 +1735,34 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             _context.Renderer.BackgroundContextAction(() =>
             {
-                bool inBuffer = !isGpuThread && handle.Sync(_context);
-
-                Storage.SignalModifiedDirty();
-
-                lock (handle.Overlaps)
+                if (IsDisposed)
                 {
-                    foreach (Texture texture in handle.Overlaps)
-                    {
-                        texture.SignalModifiedDirty();
-                    }
+                    return;
                 }
 
-                if (TextureCompatibility.CanTextureFlush(Storage.Info, _context.Capabilities) && !(inBuffer && _flushBufferImported))
+                bool inBuffer = !isGpuThread && handle.Sync(_context);
+
+                lock (_lifecycleLock)
                 {
-                    FlushSliceRange(false, handle.BaseSlice, handle.BaseSlice + handle.SliceCount, inBuffer, Storage.GetFlushTexture());
+                    if (IsDisposed)
+                    {
+                        return;
+                    }
+
+                    Storage.SignalModifiedDirty();
+
+                    lock (handle.Overlaps)
+                    {
+                        foreach (Texture texture in handle.Overlaps)
+                        {
+                            texture.SignalModifiedDirty();
+                        }
+                    }
+
+                    if (TextureCompatibility.CanTextureFlush(Storage.Info, _context.Capabilities) && !(inBuffer && _flushBufferImported))
+                    {
+                        FlushSliceRange(false, handle.BaseSlice, handle.BaseSlice + handle.SliceCount, inBuffer, Storage.GetFlushTexture());
+                    }
                 }
             });
         }
@@ -1733,9 +1772,12 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         public void Unmapped()
         {
-            if (_flushBufferImported)
+            lock (_lifecycleLock)
             {
-                _flushBufferInvalid = true;
+                if (!IsDisposed && _flushBufferImported)
+                {
+                    _flushBufferInvalid = true;
+                }
             }
         }
 
@@ -1744,6 +1786,21 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            {
+                return;
+            }
+
+            BufferHandle flushBuffer;
+
+            lock (_lifecycleLock)
+            {
+                flushBuffer = _flushBuffer;
+                _flushBuffer = BufferHandle.Null;
+                _flushBufferImported = false;
+                _flushBufferInvalid = false;
+            }
+
             foreach (TextureGroupHandle group in _handles)
             {
                 group.Dispose();
@@ -1754,9 +1811,9 @@ namespace Ryujinx.Graphics.Gpu.Image
                 incompatible.Group._incompatibleOverlaps.RemoveAll(overlap => overlap.Group == this);
             }
 
-            if (_flushBuffer != BufferHandle.Null)
+            if (flushBuffer != BufferHandle.Null)
             {
-                _context.Renderer.DeleteBuffer(_flushBuffer);
+                _context.Renderer.DeleteBuffer(flushBuffer);
             }
         }
     }
