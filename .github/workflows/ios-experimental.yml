@@ -39,6 +39,15 @@ jobs:
           dotnet-version: '10.0.400'
           architecture: arm64
 
+      - name: Run GTA V regression tests
+        shell: bash
+        run: |
+          dotnet test src/Ryujinx.Tests/Ryujinx.Tests.csproj \
+            --configuration Release \
+            --filter 'FullyQualifiedName~TextureGroupLifecycleTests|FullyQualifiedName~AutoDeleteCacheTests|FullyQualifiedName~MoltenVKConfigurationTests|FullyQualifiedName~CacheEvictionPolicyTests|FullyQualifiedName~DescriptorPoolSizingTests|FullyQualifiedName~VulkanMemoryTrimPolicyTests' \
+            --logger 'trx;LogFileName=gta-v7-regressions.trx' \
+            --results-directory artifacts/test-results
+
       - name: Build package for re-signing
         shell: bash
         run: bash distribution/ios/build-unsigned-ipa.sh
@@ -56,6 +65,7 @@ jobs:
             artifacts/ios/*.entitlements
             artifacts/ios/Package.resolved
             artifacts/ios/logs/
+            artifacts/test-results/
           if-no-files-found: warn
           compression-level: 0
           retention-days: 7
