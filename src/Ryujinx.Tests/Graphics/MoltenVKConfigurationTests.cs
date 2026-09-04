@@ -83,18 +83,18 @@ namespace Ryujinx.Tests.Graphics
             Assert.That(VulkanPlatformPolicy.ShouldUseDriverPipelineCache(isIos), Is.EqualTo(expected));
         }
 
-        [TestCase(true, false)]
+        [TestCase(true, true)]
         [TestCase(false, true)]
-        public void BackendThreadingAutoPrefersSingleThreadedRendererOnIos(bool isIos, bool expected)
+        public void BackendThreadingAutoUsesDedicatedRendererThread(bool isIos, bool expected)
         {
             Assert.That(VulkanPlatformPolicy.ShouldPreferThreading(isIos), Is.EqualTo(expected));
         }
 
         [TestCase(true, true, 2)]
         [TestCase(true, false, 2)]
-        [TestCase(false, true, 4)]
+        [TestCase(false, true, 8)]
         [TestCase(false, false, 16)]
-        public void IosUsesFourMainCommandBuffers(bool isLight, bool isIos, int expected)
+        public void IosUsesEightMainCommandBuffers(bool isLight, bool isIos, int expected)
         {
             Assert.That(CommandBufferPool.GetTotalCommandBuffers(isLight, isIos), Is.EqualTo(expected));
         }

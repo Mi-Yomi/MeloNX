@@ -22,7 +22,7 @@ namespace Ryujinx.Graphics.Vulkan
     class CommandBufferPool : IDisposable
     {
         public const int MaxCommandBuffers = 16;
-        internal const int IosCommandBuffers = 4;
+        internal const int IosCommandBuffers = 8;
 
         private readonly int _totalCommandBuffers;
         private readonly int _totalCommandBuffersMask;

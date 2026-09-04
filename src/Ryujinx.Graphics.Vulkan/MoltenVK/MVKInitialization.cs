@@ -13,7 +13,7 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
     {
         private const string VulkanLib = "libvulkan.dylib";
         private const uint DefaultMaxActiveMetalCommandBuffersPerQueue = 32;
-        internal const uint IosMaxActiveMetalCommandBuffersPerQueue = 4;
+        internal const uint IosMaxActiveMetalCommandBuffersPerQueue = 8;
 
         [LibraryImport("libMoltenVK.dylib")]
         private static partial Result vkGetMoltenVKConfigurationMVK(nint unusedInstance, out MVKConfiguration config, ref nuint configSize);

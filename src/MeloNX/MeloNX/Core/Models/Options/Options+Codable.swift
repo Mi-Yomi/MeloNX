@@ -143,7 +143,7 @@ extension Options: Codable {
         memoryManagerMode      = MemoryManagerMode(rawValue: try c.decodeIfPresent(UInt8.self, forKey: .memoryManagerMode)   ?? MemoryManagerMode.hostMappedUnsafe.rawValue)!
         loggingGraphicsDebugLevel = GraphicsDebugLevel(rawValue: try c.decodeIfPresent(UInt32.self, forKey: .loggingGraphicsDebugLevel) ?? GraphicsDebugLevel.none.rawValue)!
         aspectRatio            = AspectRatio(rawValue:   try c.decodeIfPresent(UInt32.self, forKey: .aspectRatio)             ?? AspectRatio.fixed16x9.rawValue)!
-        backendThreading       = BackendThreading(rawValue: try c.decodeIfPresent(UInt32.self, forKey: .backendThreading)     ?? BackendThreading.off.rawValue)!
+        backendThreading       = BackendThreading(rawValue: try c.decodeIfPresent(UInt32.self, forKey: .backendThreading)     ?? BackendThreading.auto.rawValue)!
         graphicsBackend        = GraphicsBackend(rawValue: try c.decodeIfPresent(UInt32.self, forKey: .graphicsBackend)       ?? GraphicsBackend.vulkan.rawValue)!
         antiAliasing           = AntiAliasing(rawValue:  try c.decodeIfPresent(UInt32.self, forKey: .antiAliasing)            ?? AntiAliasing.none.rawValue)!
         scalingFilter          = ScalingFilter(rawValue: try c.decodeIfPresent(UInt32.self, forKey: .scalingFilter)           ?? ScalingFilter.bilinear.rawValue)!

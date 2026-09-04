@@ -198,7 +198,7 @@ struct Options {
     var resScale: Float = 1.0
     var maxAnisotropy: Float = -1.0
     var aspectRatio: AspectRatio = .fixed16x9
-    var backendThreading: BackendThreading = .off
+    var backendThreading: BackendThreading = .auto
     var enableAsyncShaderCompilation: Bool = false
     var disableMacroHLE: Bool = false
     var graphicsShadersDumpPath: String?

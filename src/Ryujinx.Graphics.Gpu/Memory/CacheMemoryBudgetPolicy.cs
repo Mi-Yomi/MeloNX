@@ -26,13 +26,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private const ulong GiB = 1024 * MiB;
 
         private const ulong DefaultBufferCapacity = 2 * GiB;
-        private const ulong IosUnifiedBufferCapacity = 64 * MiB;
+        private const ulong IosUnifiedBufferCapacity = 128 * MiB;
         private const ulong MinUnifiedBufferCapacity = 256 * MiB;
         private const ulong MaxUnifiedBufferCapacity = 768 * MiB;
 
         private const ulong DefaultTextureCapacity = 1 * GiB;
         private const ulong MinTextureCapacity = 512 * MiB;
-        private const ulong IosUnifiedTextureCapacity = 64 * MiB;
+        private const ulong IosUnifiedTextureCapacity = 128 * MiB;
         private const ulong MinUnifiedTextureCapacity = 256 * MiB;
         private const ulong MaxUnifiedTextureCapacity = 768 * MiB;
         private const ulong TextureCapacity6GiB = 4 * GiB;

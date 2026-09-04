@@ -9,10 +9,9 @@ namespace Ryujinx.Graphics.Vulkan
 
         public static bool ShouldPreferThreading(bool isIos)
         {
-            // Explicit Backend Threading=On is still honored by IRenderer.TryMakeThreaded.
-            // Auto stays single-threaded on iOS so queued commands cannot retain a second
-            // generation of transient resources under the platform's strict process limit.
-            return !isIos;
+            // GTA V is CPU/GPU submission bound on iOS. Keep Auto on the dedicated backend
+            // worker; explicit Backend Threading=Off is still honored by IRenderer.TryMakeThreaded.
+            return true;
         }
 
         public static bool GetPrimitiveRestartEnable(
