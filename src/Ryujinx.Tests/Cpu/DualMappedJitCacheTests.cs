@@ -102,14 +102,14 @@ namespace Ryujinx.Tests.Cpu
             SharedJitCacheAllocator allocator = new(400, (threshold, _) => thresholds.Add(threshold));
 
             allocator.Allocate(296);
-            Assert.IsEmpty(thresholds);
+            CollectionAssert.AreEqual(new[] { 10, 25, 50 }, thresholds);
             allocator.Allocate(4);
-            CollectionAssert.AreEqual(new[] { 75 }, thresholds);
+            CollectionAssert.AreEqual(new[] { 10, 25, 50, 75 }, thresholds);
             allocator.Allocate(60);
-            CollectionAssert.AreEqual(new[] { 75, 90 }, thresholds);
+            CollectionAssert.AreEqual(new[] { 10, 25, 50, 75, 90 }, thresholds);
             allocator.Allocate(20);
             allocator.Allocate(20);
-            CollectionAssert.AreEqual(new[] { 75, 90, 95 }, thresholds);
+            CollectionAssert.AreEqual(new[] { 10, 25, 50, 75, 90, 95 }, thresholds);
             Assert.AreEqual(400, allocator.UsedBytes);
             Assert.AreEqual(400, allocator.AddressHighWaterBytes);
         }
@@ -123,10 +123,64 @@ namespace Ryujinx.Tests.Cpu
             allocator.Allocate(96);
             allocator.Allocate(4);
 
-            CollectionAssert.AreEqual(new[] { 75, 90, 95 }, thresholds);
+            CollectionAssert.AreEqual(new[] { 10, 25, 50, 75, 90, 95 }, thresholds);
             Assert.Throws<OutOfMemoryException>(() => allocator.Allocate(int.MaxValue));
             Assert.AreEqual(100, allocator.UsedBytes);
-            CollectionAssert.AreEqual(new[] { 75, 90, 95 }, thresholds);
+            CollectionAssert.AreEqual(new[] { 10, 25, 50, 75, 90, 95 }, thresholds);
+        }
+
+        [Test]
+        public void ProcessWideDiagnosticsExposeCurrentAllocatorUsage()
+        {
+            SharedJitCacheAllocator allocator = new(100);
+            DualMappedJitCacheDiagnostics.Register(allocator);
+
+            try
+            {
+                allocator.Allocate(28);
+
+                Assert.That(DualMappedJitCacheDiagnostics.TryGetUsage(out DualMappedJitCacheUsage usage), Is.True);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(usage.CapacityBytes, Is.EqualTo(100));
+                    Assert.That(usage.UsedBytes, Is.EqualTo(28));
+                    Assert.That(usage.FreeBytes, Is.EqualTo(72));
+                    Assert.That(usage.AddressHighWaterBytes, Is.EqualTo(28));
+                });
+            }
+            finally
+            {
+                DualMappedJitCacheDiagnostics.Unregister(allocator);
+            }
+
+            Assert.That(DualMappedJitCacheDiagnostics.TryGetUsage(out DualMappedJitCacheUsage unavailableUsage), Is.False);
+            Assert.That(unavailableUsage, Is.EqualTo(default(DualMappedJitCacheUsage)));
+        }
+
+        [Test]
+        public void StaleSessionCannotUnregisterNewDiagnosticsAllocator()
+        {
+            SharedJitCacheAllocator oldAllocator = new(100);
+            SharedJitCacheAllocator newAllocator = new(200);
+            newAllocator.Allocate(40);
+
+            DualMappedJitCacheDiagnostics.Register(oldAllocator);
+            DualMappedJitCacheDiagnostics.Register(newAllocator);
+            DualMappedJitCacheDiagnostics.Unregister(oldAllocator);
+
+            try
+            {
+                Assert.That(DualMappedJitCacheDiagnostics.TryGetUsage(out DualMappedJitCacheUsage usage), Is.True);
+                Assert.Multiple(() =>
+                {
+                    Assert.That(usage.CapacityBytes, Is.EqualTo(200));
+                    Assert.That(usage.UsedBytes, Is.EqualTo(40));
+                });
+            }
+            finally
+            {
+                DualMappedJitCacheDiagnostics.Unregister(newAllocator);
+            }
         }
     }
 }

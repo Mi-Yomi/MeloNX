@@ -45,11 +45,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private readonly MultiRangeList<MultiRangeBuffer> _multiRangeBuffers;
         private readonly CacheEvictionPolicy<Buffer> _evictionPolicy;
         private readonly CacheEvictionPolicy<MultiRangeBuffer> _multiRangeEvictionPolicy;
+        private readonly MonotonicMemoryPressureCapacity _memoryPressureCapacity;
         private bool _memoryBudgetConfigured;
         private bool _isAppleUnifiedMemory;
 
         internal ulong CachedBytes => _evictionPolicy.CachedBytes + _multiRangeEvictionPolicy.CachedBytes;
-        internal ulong Capacity => _evictionPolicy.Capacity;
+        internal ulong Capacity => _memoryPressureCapacity.ConfiguredCapacity;
+        internal ulong EffectiveCapacity => _memoryPressureCapacity.EffectiveCapacity;
 
         private readonly Dictionary<ulong, BufferCacheEntry> _dirtyCache;
         private readonly Dictionary<ulong, BufferCacheEntry> _modifiedCache;
@@ -80,6 +82,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 static buffer => buffer.CacheSize,
                 static buffer => buffer.CacheNode,
                 static (buffer, node) => buffer.CacheNode = node);
+            _memoryPressureCapacity = new(DefaultMaxCachedBufferBytes);
 
             _dirtyCache = new Dictionary<ulong, BufferCacheEntry>();
 
@@ -95,18 +98,32 @@ namespace Ryujinx.Graphics.Gpu.Memory
         internal void ConfigureMemoryBudget(ulong capacity, bool isAppleUnifiedMemory)
         {
             if (_memoryBudgetConfigured &&
-                _evictionPolicy.Capacity == capacity &&
+                Capacity == capacity &&
                 _isAppleUnifiedMemory == isAppleUnifiedMemory)
             {
                 return;
             }
 
+            _memoryPressureCapacity.Configure(capacity);
             _evictionPolicy.Capacity = capacity;
             _memoryBudgetConfigured = true;
             _isAppleUnifiedMemory = isAppleUnifiedMemory;
 
             string memoryKind = isAppleUnifiedMemory ? " (Apple unified memory)" : string.Empty;
-            Logger.Info?.Print(LogClass.Gpu, $"Buffer cache memory limit: {_evictionPolicy.Capacity / MiB} MiB{memoryKind}");
+            Logger.Info?.Print(
+                LogClass.Gpu,
+                $"Buffer cache memory limit: configured={Capacity / MiB} MiB, effective={EffectiveCapacity / MiB} MiB{memoryKind}");
+        }
+
+        /// <summary>
+        /// Lowers the cache ceiling for the remainder of this cache's lifetime. This is called only
+        /// from the GPU thread after a critical host-memory pressure report has been consumed.
+        /// </summary>
+        /// <param name="capacity">New maximum number of evictable cache bytes</param>
+        /// <returns>True if the effective pressure ceiling changed</returns>
+        internal bool LatchPressureCapacity(ulong capacity)
+        {
+            return _memoryPressureCapacity.Latch(capacity);
         }
 
         private void AddBuffer(Buffer buffer)
@@ -173,12 +190,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
-        /// Evicts clean least-recently-used buffers until the configured memory budget is met.
+        /// Evicts clean least-recently-used buffers until the effective memory budget is met.
+        /// A session-long pressure ceiling can make this stricter than the configured budget.
         /// Buffers used by the current GPU sequence and buffers with outstanding data ownership are retained.
         /// </summary>
         internal void TrimToCapacity()
         {
-            TrimToCapacity(_evictionPolicy.Capacity);
+            TrimToCapacity(EffectiveCapacity);
         }
 
         /// <summary>
@@ -726,19 +744,19 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
                         overlaps = _buffers.FindOverlapsAsSpan(address, size);
                     }
-                    
+
                     address = Math.Min(address, overlaps[0].Address);
                     endAddress = Math.Max(endAddress, overlaps[^1].EndAddress);
-                    
+
                     for (int i = 0; i < overlaps.Length; i++)
                     {
                         anySparseCompatible |= overlaps[i].SparseCompatible;
                     }
 
                     Buffer[] overlapsArray = overlaps.ToArray();
-                    
+
                     RemoveBuffers(overlapsArray);
-                    
+
                     ulong newSize = endAddress - address;
 
                     AddBuffer(CreateBufferAligned(address, newSize, stage, anySparseCompatible, overlapsArray));
@@ -767,7 +785,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private void CreateBufferAligned(ulong address, ulong size, BufferStage stage, ulong alignment)
         {
             bool sparseAligned = alignment >= SparseBufferAlignmentSize;
-            
+
             ReadOnlySpan<Buffer> overlaps = _buffers.FindOverlapsAsSpan(address, size);
 
             if (overlaps.Length != 0)
@@ -789,7 +807,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
                     endAddress = Math.Max(endAddress, overlaps[^1].EndAddress);
                     int oldOverlapCount;
-                    
+
                     do
                     {
                         address = Math.Min(address, overlaps[0].Address);
@@ -803,11 +821,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
                     while (oldOverlapCount != overlaps.Length);
 
                     ulong newSize = endAddress - address;
-                    
+
                     Buffer[] overlapsArray = overlaps.ToArray();
-                    
+
                     RemoveBuffers(overlapsArray);
-                    
+
                     AddBuffer(CreateBufferAligned(address, newSize, stage, sparseAligned, overlapsArray));
                 }
                 else
@@ -819,7 +837,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             {
                 // No overlap, just create a new buffer.
                 AddBuffer(new(_context, _physicalMemory, address, size, stage, sparseAligned, []));
-            } 
+            }
         }
 
         /// <summary>
@@ -854,7 +872,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             NotifyBuffersModified?.Invoke();
 
             RecreateMultiRangeBuffers(address, size);
-            
+
             return newBuffer;
         }
 

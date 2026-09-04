@@ -86,19 +86,23 @@ namespace Ryujinx.Graphics.Vulkan
             return _plces.GetOrAdd(key, newKey => new PipelineLayoutCacheEntry(gd, device, setDescriptors, usePushDescriptors));
         }
 
-        public (int Layouts, int DescriptorSets, int Pools) TrimReusableDescriptorSets()
+        public (int Layouts, int DescriptorSets, int Pools, int PoolsCreated, int AllocationRetries) TrimReusableDescriptorSets()
         {
             int descriptorSets = 0;
             int pools = 0;
+            int poolsCreated = 0;
+            int allocationRetries = 0;
 
             foreach (PipelineLayoutCacheEntry plce in _plces.Values)
             {
                 var result = plce.TrimReusableDescriptorSets();
                 descriptorSets += result.DescriptorSets;
                 pools += result.Pools;
+                poolsCreated += result.PoolsCreated;
+                allocationRetries += result.AllocationRetries;
             }
 
-            return (_plces.Count, descriptorSets, pools);
+            return (_plces.Count, descriptorSets, pools, poolsCreated, allocationRetries);
         }
 
         protected virtual void Dispose(bool disposing)

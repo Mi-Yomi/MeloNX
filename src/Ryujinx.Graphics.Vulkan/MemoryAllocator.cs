@@ -5,6 +5,15 @@ using System.Threading;
 
 namespace Ryujinx.Graphics.Vulkan
 {
+    readonly record struct MemoryAllocatorStatistics(
+        int BlockLists,
+        int Blocks,
+        int FreeRanges,
+        ulong ReservedBytes,
+        ulong UsedBytes,
+        ulong FreeBytes,
+        ulong LargestFreeRangeBytes);
+
     class MemoryAllocator : IDisposable
     {
         private const ulong MaxDeviceMemoryUsageEstimate = 16UL * 1024 * 1024 * 1024;
@@ -92,6 +101,43 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             return -1;
+        }
+
+        internal MemoryAllocatorStatistics GetStatistics()
+        {
+            int blocks = 0;
+            int freeRanges = 0;
+            ulong reservedBytes = 0;
+            ulong freeBytes = 0;
+            ulong largestFreeRangeBytes = 0;
+
+            _lock.EnterReadLock();
+
+            try
+            {
+                foreach (MemoryAllocatorBlockList blockList in _blockLists)
+                {
+                    MemoryAllocatorStatistics statistics = blockList.GetStatistics();
+                    blocks += statistics.Blocks;
+                    freeRanges += statistics.FreeRanges;
+                    reservedBytes += statistics.ReservedBytes;
+                    freeBytes += statistics.FreeBytes;
+                    largestFreeRangeBytes = Math.Max(largestFreeRangeBytes, statistics.LargestFreeRangeBytes);
+                }
+
+                return new(
+                    _blockLists.Count,
+                    blocks,
+                    freeRanges,
+                    reservedBytes,
+                    reservedBytes - freeBytes,
+                    freeBytes,
+                    largestFreeRangeBytes);
+            }
+            finally
+            {
+                _lock.ExitReadLock();
+            }
         }
 
         public static bool IsDeviceMemoryShared(VulkanPhysicalDevice physicalDevice)

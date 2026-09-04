@@ -187,11 +187,15 @@ namespace Ryujinx.Graphics.Gpu
         public string GetCrashDiagnosticSnapshot()
         {
             ulong bufferCachedBytes = 0;
+            ulong bufferConfiguredCapacity = 0;
+            ulong bufferEffectiveCapacity = 0;
             ulong textureCachedBytes = 0;
 
             foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
             {
                 bufferCachedBytes += physicalMemory.BufferCache.CachedBytes;
+                bufferConfiguredCapacity += physicalMemory.BufferCache.Capacity;
+                bufferEffectiveCapacity += physicalMemory.BufferCache.EffectiveCapacity;
                 textureCachedBytes += physicalMemory.TextureCache.CachedBytes;
             }
 
@@ -202,6 +206,8 @@ namespace Ryujinx.Graphics.Gpu
             return $"sequence={SequenceNumber}, sync={SyncNumber}, physical_memories={PhysicalMemoryRegistry.Count}, " +
                    $"deferred_actions={DeferredActions.Count}, " +
                    $"buffer_cached_mib={bufferCachedBytes / (1024 * 1024)}, " +
+                   $"buffer_configured_capacity_mib={bufferConfiguredCapacity / (1024 * 1024)}, " +
+                   $"buffer_effective_capacity_mib={bufferEffectiveCapacity / (1024 * 1024)}, " +
                    $"texture_cached_mib={textureCachedBytes / (1024 * 1024)}, " +
                    $"presentation=[{Window.GetDiagnosticSnapshot()}], {renderer}.";
         }
@@ -402,9 +408,13 @@ namespace Ryujinx.Graphics.Gpu
                 ulong bufferBefore = 0;
                 ulong bufferAfter = 0;
                 ulong bufferTarget = 0;
+                ulong bufferConfiguredCapacity = 0;
+                ulong bufferEffectiveCapacity = 0;
                 ulong textureBefore = 0;
                 ulong textureAfter = 0;
                 ulong textureTarget = 0;
+                int textureEntries = 0;
+                ulong textureLargestEntryBytes = 0;
                 int textureEvicted = 0;
                 int textureSkippedReferenced = 0;
                 int textureSkippedModified = 0;
@@ -413,13 +423,17 @@ namespace Ryujinx.Graphics.Gpu
 
                 foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
                 {
-                    var result = physicalMemory.TrimForMemoryPressure(request.Severity);
+                    var result = physicalMemory.TrimForMemoryPressure(request.Severity, request.AvailableMemoryBytes);
                     bufferBefore += result.BufferBefore;
                     bufferAfter += result.BufferAfter;
                     bufferTarget += result.BufferTarget;
+                    bufferConfiguredCapacity += result.BufferConfiguredCapacity;
+                    bufferEffectiveCapacity += result.BufferEffectiveCapacity;
                     textureBefore += result.TextureBefore;
                     textureAfter += result.TextureAfter;
                     textureTarget += result.TextureTarget;
+                    textureEntries += result.TextureEntries;
+                    textureLargestEntryBytes = Math.Max(textureLargestEntryBytes, result.TextureLargestEntryBytes);
                     textureEvicted += result.TextureEvicted;
                     textureSkippedReferenced += result.TextureSkippedReferenced;
                     textureSkippedModified += result.TextureSkippedModified;
@@ -430,7 +444,9 @@ namespace Ryujinx.Graphics.Gpu
                 // This is deliberately after logical cache eviction. ThreadedRenderer turns it
                 // into a synchronous backend barrier, so queued disposals and completed Vulkan
                 // dependencies are physically released before the game can enqueue more work.
-                Renderer.TrimMemory(request.Severity == MemoryPressureSeverity.Critical);
+                Renderer.TrimMemory(
+                    request.Severity == MemoryPressureSeverity.Critical,
+                    request.AvailableMemoryBytes);
 
                 stopwatch.Stop();
                 Logger.Warning?.Print(
@@ -439,8 +455,11 @@ namespace Ryujinx.Graphics.Gpu
                     $"available={request.AvailableMemoryBytes / (1024 * 1024)} MiB, sequence={SequenceNumber}, " +
                     $"buffer_before={bufferBefore / (1024 * 1024)} MiB, buffer_after={bufferAfter / (1024 * 1024)} MiB, " +
                     $"buffer_target={bufferTarget / (1024 * 1024)} MiB, " +
+                    $"buffer_configured_capacity={bufferConfiguredCapacity / (1024 * 1024)} MiB, " +
+                    $"buffer_effective_capacity={bufferEffectiveCapacity / (1024 * 1024)} MiB, " +
                     $"texture_tracked={textureBefore / (1024 * 1024)} MiB, " +
                     $"texture_before={textureBefore / (1024 * 1024)} MiB, texture_after={textureAfter / (1024 * 1024)} MiB, " +
+                    $"texture_entries={textureEntries}, texture_largest_entry={textureLargestEntryBytes / (1024 * 1024)} MiB, " +
                     $"texture_target={textureTarget / (1024 * 1024)} MiB, texture_evicted={textureEvicted}, " +
                     $"texture_pressure_eviction_enabled={texturePressureEvictionEnabled}, " +
                     $"texture_skipped_referenced={textureSkippedReferenced}, texture_skipped_modified={textureSkippedModified}, " +

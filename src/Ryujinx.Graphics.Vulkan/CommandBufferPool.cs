@@ -7,9 +7,22 @@ using Semaphore = Silk.NET.Vulkan.Semaphore;
 
 namespace Ryujinx.Graphics.Vulkan
 {
+    readonly record struct CommandBufferPoolTrimResult(
+        int RetiredSubmissions,
+        int TotalCommandBuffers,
+        int QueuedBefore,
+        int QueuedAfter,
+        int InUse,
+        int DependenciesBefore,
+        int WaitablesBefore,
+        int PeakQueued,
+        int PeakDependenciesPerCommandBuffer,
+        int PeakWaitablesPerCommandBuffer);
+
     class CommandBufferPool : IDisposable
     {
         public const int MaxCommandBuffers = 16;
+        internal const int IosCommandBuffers = 4;
 
         private readonly int _totalCommandBuffers;
         private readonly int _totalCommandBuffersMask;
@@ -58,6 +71,9 @@ namespace Ryujinx.Graphics.Vulkan
         private int _queuedIndexesPtr;
         private int _queuedCount;
         private int _inUseCount;
+        private int _peakQueuedCount;
+        private int _peakDependenciesPerCommandBuffer;
+        private int _peakWaitablesPerCommandBuffer;
 
         public unsafe CommandBufferPool(
             Vk api,
@@ -88,7 +104,7 @@ namespace Ryujinx.Graphics.Vulkan
             // We need at least 2 command buffers to get texture data in some cases. iOS has a
             // strict process-memory ceiling, so keep fewer completed submissions and their
             // dependencies resident than the desktop backends do.
-            _totalCommandBuffers = isLight ? 2 : OperatingSystem.IsIOS() ? 8 : MaxCommandBuffers;
+            _totalCommandBuffers = GetTotalCommandBuffers(isLight, OperatingSystem.IsIOS());
             _totalCommandBuffersMask = _totalCommandBuffers - 1;
 
             _commandBuffers = new ReservedCommandBuffer[_totalCommandBuffers];
@@ -104,10 +120,18 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
+        internal static int GetTotalCommandBuffers(bool isLight, bool isIos)
+        {
+            return isLight ? 2 : isIos ? IosCommandBuffers : MaxCommandBuffers;
+        }
+
         public void AddDependant(int cbIndex, IAuto dependant)
         {
             dependant.IncrementReferenceCount();
             _commandBuffers[cbIndex].Dependants.Add(dependant);
+            _peakDependenciesPerCommandBuffer = Math.Max(
+                _peakDependenciesPerCommandBuffer,
+                _commandBuffers[cbIndex].Dependants.Count);
         }
 
         public void AddWaitable(MultiFenceHolder waitable)
@@ -148,6 +172,9 @@ namespace Ryujinx.Graphics.Vulkan
             if (waitable.AddFence(cbIndex, entry.Fence))
             {
                 entry.Waitables.Add(waitable);
+                _peakWaitablesPerCommandBuffer = Math.Max(
+                    _peakWaitablesPerCommandBuffer,
+                    entry.Waitables.Count);
             }
         }
 
@@ -325,6 +352,7 @@ namespace Ryujinx.Graphics.Vulkan
                 int ptr = (_queuedIndexesPtr + _queuedCount) % _totalCommandBuffers;
                 _queuedIndexes[ptr] = cbIndex;
                 _queuedCount++;
+                _peakQueuedCount = Math.Max(_peakQueuedCount, _queuedCount);
             }
         }
 
@@ -367,20 +395,56 @@ namespace Ryujinx.Graphics.Vulkan
         /// Releases completed command-buffer dependencies and asks the backend to return unused
         /// command-pool storage to the system. This must run on the pool owner thread.
         /// </summary>
-        /// <returns>The number of queued submissions retired by this call</returns>
-        public int Trim()
+        /// <returns>Submission and dependency accounting captured before and after the trim</returns>
+        public CommandBufferPoolTrimResult Trim()
         {
             Debug.Assert(OwnedByCurrentThread);
 
             lock (_commandBuffers)
             {
                 int queuedBefore = _queuedCount;
+                int dependenciesBefore = 0;
+                int waitablesBefore = 0;
+
+                for (int index = 0; index < _totalCommandBuffers; index++)
+                {
+                    dependenciesBefore += _commandBuffers[index].Dependants.Count;
+                    waitablesBefore += _commandBuffers[index].Waitables.Count;
+                }
 
                 // Completed submissions release their dependencies; pending command buffers stay valid.
                 FreeConsumed(wait: false);
                 _api.TrimCommandPool(_device, _pool, 0);
 
-                return queuedBefore - _queuedCount;
+                CommandBufferPoolTrimResult result = new(
+                    queuedBefore - _queuedCount,
+                    _totalCommandBuffers,
+                    queuedBefore,
+                    _queuedCount,
+                    _inUseCount,
+                    dependenciesBefore,
+                    waitablesBefore,
+                    _peakQueuedCount,
+                    _peakDependenciesPerCommandBuffer,
+                    _peakWaitablesPerCommandBuffer);
+
+                _peakQueuedCount = _queuedCount;
+                _peakDependenciesPerCommandBuffer = 0;
+                _peakWaitablesPerCommandBuffer = 0;
+
+                // Pending submissions survive a non-blocking trim. Seed the next reporting
+                // window from their current ownership rather than briefly reporting zero.
+                for (int index = 0; index < _totalCommandBuffers; index++)
+                {
+                    _peakDependenciesPerCommandBuffer = Math.Max(
+                        _peakDependenciesPerCommandBuffer,
+                        _commandBuffers[index].Dependants.Count);
+                    _peakWaitablesPerCommandBuffer = Math.Max(
+                        _peakWaitablesPerCommandBuffer,
+                        _commandBuffers[index].Waitables.Count);
+                }
+
+                return result;
             }
         }
 

@@ -136,6 +136,20 @@ namespace Ryujinx.Graphics.Vulkan
                 return false;
             }
 
+            internal (int RangeCount, ulong FreeBytes, ulong LargestFreeRangeBytes) GetFreeStatistics()
+            {
+                ulong freeBytes = 0;
+                ulong largestFreeRangeBytes = 0;
+
+                foreach (Range range in _freeRanges)
+                {
+                    freeBytes += range.Size;
+                    largestFreeRangeBytes = Math.Max(largestFreeRangeBytes, range.Size);
+                }
+
+                return (_freeRanges.Count, freeBytes, largestFreeRangeBytes);
+            }
+
             public int CompareTo(Block other)
             {
                 return Size.CompareTo(other.Size);
@@ -306,6 +320,41 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             _blocks.Insert(index, block);
+        }
+
+        internal MemoryAllocatorStatistics GetStatistics()
+        {
+            int freeRanges = 0;
+            ulong reservedBytes = 0;
+            ulong freeBytes = 0;
+            ulong largestFreeRangeBytes = 0;
+
+            _lock.EnterReadLock();
+
+            try
+            {
+                foreach (Block block in _blocks)
+                {
+                    var freeStatistics = block.GetFreeStatistics();
+                    freeRanges += freeStatistics.RangeCount;
+                    reservedBytes += block.Size;
+                    freeBytes += freeStatistics.FreeBytes;
+                    largestFreeRangeBytes = Math.Max(largestFreeRangeBytes, freeStatistics.LargestFreeRangeBytes);
+                }
+
+                return new(
+                    1,
+                    _blocks.Count,
+                    freeRanges,
+                    reservedBytes,
+                    reservedBytes - freeBytes,
+                    freeBytes,
+                    largestFreeRangeBytes);
+            }
+            finally
+            {
+                _lock.ExitReadLock();
+            }
         }
 
         public void Dispose()

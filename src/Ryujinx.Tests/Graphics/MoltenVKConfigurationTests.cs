@@ -2,6 +2,7 @@ using NUnit.Framework;
 using Ryujinx.Graphics.Vulkan;
 using Ryujinx.Graphics.Vulkan.MoltenVK;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace Ryujinx.Tests.Graphics
 {
@@ -80,6 +81,29 @@ namespace Ryujinx.Tests.Graphics
         public void IosDoesNotUseDriverPipelineCache(bool isIos, bool expected)
         {
             Assert.That(VulkanPlatformPolicy.ShouldUseDriverPipelineCache(isIos), Is.EqualTo(expected));
+        }
+
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        public void BackendThreadingAutoPrefersSingleThreadedRendererOnIos(bool isIos, bool expected)
+        {
+            Assert.That(VulkanPlatformPolicy.ShouldPreferThreading(isIos), Is.EqualTo(expected));
+        }
+
+        [TestCase(true, true, 2)]
+        [TestCase(true, false, 2)]
+        [TestCase(false, true, 4)]
+        [TestCase(false, false, 16)]
+        public void IosUsesFourMainCommandBuffers(bool isLight, bool isIos, int expected)
+        {
+            Assert.That(CommandBufferPool.GetTotalCommandBuffers(isLight, isIos), Is.EqualTo(expected));
+        }
+
+        [Test]
+        [SupportedOSPlatform("ios")]
+        public void MoltenVkAndRendererUseTheSameIosCommandBufferLimit()
+        {
+            Assert.That(MVKInitialization.IosMaxActiveMetalCommandBuffersPerQueue, Is.EqualTo(CommandBufferPool.IosCommandBuffers));
         }
     }
 }

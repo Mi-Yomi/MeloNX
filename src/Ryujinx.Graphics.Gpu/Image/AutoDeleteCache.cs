@@ -66,6 +66,18 @@ namespace Ryujinx.Graphics.Gpu.Image
         internal ulong CachedBytes => _totalSize;
         internal ulong Capacity => _maxCacheMemoryUsage;
 
+        internal (int Entries, ulong LargestEntryBytes) GetStatistics()
+        {
+            ulong largestEntryBytes = 0;
+
+            foreach (Texture texture in _textures)
+            {
+                largestEntryBytes = ulong.Max(largestEntryBytes, texture.CacheSize);
+            }
+
+            return (_textures.Count, largestEntryBytes);
+        }
+
         private HashSet<ShortTextureCacheEntry> _shortCacheBuilder;
         private HashSet<ShortTextureCacheEntry> _shortCache;
 

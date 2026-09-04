@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 [assembly: InternalsVisibleTo("Ryujinx.Tests")]
 
@@ -30,22 +31,69 @@ namespace Ryujinx.Cpu.LightningJit.Cache
         }
     }
 
+    public readonly record struct DualMappedJitCacheUsage(
+        int CapacityBytes,
+        int UsedBytes,
+        int FreeBytes,
+        int AddressHighWaterBytes);
+
+    /// <summary>
+    /// Exposes read-only process-wide JIT cache accounting to the iOS diagnostics boundary.
+    /// These are allocator bytes, not a measurement of resident physical pages.
+    /// </summary>
+    public static class DualMappedJitCacheDiagnostics
+    {
+        private static SharedJitCacheAllocator _allocator;
+
+        internal static void Register(SharedJitCacheAllocator allocator)
+        {
+            Volatile.Write(ref _allocator, allocator);
+        }
+
+        internal static void Unregister(SharedJitCacheAllocator allocator)
+        {
+            Interlocked.CompareExchange(ref _allocator, null, allocator);
+        }
+
+        public static bool TryGetUsage(out DualMappedJitCacheUsage usage)
+        {
+            SharedJitCacheAllocator allocator = Volatile.Read(ref _allocator);
+            if (allocator == null)
+            {
+                usage = default;
+                return false;
+            }
+
+            int usedBytes = allocator.UsedBytes;
+            int capacityBytes = allocator.CapacityBytes;
+            usage = new(
+                capacityBytes,
+                usedBytes,
+                Math.Max(0, capacityBytes - usedBytes),
+                allocator.AddressHighWaterBytes);
+            return true;
+        }
+    }
+
     // Managed allocation accounting, separate from the native executable mapping so it can be tested on any host.
     sealed class SharedJitCacheAllocator
     {
         private const int CodeAlignment = 4;
-        private static readonly int[] UsageThresholds = [75, 90, 95];
+        private static readonly int[] UsageThresholds = [10, 25, 50, 75, 90, 95];
 
         private readonly CacheMemoryAllocator _allocator;
         private readonly Action<int, SharedJitCacheAllocator> _usageThresholdReached;
         private int _nextUsageThreshold;
 
         public int CapacityBytes { get; }
-        public int UsedBytes { get; private set; }
+        private int _usedBytes;
+        private int _addressHighWaterBytes;
+
+        public int UsedBytes => Volatile.Read(ref _usedBytes);
         public int FreeBytes => CapacityBytes - UsedBytes;
 
         // Highest allocated end offset; unlike UsedBytes, this also spans reusable alignment gaps.
-        public int AddressHighWaterBytes { get; private set; }
+        public int AddressHighWaterBytes => Volatile.Read(ref _addressHighWaterBytes);
 
         public SharedJitCacheAllocator(int capacityBytes, Action<int, SharedJitCacheAllocator> usageThresholdReached = null)
         {
@@ -93,8 +141,8 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                     "Free bytes may be split by alignment gaps; this is executable cache exhaustion, not a measured iOS memory limit.");
             }
 
-            UsedBytes += (int)alignedBytes;
-            AddressHighWaterBytes = Math.Max(AddressHighWaterBytes, offset + (int)alignedBytes);
+            _usedBytes += (int)alignedBytes;
+            _addressHighWaterBytes = Math.Max(_addressHighWaterBytes, offset + (int)alignedBytes);
 
             while (_nextUsageThreshold < UsageThresholds.Length &&
                    (long)UsedBytes * 100 >= (long)CapacityBytes * UsageThresholds[_nextUsageThreshold])

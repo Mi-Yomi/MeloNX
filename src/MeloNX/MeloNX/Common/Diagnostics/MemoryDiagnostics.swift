@@ -131,7 +131,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 try openSegment()
 
                 var header: [String: Any] = [
-                    "schema_version": 3,
+                    "schema_version": 4,
                     "event": "session_start",
                     "time_utc": Self.timestamp(),
                     "device_model": metadata.model,
@@ -171,7 +171,17 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                     "file_logging_option": metadata.launchSettings.fileLoggingOption,
                     "core_log_captured": metadata.launchSettings.coreLogCaptured,
                     "managed_crash_entry_file": "managed-crash-entry.jsonl",
-                    "pressure_texture_eviction_enabled": false
+                    "pressure_texture_eviction_enabled": false,
+                    "ios_buffer_cache_limit_mib": 64,
+                    "ios_buffer_cache_critical_limit_mib": 32,
+                    "ios_buffer_cache_emergency_limit_mib": 16,
+                    "ios_texture_cache_limit_mib": 64,
+                    "ios_vulkan_command_buffers": 4,
+                    "backend_threading_auto_effective": "Off",
+                    "pressure_descriptor_trim_enabled": true,
+                    "pressure_managed_gc_enabled": true,
+                    "jit_pressure_snapshots_in_core_log": true,
+                    "jit_usage_in_memory_samples": true
                 ]
                 if let sourceCommit = metadata.sourceCommit {
                     header["source_commit"] = sourceCommit
@@ -293,6 +303,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             record["phys_footprint_bytes"] = info.phys_footprint
             record["session_sampled_peak_bytes"] = sampledPeak
             record["process_phys_footprint_peak_bytes"] = max(0, info.ledger_phys_footprint_peak)
+            appendTaskVmInfo(info, infoCount: count, availableMemory: availableMemory, to: &record)
         } else {
             record["task_info_error"] = result
         }
@@ -395,6 +406,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             "elapsed_seconds": (ProcessInfo.processInfo.systemUptime - startedAtUptime).rounded(),
             "os_proc_available_memory_bytes": availableMemory
         ]
+        appendJitCacheUsage(to: &record)
         if let pressure = evaluateMemoryPressure(event: event, availableMemory: availableMemory) {
             record["gpu_trim_request"] = pressure.level
             record["gpu_trim_source"] = pressure.source
@@ -406,6 +418,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             record["session_sampled_peak_bytes"] = sampledPeak
             // Kernel peak covers the whole process lifetime, including earlier games.
             record["process_phys_footprint_peak_bytes"] = max(0, info.ledger_phys_footprint_peak)
+            appendTaskVmInfo(info, infoCount: count, availableMemory: availableMemory, to: &record)
         } else {
             record["task_info_error"] = result
         }
@@ -416,6 +429,51 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             closeSession()
             print("Memory diagnostics stopped after a write error.")
         }
+    }
+
+    private func appendJitCacheUsage(to record: inout [String: Any]) {
+        let usage = Ryujinx.getJitCacheUsage()
+        record["jit_cache_available"] = usage.available
+        record["jit_cache_capacity_bytes"] = usage.capacityBytes
+        record["jit_cache_used_bytes"] = usage.usedBytes
+        record["jit_cache_free_bytes"] = usage.freeBytes
+        record["jit_cache_address_high_water_bytes"] = usage.addressHighWaterBytes
+
+        if usage.queryStatus < 0 {
+            record["jit_cache_query_status"] = usage.queryStatus
+        }
+    }
+
+    private func appendTaskVmInfo(
+        _ info: task_vm_info_data_t,
+        infoCount: mach_msg_type_number_t,
+        availableMemory: UInt64,
+        to record: inout [String: Any]
+    ) {
+        record["task_vm_info_count"] = infoCount
+        if let limitOffset = MemoryLayout<task_vm_info_data_t>.offset(of: \.limit_bytes_remaining) {
+            let integerStride = MemoryLayout<integer_t>.stride
+            let requiredCount = mach_msg_type_number_t(
+                (limitOffset + MemoryLayout<UInt64>.size + integerStride - 1) / integerStride
+            )
+            let hasLimitBytesRemaining = infoCount >= requiredCount
+            record["task_vm_limit_bytes_remaining_available"] = hasLimitBytesRemaining
+            if hasLimitBytesRemaining {
+                record["task_vm_limit_bytes_remaining"] = info.limit_bytes_remaining
+            }
+        } else {
+            record["task_vm_limit_bytes_remaining_available"] = false
+        }
+        record["estimated_process_limit_bytes"] = info.phys_footprint + availableMemory
+        record["task_vm_virtual_size_bytes"] = info.virtual_size
+        record["task_vm_resident_size_bytes"] = info.resident_size
+        record["task_vm_resident_size_peak_bytes"] = info.resident_size_peak
+        record["task_vm_internal_bytes"] = info.internal
+        record["task_vm_compressed_bytes"] = info.compressed
+        record["task_vm_reusable_bytes"] = info.reusable
+        record["task_vm_external_bytes"] = info.external
+        record["task_vm_device_bytes"] = info.device
+        record["task_vm_region_count"] = info.region_count
     }
 
     private func evaluateMemoryPressure(event: String, availableMemory: UInt64) -> (level: String, source: String, result: Int32)? {

@@ -168,6 +168,7 @@ printf 'moltenvk_sha256=%s\n' "$MOLTENVK_SHA256" >> "$BUILD_INFO"
 test "$(/usr/libexec/PlistBuddy -c 'Print :MeloNXSourceCommit' "$APP/Info.plist")" = "$SOURCE_SHA"
 nm -g "$APP/Frameworks/Ryujinx.Library.dylib" > "$OUTPUT_ROOT/logs/native-symbols.log"
 grep -Eq '(^|[[:space:]_])report_memory_pressure$' "$OUTPUT_ROOT/logs/native-symbols.log"
+grep -Eq '(^|[[:space:]_])get_jit_cache_usage$' "$OUTPUT_ROOT/logs/native-symbols.log"
 
 # Ad-hoc sign the main Mach-O only to preserve the requested memory entitlement
 # for the sideload tool. This does not create a device provisioning profile.

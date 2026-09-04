@@ -80,7 +80,8 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 _appliedPoolTrimGeneration = generation;
                 _pendingFlushTrimGeneration = generation;
-                retiredSubmissions = _pool?.Trim() ?? 0;
+                CommandBufferPoolTrimResult? poolTrim = _pool?.Trim();
+                retiredSubmissions = poolTrim?.RetiredSubmissions ?? 0;
             }
 
             long flushBufferBytes = trimFlushBufferNow ? TrimPendingFlushBuffer() : 0;

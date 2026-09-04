@@ -13,6 +13,7 @@ using Ryujinx.Common.Logging.Targets;
 using Ryujinx.Common.SystemInterop;
 using Ryujinx.Common.Utilities;
 using Ryujinx.Cpu;
+using Ryujinx.Cpu.LightningJit.Cache;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.GAL.Multithreading;
 using Ryujinx.Graphics.Gpu;
@@ -91,6 +92,11 @@ namespace Ryujinx.Library
         public int GcGen0Collections { get; init; }
         public int GcGen1Collections { get; init; }
         public int GcGen2Collections { get; init; }
+        public bool JitCacheAvailable { get; init; }
+        public int JitCacheCapacityBytes { get; init; }
+        public int JitCacheUsedBytes { get; init; }
+        public int JitCacheFreeBytes { get; init; }
+        public int JitCacheAddressHighWaterBytes { get; init; }
         public string GpuSnapshot { get; init; } = string.Empty;
     }
 
@@ -222,6 +228,7 @@ namespace Ryujinx.Library
                 string message = LimitDiagnosticText(exception?.Message ?? exceptionObject?.ToString() ?? "unknown", 1024);
                 string stack = LimitDiagnosticText(exception?.StackTrace ?? "stack_unavailable", 10000);
                 string gpuSnapshot = "unavailable";
+                bool jitCacheAvailable = DualMappedJitCacheDiagnostics.TryGetUsage(out DualMappedJitCacheUsage jitUsage);
 
                 try
                 {
@@ -234,7 +241,7 @@ namespace Ryujinx.Library
 
                 ManagedCrashPayload payload = new()
                 {
-                    SchemaVersion = 1,
+                    SchemaVersion = 2,
                     Origin = origin,
                     IsTerminating = isTerminating,
                     TimeUtc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
@@ -248,6 +255,11 @@ namespace Ryujinx.Library
                     GcGen0Collections = GC.CollectionCount(0),
                     GcGen1Collections = GC.CollectionCount(1),
                     GcGen2Collections = GC.CollectionCount(2),
+                    JitCacheAvailable = jitCacheAvailable,
+                    JitCacheCapacityBytes = jitUsage.CapacityBytes,
+                    JitCacheUsedBytes = jitUsage.UsedBytes,
+                    JitCacheFreeBytes = jitUsage.FreeBytes,
+                    JitCacheAddressHighWaterBytes = jitUsage.AddressHighWaterBytes,
                     GpuSnapshot = gpuSnapshot,
                 };
 
@@ -346,13 +358,69 @@ namespace Ryujinx.Library
             _emulationContext?.SetUnboundedPresentTargetFps(targetFps);
         }
 
+        /// <summary>
+        /// Copies the current logical dual-mapped JIT allocator counters for native diagnostics.
+        /// Returns 1 when a cache is active, 0 before a cache is registered, and -1 for an invalid
+        /// call or an unexpected failure. These counters are not resident-memory measurements.
+        /// </summary>
+        [UnmanagedCallersOnly(EntryPoint = "get_jit_cache_usage")]
+        public static unsafe int GetJitCacheUsage(
+            ulong* capacityBytes,
+            ulong* usedBytes,
+            ulong* freeBytes,
+            ulong* addressHighWaterBytes)
+        {
+            if (capacityBytes == null || usedBytes == null || freeBytes == null || addressHighWaterBytes == null)
+            {
+                return -1;
+            }
+
+            *capacityBytes = 0;
+            *usedBytes = 0;
+            *freeBytes = 0;
+            *addressHighWaterBytes = 0;
+
+            try
+            {
+                if (!DualMappedJitCacheDiagnostics.TryGetUsage(out DualMappedJitCacheUsage usage))
+                {
+                    return 0;
+                }
+
+                *capacityBytes = (ulong)usage.CapacityBytes;
+                *usedBytes = (ulong)usage.UsedBytes;
+                *freeBytes = (ulong)usage.FreeBytes;
+                *addressHighWaterBytes = (ulong)usage.AddressHighWaterBytes;
+                return 1;
+            }
+            catch
+            {
+                *capacityBytes = 0;
+                *usedBytes = 0;
+                *freeBytes = 0;
+                *addressHighWaterBytes = 0;
+                return -1;
+            }
+        }
+
         [UnmanagedCallersOnly(EntryPoint = "report_memory_pressure")]
         public static int ReportMemoryPressure(ulong availableMemoryBytes, int severity, int source)
         {
             try
             {
                 GpuContext context = Volatile.Read(ref _activeMemoryPressureContext);
-                return context?.ReportMemoryPressure(availableMemoryBytes, severity, source) == true ? 1 : 0;
+                bool accepted = context?.ReportMemoryPressure(availableMemoryBytes, severity, source) == true;
+
+                if (accepted && DualMappedJitCacheDiagnostics.TryGetUsage(out DualMappedJitCacheUsage usage))
+                {
+                    Logger.Warning?.Print(
+                        LogClass.Cpu,
+                        $"JIT cache pressure snapshot: severity={severity}, source={source}, " +
+                        $"capacity={usage.CapacityBytes}, used={usage.UsedBytes}, free={usage.FreeBytes}, " +
+                        $"address_high_water={usage.AddressHighWaterBytes}.");
+                }
+
+                return accepted ? 1 : 0;
             }
             catch
             {

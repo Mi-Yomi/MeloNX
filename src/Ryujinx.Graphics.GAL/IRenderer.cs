@@ -38,7 +38,8 @@ namespace Ryujinx.Graphics.GAL
         /// Releases backend allocations that are safe to discard while the host is under memory pressure.
         /// </summary>
         /// <param name="aggressive">Whether expensive, rebuildable caches should also be discarded</param>
-        void TrimMemory(bool aggressive);
+        /// <param name="availableMemoryBytes">Current host bytes remaining before the process limit</param>
+        void TrimMemory(bool aggressive, ulong availableMemoryBytes);
 
         BufferHandle CreateBuffer(int size, BufferAccess access = BufferAccess.Default);
         BufferHandle CreateBuffer(nint pointer, int size);

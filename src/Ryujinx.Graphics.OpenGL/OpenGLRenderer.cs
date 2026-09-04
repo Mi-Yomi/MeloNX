@@ -280,7 +280,7 @@ namespace Ryujinx.Graphics.OpenGL
             }
         }
 
-        public void TrimMemory(bool aggressive)
+        public void TrimMemory(bool aggressive, ulong availableMemoryBytes)
         {
             // OpenGL has no equivalent to Vulkan command-pool trimming. The iOS backend is Vulkan.
         }

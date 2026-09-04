@@ -6,6 +6,8 @@ namespace Ryujinx.Tests.Graphics
 {
     public class MemoryPressureMailboxTests
     {
+        private const ulong MiB = 1024 * 1024;
+
         [Test]
         public void CoalescesStrongestSeveritySourcesAndLowestAvailableMemory()
         {
@@ -77,6 +79,88 @@ namespace Ryujinx.Tests.Graphics
         public void CalculatesTemporaryBufferTarget(ulong capacity, int severity, ulong expected)
         {
             Assert.That(MemoryPressureTrimPolicy.CalculateBufferTarget(capacity, (MemoryPressureSeverity)severity), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void LowPressureDoesNotLatchPersistentBufferCapacity()
+        {
+            ulong? target = MemoryPressureTrimPolicy.CalculatePersistentBufferCapacity(
+                64 * MiB,
+                MemoryPressureSeverity.Low,
+                1 * MiB);
+
+            Assert.That(target, Is.Null);
+        }
+
+        [TestCase(257UL, 32UL)]
+        [TestCase(256UL, 16UL)]
+        [TestCase(1UL, 16UL)]
+        public void CriticalPressureSelectsStagedPersistentBufferCapacity(ulong availableMiB, ulong expectedMiB)
+        {
+            ulong? target = MemoryPressureTrimPolicy.CalculatePersistentBufferCapacity(
+                64 * MiB,
+                MemoryPressureSeverity.Critical,
+                availableMiB * MiB);
+
+            Assert.That(target, Is.EqualTo(expectedMiB * MiB));
+        }
+
+        [Test]
+        public void PersistentCapacityCanOnlyTightenAndConfigurationDoesNotResetIt()
+        {
+            MonotonicMemoryPressureCapacity capacity = new(64 * MiB);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(capacity.IsLatched, Is.False);
+                Assert.That(capacity.ConfiguredCapacity, Is.EqualTo(64 * MiB));
+                Assert.That(capacity.EffectiveCapacity, Is.EqualTo(64 * MiB));
+            });
+
+            bool firstLatchChanged = capacity.Latch(32 * MiB);
+            bool attemptedRaiseChanged = capacity.Latch(64 * MiB);
+            capacity.Configure(128 * MiB);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(firstLatchChanged, Is.True);
+                Assert.That(attemptedRaiseChanged, Is.False);
+                Assert.That(capacity.IsLatched, Is.True);
+                Assert.That(capacity.ConfiguredCapacity, Is.EqualTo(128 * MiB));
+                Assert.That(capacity.EffectiveCapacity, Is.EqualTo(32 * MiB));
+            });
+
+            Assert.That(capacity.Latch(0), Is.True);
+            capacity.Configure(256 * MiB);
+            Assert.That(capacity.EffectiveCapacity, Is.Zero);
+        }
+
+        [Test]
+        public void LowerConfiguredCapacityPermanentlyTightensLatchedCapacity()
+        {
+            MonotonicMemoryPressureCapacity capacity = new(64 * MiB);
+            capacity.Latch(32 * MiB);
+
+            capacity.Configure(16 * MiB);
+            capacity.Configure(128 * MiB);
+
+            Assert.That(capacity.EffectiveCapacity, Is.EqualTo(16 * MiB));
+        }
+
+        [Test]
+        public void NewPersistentCapacityStartsUnlatched()
+        {
+            MonotonicMemoryPressureCapacity oldSession = new(64 * MiB);
+            oldSession.Latch(0);
+
+            MonotonicMemoryPressureCapacity newSession = new(64 * MiB);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(oldSession.EffectiveCapacity, Is.Zero);
+                Assert.That(newSession.IsLatched, Is.False);
+                Assert.That(newSession.EffectiveCapacity, Is.EqualTo(64 * MiB));
+            });
         }
 
         [TestCase(256UL, (int)MemoryPressureSeverity.Low, 128UL)]

@@ -75,8 +75,8 @@ namespace Ryujinx.Tests.Graphics
                 Assert.That(beforeRendererInitialization.BufferCapacity, Is.EqualTo(2 * GiB));
                 Assert.That(beforeRendererInitialization.TextureCapacity, Is.EqualTo(1 * GiB));
                 Assert.That(beforeRendererInitialization.IsAppleUnifiedMemory, Is.False);
-                Assert.That(afterRendererInitialization.BufferCapacity, Is.EqualTo(128 * MiB));
-                Assert.That(afterRendererInitialization.TextureCapacity, Is.EqualTo(128 * MiB));
+                Assert.That(afterRendererInitialization.BufferCapacity, Is.EqualTo(64 * MiB));
+                Assert.That(afterRendererInitialization.TextureCapacity, Is.EqualTo(64 * MiB));
                 Assert.That(afterRendererInitialization.IsAppleUnifiedMemory, Is.True);
             });
         }
@@ -98,8 +98,8 @@ namespace Ryujinx.Tests.Graphics
 
             Assert.Multiple(() =>
             {
-                Assert.That(budget.BufferCapacity, Is.EqualTo(128 * MiB));
-                Assert.That(budget.TextureCapacity, Is.EqualTo(128 * MiB));
+                Assert.That(budget.BufferCapacity, Is.EqualTo(64 * MiB));
+                Assert.That(budget.TextureCapacity, Is.EqualTo(64 * MiB));
                 Assert.That(budget.IsAppleUnifiedMemory, Is.True);
             });
         }

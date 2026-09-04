@@ -11,6 +11,15 @@ enum FirmwareInstallationError: Error {
     case failedInstall(String)
 }
 
+nonisolated struct JitCacheUsageSnapshot: Sendable {
+    let available: Bool
+    let queryStatus: Int32
+    let capacityBytes: UInt64
+    let usedBytes: UInt64
+    let freeBytes: UInt64
+    let addressHighWaterBytes: UInt64
+}
+
 final class Ryujinx {
     static var emulationView: MTKView?
     
@@ -32,6 +41,28 @@ final class Ryujinx {
 
     nonisolated static func reportMemoryPressure(availableBytes: UInt64, severity: Int32, source: Int32) -> Int32 {
         report_memory_pressure(availableBytes, severity, source)
+    }
+
+    nonisolated static func getJitCacheUsage() -> JitCacheUsageSnapshot {
+        var capacityBytes: UInt64 = 0
+        var usedBytes: UInt64 = 0
+        var freeBytes: UInt64 = 0
+        var addressHighWaterBytes: UInt64 = 0
+        let status = get_jit_cache_usage(
+            &capacityBytes,
+            &usedBytes,
+            &freeBytes,
+            &addressHighWaterBytes
+        )
+
+        return JitCacheUsageSnapshot(
+            available: status == 1,
+            queryStatus: status,
+            capacityBytes: capacityBytes,
+            usedBytes: usedBytes,
+            freeBytes: freeBytes,
+            addressHighWaterBytes: addressHighWaterBytes
+        )
     }
     
     static func getGameInfo(arg0: Int32, arg1: NSString, path: URL) -> GameInfo {
@@ -460,6 +491,14 @@ fileprivate func set_unbounded_present_target_fps(_ targetFps: Int32)
 
 @_silgen_name("report_memory_pressure")
 nonisolated fileprivate func report_memory_pressure(_ availableBytes: UInt64, _ severity: Int32, _ source: Int32) -> Int32
+
+@_silgen_name("get_jit_cache_usage")
+nonisolated fileprivate func get_jit_cache_usage(
+    _ capacityBytes: UnsafeMutablePointer<UInt64>,
+    _ usedBytes: UnsafeMutablePointer<UInt64>,
+    _ freeBytes: UnsafeMutablePointer<UInt64>,
+    _ addressHighWaterBytes: UnsafeMutablePointer<UInt64>
+) -> Int32
 
 @_silgen_name("get_dlc_nca_list")
 func get_dlc_nca_list(_ titleIdPtr: UnsafePointer<CChar>!, _ pathPtr: UnsafePointer<CChar>!) -> DlcNcaListC

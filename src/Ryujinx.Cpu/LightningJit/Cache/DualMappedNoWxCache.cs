@@ -30,6 +30,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             {
                 _allocator = alloc;
                 _cacheAllocator = new(size, LogUsageThreshold);
+                DualMappedJitCacheDiagnostics.Register(_cacheAllocator);
             }
 
             public int Allocate(int codeSize)
@@ -54,6 +55,11 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 }
             }
 
+            public void DetachDiagnostics()
+            {
+                DualMappedJitCacheDiagnostics.Unregister(_cacheAllocator);
+            }
+
             private static void LogUsageThreshold(int threshold, SharedJitCacheAllocator allocator)
             {
                 Logger.Warning?.Print(LogClass.Cpu,
@@ -66,6 +72,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
             {
                 if (disposing)
                 {
+                    DualMappedJitCacheDiagnostics.Unregister(_cacheAllocator);
                     _allocator.Dispose();
                 }
             }
@@ -103,7 +110,7 @@ namespace Ryujinx.Cpu.LightningJit.Cache
                 "Changing the size requires restarting the app; this does not change guest RAM.");
         }
 
-        public static void InitMemoryCache() 
+        public static void InitMemoryCache()
         {
             lock (InitializationLock)
             {
@@ -192,6 +199,13 @@ namespace Ryujinx.Cpu.LightningJit.Cache
 
         protected virtual void Dispose(bool disposing)
         {
+            if (disposing)
+            {
+                // The process-wide TXM mapping is intentionally reused by the next game, so do
+                // not dispose MemoryCache here. Only stop exposing this session's logical usage.
+                _sharedCache?.DetachDiagnostics();
+                _sharedCache = null;
+            }
         }
 
         public void Dispose()

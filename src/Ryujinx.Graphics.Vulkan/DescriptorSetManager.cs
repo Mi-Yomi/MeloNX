@@ -158,6 +158,8 @@ namespace Ryujinx.Graphics.Vulkan
 
         private readonly Device _device;
         private readonly DescriptorPoolHolder[] _currentPools;
+        private int _poolCreationsSinceLastReport;
+        private int _allocationRetriesSinceLastReport;
 
         public DescriptorSetManager(Device device, int poolCount)
         {
@@ -191,6 +193,7 @@ namespace Ryujinx.Graphics.Vulkan
             DescriptorPoolHolder pool = GetPool(api, poolSizes, poolIndex, layouts.Length, consumedDescriptors, updateAfterBind);
             if (!pool.TryAllocateDescriptorSets(layouts, consumedDescriptors, out DescriptorSetCollection dsc))
             {
+                _allocationRetriesSinceLastReport++;
                 pool = GetPool(api, poolSizes, poolIndex, layouts.Length, consumedDescriptors, updateAfterBind);
                 dsc = pool.AllocateDescriptorSets(layouts, consumedDescriptors);
             }
@@ -211,6 +214,7 @@ namespace Ryujinx.Graphics.Vulkan
             if (currentPool == null || !currentPool.CanFit(setsCount, descriptorsCount))
             {
                 currentPool = new DescriptorPoolHolder(api, _device, poolSizes, updateAfterBind);
+                _poolCreationsSinceLastReport++;
             }
 
             return currentPool;
@@ -220,7 +224,7 @@ namespace Ryujinx.Graphics.Vulkan
         /// Stops reusing the current pools. Pools with live descriptor sets are destroyed when
         /// their final <see cref="DescriptorSetCollection"/> is released.
         /// </summary>
-        public int RetireCurrentPools()
+        public (int Retired, int Created, int AllocationRetries) RetireCurrentPools()
         {
             int retired = 0;
 
@@ -235,7 +239,23 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             }
 
-            return retired;
+            var activity = ConsumeActivityCounters();
+            return (retired, activity.Created, activity.AllocationRetries);
+        }
+
+        /// <summary>
+        /// Returns and resets pool activity accumulated since the previous report without
+        /// retiring live pools. This lets pressure diagnostics include manual descriptor pools,
+        /// whose stable cache indexes prevent them from being retired with automatic sets.
+        /// </summary>
+        public (int Created, int AllocationRetries) ConsumeActivityCounters()
+        {
+            int created = _poolCreationsSinceLastReport;
+            int allocationRetries = _allocationRetriesSinceLastReport;
+            _poolCreationsSinceLastReport = 0;
+            _allocationRetriesSinceLastReport = 0;
+
+            return (created, allocationRetries);
         }
 
         protected virtual void Dispose(bool disposing)

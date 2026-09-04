@@ -51,6 +51,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
         internal ulong CachedBytes => _cache.CachedBytes;
         internal ulong Capacity => _cache.Capacity;
+        internal (int Entries, ulong LargestEntryBytes) GetCacheStatistics() => _cache.GetStatistics();
 
         /// <summary>
         /// Constructs a new instance of the texture manager.

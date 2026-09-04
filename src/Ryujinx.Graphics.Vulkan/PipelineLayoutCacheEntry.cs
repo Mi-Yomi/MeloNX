@@ -269,7 +269,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        private static Span<DescriptorPoolSize> GetDescriptorPoolSizes(Span<DescriptorPoolSize> output, ResourceDescriptorCollection setDescriptor, uint multiplier)
+        internal static Span<DescriptorPoolSize> GetDescriptorPoolSizes(Span<DescriptorPoolSize> output, ResourceDescriptorCollection setDescriptor, uint multiplier)
         {
             int count = 0;
 
@@ -295,7 +295,7 @@ namespace Ryujinx.Graphics.Vulkan
                     output[count++] = new DescriptorPoolSize()
                     {
                         Type = descriptorType,
-                        DescriptorCount = (uint)descriptor.Count,
+                        DescriptorCount = (uint)descriptor.Count * multiplier,
                     };
                 }
             }
@@ -328,7 +328,7 @@ namespace Ryujinx.Graphics.Vulkan
         /// Drops only automatically allocated, reproducible descriptor sets. Manual descriptor
         /// sets keep stable cache indexes used by resource arrays and are deliberately retained.
         /// </summary>
-        public (int DescriptorSets, int Pools) TrimReusableDescriptorSets()
+        public (int DescriptorSets, int Pools, int PoolsCreated, int AllocationRetries) TrimReusableDescriptorSets()
         {
             int descriptorSets = 0;
 
@@ -350,7 +350,14 @@ namespace Ryujinx.Graphics.Vulkan
 
             Array.Clear(_dsCacheCursor);
 
-            return (descriptorSets, _automaticDescriptorSetManager.RetireCurrentPools());
+            var automaticPoolResult = _automaticDescriptorSetManager.RetireCurrentPools();
+            var manualPoolActivity = _manualDescriptorSetManager.ConsumeActivityCounters();
+
+            return (
+                descriptorSets,
+                automaticPoolResult.Retired,
+                automaticPoolResult.Created + manualPoolActivity.Created,
+                automaticPoolResult.AllocationRetries + manualPoolActivity.AllocationRetries);
         }
 
         protected virtual unsafe void Dispose(bool disposing)

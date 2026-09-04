@@ -12,6 +12,7 @@ using Silk.NET.Vulkan.Extensions.EXT;
 using Silk.NET.Vulkan.Extensions.KHR;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -23,8 +24,6 @@ namespace Ryujinx.Graphics.Vulkan
 {
     public sealed class VulkanRenderer : IRenderer
     {
-        private const long AggressiveMemoryTrimIntervalMilliseconds = 30_000;
-
         [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "malloc_zone_pressure_relief")]
         private static extern nuint MallocZonePressureRelief(nint zone, nuint goal);
 
@@ -35,9 +34,13 @@ namespace Ryujinx.Graphics.Vulkan
         private WindowBase _window;
 
         private bool _initialized;
-        private long _lastAggressiveMemoryTrimMilliseconds;
+        private long _lastHeavyMemoryTrimMilliseconds;
+        private long _lastDescriptorMemoryTrimMilliseconds;
+        private long _lastManagedMemoryCollectionMilliseconds;
         private readonly object _backgroundContextGate = new();
+        private readonly Lock _memoryTrimRequestGate = new();
         private int _pendingMemoryTrimSeverity;
+        private ulong _pendingMemoryTrimAvailableBytes = ulong.MaxValue;
         private int _memoryTrimDeferralLogged;
         private readonly HashSet<PipelineBase> _pipelineOwners = new();
         private readonly HashSet<TextureStorage> _presentationStorages = new();
@@ -159,7 +162,7 @@ namespace Ryujinx.Graphics.Vulkan
         public string GpuRenderer { get; private set; }
         public string GpuVersion { get; private set; }
 
-        public bool PreferThreading => true;
+        public bool PreferThreading => VulkanPlatformPolicy.ShouldPreferThreading(OperatingSystem.IsIOS());
 
         public event EventHandler<ScreenCaptureImageInfo> ScreenCaptured;
 
@@ -1167,24 +1170,13 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        public void TrimMemory(bool aggressive)
+        public void TrimMemory(bool aggressive, ulong availableMemoryBytes)
         {
             int requestedSeverity = aggressive ? 2 : 1;
-            int currentSeverity = Volatile.Read(ref _pendingMemoryTrimSeverity);
-
-            while (currentSeverity < requestedSeverity)
+            lock (_memoryTrimRequestGate)
             {
-                int observedSeverity = Interlocked.CompareExchange(
-                    ref _pendingMemoryTrimSeverity,
-                    requestedSeverity,
-                    currentSeverity);
-
-                if (observedSeverity == currentSeverity)
-                {
-                    break;
-                }
-
-                currentSeverity = observedSeverity;
+                _pendingMemoryTrimSeverity = Math.Max(_pendingMemoryTrimSeverity, requestedSeverity);
+                _pendingMemoryTrimAvailableBytes = Math.Min(_pendingMemoryTrimAvailableBytes, availableMemoryBytes);
             }
 
             TryRunPendingMemoryTrim();
@@ -1192,9 +1184,12 @@ namespace Ryujinx.Graphics.Vulkan
 
         private void TryRunPendingMemoryTrim()
         {
-            if (Volatile.Read(ref _pendingMemoryTrimSeverity) == 0 || !_initialized || _pipeline == null)
+            lock (_memoryTrimRequestGate)
             {
-                return;
+                if (_pendingMemoryTrimSeverity == 0 || !_initialized || _pipeline == null)
+                {
+                    return;
+                }
             }
 
             // A background flush can synchronously interrupt the renderer to submit work. Never
@@ -1212,11 +1207,21 @@ namespace Ryujinx.Graphics.Vulkan
 
             try
             {
-                int severity = Interlocked.Exchange(ref _pendingMemoryTrimSeverity, 0);
+                int severity;
+                ulong availableMemoryBytes;
+
+                lock (_memoryTrimRequestGate)
+                {
+                    severity = _pendingMemoryTrimSeverity;
+                    availableMemoryBytes = _pendingMemoryTrimAvailableBytes;
+                    _pendingMemoryTrimSeverity = 0;
+                    _pendingMemoryTrimAvailableBytes = ulong.MaxValue;
+                }
+
                 if (severity != 0)
                 {
                     Interlocked.Exchange(ref _memoryTrimDeferralLogged, 0);
-                    TrimMemoryLocked(severity >= 2);
+                    TrimMemoryLocked(severity >= 2, availableMemoryBytes);
                 }
             }
             finally
@@ -1225,7 +1230,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
-        private void TrimMemoryLocked(bool aggressive)
+        private void TrimMemoryLocked(bool aggressive, ulong availableMemoryBytes)
         {
             if (!_initialized || _pipeline == null)
             {
@@ -1233,17 +1238,28 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             var deviceMemoryBefore = GetDeviceMemoryBudget();
+            MemoryAllocatorStatistics allocatorBefore = MemoryAllocator.GetStatistics();
             long now = Environment.TickCount64;
-            bool runAggressiveTrim = aggressive &&
-                (_lastAggressiveMemoryTrimMilliseconds == 0 ||
-                 now - _lastAggressiveMemoryTrimMilliseconds >= AggressiveMemoryTrimIntervalMilliseconds);
+            long managedAtDecision = GC.GetTotalMemory(forceFullCollection: false);
+            VulkanMemoryTrimDecision decision = VulkanMemoryTrimPolicy.Calculate(
+                OperatingSystem.IsIOS(),
+                aggressive,
+                availableMemoryBytes,
+                managedAtDecision,
+                now,
+                _lastHeavyMemoryTrimMilliseconds,
+                _lastDescriptorMemoryTrimMilliseconds,
+                _lastManagedMemoryCollectionMilliseconds);
+            bool runAggressiveTrim = decision.RunHeavyCacheTrim;
+            bool runReusableDescriptorTrim = decision.RunDescriptorTrim;
+            bool runManagedCollection = decision.RunManagedCollection;
 
             int buffersScanned = 0;
             int pipelineOwnersReset = 0;
 
             if (runAggressiveTrim)
             {
-                _lastAggressiveMemoryTrimMilliseconds = now;
+                _lastHeavyMemoryTrimMilliseconds = now;
 
                 // Derived index and vertex buffers are reproducible from their source buffers.
                 // Drop them before the submission so completed work can release the allocations.
@@ -1257,13 +1273,32 @@ namespace Ryujinx.Graphics.Vulkan
             FlushAllCommands();
             WaitForDeviceIdleSynchronized();
 
-            int retiredSubmissions = CommandBufferPool.Trim();
+            CommandBufferPoolTrimResult commandBufferTrim = CommandBufferPool.Trim();
             var backgroundTrim = BackgroundResources.Trim();
             int pipelineVariants = 0;
             int descriptorLayouts = 0;
             int descriptorSets = 0;
             int descriptorPools = 0;
+            int descriptorPoolsCreated = 0;
+            int descriptorAllocationRetries = 0;
             long managedBefore = GC.GetTotalMemory(forceFullCollection: false);
+            long totalAllocatedBefore = GC.GetTotalAllocatedBytes(precise: false);
+            GCMemoryInfo gcInfoBefore = GC.GetGCMemoryInfo();
+            int gcGen0Before = GC.CollectionCount(0);
+            int gcGen1Before = GC.CollectionCount(1);
+            int gcGen2Before = GC.CollectionCount(2);
+            long managedCollectionDurationMicroseconds = 0;
+
+            if (runReusableDescriptorTrim)
+            {
+                _lastDescriptorMemoryTrimMilliseconds = now;
+                var descriptorResult = PipelineLayoutCache.TrimReusableDescriptorSets();
+                descriptorLayouts = descriptorResult.Layouts;
+                descriptorSets = descriptorResult.DescriptorSets;
+                descriptorPools = descriptorResult.Pools;
+                descriptorPoolsCreated = descriptorResult.PoolsCreated;
+                descriptorAllocationRetries = descriptorResult.AllocationRetries;
+            }
 
             if (runAggressiveTrim)
             {
@@ -1271,13 +1306,14 @@ namespace Ryujinx.Graphics.Vulkan
                 {
                     pipelineVariants += shader.TrimPipelineVariants();
                 }
+            }
 
-                var descriptorResult = PipelineLayoutCache.TrimReusableDescriptorSets();
-                descriptorLayouts = descriptorResult.Layouts;
-                descriptorSets = descriptorResult.DescriptorSets;
-                descriptorPools = descriptorResult.Pools;
-
+            if (runManagedCollection)
+            {
+                _lastManagedMemoryCollectionMilliseconds = now;
+                long collectionStart = Stopwatch.GetTimestamp();
                 GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
+                managedCollectionDurationMicroseconds = Stopwatch.GetElapsedTime(collectionStart).Ticks / 10;
             }
 
             nuint mallocRelieved = 0;
@@ -1296,17 +1332,50 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             long managedAfter = GC.GetTotalMemory(forceFullCollection: false);
+            long totalAllocatedAfter = GC.GetTotalAllocatedBytes(precise: false);
+            GCMemoryInfo gcInfoAfter = GC.GetGCMemoryInfo();
             var deviceMemoryAfter = GetDeviceMemoryBudget();
+            MemoryAllocatorStatistics allocatorAfter = MemoryAllocator.GetStatistics();
 
             Logger.Warning?.Print(
                 LogClass.Gpu,
-                $"Renderer memory trim: aggressive={runAggressiveTrim}, retired_submissions={retiredSubmissions}, " +
+                $"Renderer memory trim: critical_requested={aggressive}, heavy_cache_trim={runAggressiveTrim}, " +
+                $"descriptor_trim={runReusableDescriptorTrim}, managed_gc={runManagedCollection}, " +
+                $"available_memory={availableMemoryBytes}, managed_at_decision={managedAtDecision}, " +
+                $"retired_submissions={commandBufferTrim.RetiredSubmissions}, " +
+                $"command_buffers_total={commandBufferTrim.TotalCommandBuffers}, " +
+                $"command_buffers_queued_before={commandBufferTrim.QueuedBefore}, " +
+                $"command_buffers_queued_after={commandBufferTrim.QueuedAfter}, " +
+                $"command_buffers_in_use={commandBufferTrim.InUse}, " +
+                $"command_buffer_dependencies={commandBufferTrim.DependenciesBefore}, " +
+                $"command_buffer_waitables={commandBufferTrim.WaitablesBefore}, " +
+                $"command_buffers_peak_queued={commandBufferTrim.PeakQueued}, " +
+                $"command_buffer_peak_dependencies={commandBufferTrim.PeakDependenciesPerCommandBuffer}, " +
+                $"command_buffer_peak_waitables={commandBufferTrim.PeakWaitablesPerCommandBuffer}, " +
                 $"background_resources={backgroundTrim.Resources}, background_retired_submissions={backgroundTrim.RetiredSubmissions}, " +
                 $"background_flush_buffer_bytes={backgroundTrim.FlushBufferBytes}, " +
                 $"pipeline_owners_reset={pipelineOwnersReset}, pipeline_variants={pipelineVariants}, " +
                 $"descriptor_layouts={descriptorLayouts}, " +
-                $"descriptor_sets={descriptorSets}, descriptor_pools={descriptorPools}, buffers_scanned={buffersScanned}, " +
+                $"descriptor_sets={descriptorSets}, descriptor_pools_retired={descriptorPools}, " +
+                $"descriptor_pools_created={descriptorPoolsCreated}, " +
+                $"descriptor_allocation_retries={descriptorAllocationRetries}, buffers_scanned={buffersScanned}, " +
                 $"managed_before={managedBefore}, managed_after={managedAfter}, " +
+                $"managed_gc_duration_us={managedCollectionDurationMicroseconds}, " +
+                $"gc_heap_before={gcInfoBefore.HeapSizeBytes}, gc_heap_after={gcInfoAfter.HeapSizeBytes}, " +
+                $"gc_committed_before={gcInfoBefore.TotalCommittedBytes}, gc_committed_after={gcInfoAfter.TotalCommittedBytes}, " +
+                $"gc_fragmented_before={gcInfoBefore.FragmentedBytes}, gc_fragmented_after={gcInfoAfter.FragmentedBytes}, " +
+                $"gc_memory_load_after={gcInfoAfter.MemoryLoadBytes}, gc_available_after={gcInfoAfter.TotalAvailableMemoryBytes}, " +
+                $"gc_gen0_delta={GC.CollectionCount(0) - gcGen0Before}, " +
+                $"gc_gen1_delta={GC.CollectionCount(1) - gcGen1Before}, " +
+                $"gc_gen2_delta={GC.CollectionCount(2) - gcGen2Before}, " +
+                $"managed_allocated_during_trim={Math.Max(0, totalAllocatedAfter - totalAllocatedBefore)}, " +
+                $"allocator_block_lists={allocatorAfter.BlockLists}, " +
+                $"allocator_blocks_before={allocatorBefore.Blocks}, allocator_blocks_after={allocatorAfter.Blocks}, " +
+                $"allocator_reserved_before={allocatorBefore.ReservedBytes}, allocator_reserved_after={allocatorAfter.ReservedBytes}, " +
+                $"allocator_used_before={allocatorBefore.UsedBytes}, allocator_used_after={allocatorAfter.UsedBytes}, " +
+                $"allocator_free_before={allocatorBefore.FreeBytes}, allocator_free_after={allocatorAfter.FreeBytes}, " +
+                $"allocator_free_ranges_after={allocatorAfter.FreeRanges}, " +
+                $"allocator_largest_free_range_after={allocatorAfter.LargestFreeRangeBytes}, " +
                 $"malloc_relieved_bytes={(ulong)mallocRelieved}, device_usage_before={deviceMemoryBefore.Usage}, " +
                 $"device_usage_after={deviceMemoryAfter.Usage}, device_budget={deviceMemoryAfter.Budget}.");
         }
