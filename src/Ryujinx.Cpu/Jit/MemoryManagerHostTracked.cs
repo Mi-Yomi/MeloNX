@@ -50,6 +50,16 @@ namespace Ryujinx.Cpu.Jit
         /// <param name="unsafeMode">True if unmanaged access should not be masked (unsafe), false otherwise.</param>
         /// <param name="invalidAccessHandler">Optional function to handle invalid memory accesses</param>
         public MemoryManagerHostTracked(MemoryBlock backingMemory, ulong addressSpaceSize, bool unsafeMode, InvalidAccessHandler invalidAccessHandler)
+            : this(backingMemory, addressSpaceSize, unsafeMode, invalidAccessHandler, null)
+        {
+        }
+
+        internal MemoryManagerHostTracked(
+            MemoryBlock backingMemory,
+            ulong addressSpaceSize,
+            bool unsafeMode,
+            InvalidAccessHandler invalidAccessHandler,
+            Func<MemoryBlock, ulong, ulong, bool> discardCallback)
         {
             bool useProtectionMirrors = MemoryBlock.GetPageSize() > PageSize;
 
@@ -81,7 +91,7 @@ namespace Ryujinx.Cpu.Jit
 
             _pages = new ManagedPageFlags(asBits);
             _nativePageTable = new(asSize);
-            _addressSpace = new(Tracking, backingMemory, _nativePageTable, useProtectionMirrors);
+            _addressSpace = new(Tracking, backingMemory, _nativePageTable, useProtectionMirrors, discardCallback);
         }
 
         public override ReadOnlySequence<byte> GetReadOnlySequence(ulong va, int size, bool tracked = false)

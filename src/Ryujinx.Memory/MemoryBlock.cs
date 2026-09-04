@@ -154,6 +154,39 @@ namespace Ryujinx.Memory
         }
 
         /// <summary>
+        /// Attempts to discard the physical pages backing a mapped range while preserving its mapping and protection.
+        /// This is a best-effort operation and is currently supported only on iOS.
+        /// The previous contents must be treated as lost after a successful call and initialized before reuse.
+        /// </summary>
+        /// <param name="offset">Starting offset of the range to discard</param>
+        /// <param name="size">Size of the range to discard</param>
+        /// <returns>True if the operating system accepted the discard request, false otherwise</returns>
+        public bool TryDiscard(ulong offset, ulong size)
+        {
+            nint pointer = _pointer;
+            ulong pageSize = GetPageSize();
+
+            if (pointer == nint.Zero ||
+                size == 0 ||
+                offset > Size ||
+                size > Size - offset ||
+                (offset & (pageSize - 1)) != 0 ||
+                (size & (pageSize - 1)) != 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                return MemoryManagement.TryDiscard(PtrAddr(pointer, offset), size);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Maps a view of memory from another memory block.
         /// </summary>
         /// <param name="srcBlock">Memory block from where the backing memory will be taken</param>

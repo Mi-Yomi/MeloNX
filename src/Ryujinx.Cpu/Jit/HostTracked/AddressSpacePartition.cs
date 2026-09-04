@@ -2,6 +2,7 @@ using Ryujinx.Common;
 using Ryujinx.Common.Collections;
 using Ryujinx.Memory;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 
@@ -143,15 +144,18 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                 PrivateAllocation = newAllocation;
             }
 
-            public void Unmap(AddressSpacePartitionMultiAllocation baseBlock, ulong baseAddress)
+            public PrivateMemoryAllocation Unmap(AddressSpacePartitionMultiAllocation baseBlock, ulong baseAddress)
             {
+                PrivateMemoryAllocation allocation = PrivateAllocation;
+
                 if (PrivateAllocation.IsValid)
                 {
                     baseBlock.UnmapView(PrivateAllocation.Memory, Address - baseAddress, Size);
-                    PrivateAllocation.Dispose();
                 }
 
                 PrivateAllocation = default;
+
+                return allocation;
             }
 
             public void Extend(ulong sizeDelta)
@@ -215,9 +219,14 @@ namespace Ryujinx.Cpu.Jit.HostTracked
         public ulong Size { get; }
         public ulong EndAddress => Address + Size;
 
-        public AddressSpacePartition(AddressSpacePartitionAllocation baseMemory, MemoryBlock backingMemory, ulong address, ulong size)
+        public AddressSpacePartition(
+            AddressSpacePartitionAllocation baseMemory,
+            MemoryBlock backingMemory,
+            ulong address,
+            ulong size,
+            Func<MemoryBlock, ulong, ulong, bool> discardCallback = null)
         {
-            _privateMemoryAllocator = new PrivateMemoryAllocator(DefaultBlockAlignment, MemoryAllocationFlags.Mirrorable);
+            _privateMemoryAllocator = new PrivateMemoryAllocator(DefaultBlockAlignment, MemoryAllocationFlags.Mirrorable, discardCallback);
             _mappingTree = new AddressIntrusiveRedBlackTree<Mapping>();
             _privateTree = new AddressIntrusiveRedBlackTree<PrivateMapping>();
             _treeLock = new ReaderWriterLockSlim();
@@ -268,11 +277,13 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                 _lastPagePa = pa + ((EndAddress - GuestPageSize) - va);
             }
 
-            Update(va, pa, size, MappingType.Private, zeroFill);
+            Update(va, pa, size, MappingType.Private, zeroFill, null);
         }
 
-        public void Unmap(ulong va, ulong size)
+        public void Unmap(ulong va, ulong size, List<PrivateMemoryAllocation> releasedAllocations)
         {
+            ArgumentNullException.ThrowIfNull(releasedAllocations);
+
             Debug.Assert(va >= Address);
             Debug.Assert(va + size <= EndAddress);
 
@@ -286,7 +297,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                 _lastPagePa = null;
             }
 
-            Update(va, 0UL, size, MappingType.None);
+            Update(va, 0UL, size, MappingType.None, false, releasedAllocations);
         }
 
         public void ReprotectAligned(ulong va, ulong size, MemoryPermission protection)
@@ -412,7 +423,13 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             return PrivateRange.Empty;
         }
 
-        private void Update(ulong va, ulong pa, ulong size, MappingType type, bool zeroFill = false)
+        private void Update(
+            ulong va,
+            ulong pa,
+            ulong size,
+            MappingType type,
+            bool zeroFill,
+            List<PrivateMemoryAllocation> releasedAllocations)
         {
             _treeLock.EnterWriteLock();
 
@@ -420,7 +437,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             {
                 Mapping map = _mappingTree.GetNode(va);
 
-                Update(map, va, pa, size, type, zeroFill);
+                Update(map, va, pa, size, type, zeroFill, releasedAllocations);
             }
             finally
             {
@@ -428,7 +445,14 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             }
         }
 
-        private Mapping Update(Mapping map, ulong va, ulong pa, ulong size, MappingType type, bool zeroFill)
+        private Mapping Update(
+            Mapping map,
+            ulong va,
+            ulong pa,
+            ulong size,
+            MappingType type,
+            bool zeroFill,
+            List<PrivateMemoryAllocation> releasedAllocations)
         {
             ulong endAddress = va + size;
 
@@ -457,7 +481,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                         bool unmappedAfter = map.Successor == null ||
                             (map.Successor.Type == MappingType.None && map.Successor.EndAddress >= BitUtils.AlignUp(endAddress, alignment));
 
-                        UnmapPrivate(va, size, unmappedBefore, unmappedAfter);
+                        UnmapPrivate(va, size, unmappedBefore, unmappedAfter, releasedAllocations);
                         break;
                     case MappingType.Private:
                         MapPrivate(va, size, zeroFill);
@@ -548,7 +572,12 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             }
         }
 
-        private void UnmapPrivate(ulong va, ulong size, bool unmappedBefore, bool unmappedAfter)
+        private void UnmapPrivate(
+            ulong va,
+            ulong size,
+            bool unmappedBefore,
+            bool unmappedAfter,
+            List<PrivateMemoryAllocation> releasedAllocations)
         {
             ulong endAddress = va + size;
 
@@ -582,7 +611,13 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                         map = newMap;
                     }
 
-                    map.Unmap(_baseMemory, Address);
+                    PrivateMemoryAllocation releasedAllocation = map.Unmap(_baseMemory, Address);
+
+                    if (releasedAllocation.IsValid)
+                    {
+                        releasedAllocations.Add(releasedAllocation);
+                    }
+
                     map = TryCoalesce(map);
                 }
 

@@ -108,6 +108,11 @@ namespace Ryujinx.Memory
             }
         }
 
+        public static bool TryDiscard(nint address, ulong size)
+        {
+            return madvise(address, size, MADV_FREE_DARWIN) == 0;
+        }
+
         public static bool Reprotect(nint address, ulong size, MemoryPermission permission)
         {
             return mprotect(address, size, GetProtection(permission)) == 0;

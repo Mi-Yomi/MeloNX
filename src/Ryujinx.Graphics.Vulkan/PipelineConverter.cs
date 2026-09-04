@@ -189,7 +189,10 @@ namespace Ryujinx.Graphics.Vulkan
 
             pipeline.PatchControlPoints = state.PatchControlPoints;
             pipeline.PolygonMode = PolygonMode.Fill; // Not implemented.
-            pipeline.PrimitiveRestartEnable = state.PrimitiveRestartEnable;
+            pipeline.PrimitiveRestartEnable = VulkanPlatformPolicy.GetPrimitiveRestartEnable(
+                state.PrimitiveRestartEnable,
+                topologySupportsRestart: true,
+                gd.IsMoltenVk);
             pipeline.RasterizerDiscardEnable = state.RasterizerDiscard;
             pipeline.SamplesCount = (uint)state.SamplesCount;
 

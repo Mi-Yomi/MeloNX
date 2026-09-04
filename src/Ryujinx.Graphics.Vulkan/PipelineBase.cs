@@ -932,7 +932,10 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void SetPrimitiveRestart(bool enable, int index)
         {
-            _newState.PrimitiveRestartEnable = enable;
+            _newState.PrimitiveRestartEnable = VulkanPlatformPolicy.GetPrimitiveRestartEnable(
+                enable,
+                topologySupportsRestart: true,
+                Gd.IsMoltenVk);
             // TODO: What to do about the index?
             SignalStateChange();
         }

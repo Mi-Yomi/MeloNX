@@ -55,6 +55,7 @@ namespace Ryujinx.Memory
         private const int MAP_ANONYMOUS_DARWIN = 0x1000;
 
         public const int MADV_DONTNEED = 4;
+        public const int MADV_FREE_DARWIN = 5;
         public const int MADV_REMOVE = 9;
 
         [LibraryImport("libc", EntryPoint = "mmap", SetLastError = true)]

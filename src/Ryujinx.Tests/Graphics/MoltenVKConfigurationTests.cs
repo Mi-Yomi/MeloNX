@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using Ryujinx.Graphics.Vulkan;
 using Ryujinx.Graphics.Vulkan.MoltenVK;
 using System.Runtime.InteropServices;
 
@@ -39,6 +40,46 @@ namespace Ryujinx.Tests.Graphics
                 Assert.That((uint)MVKConfigAdvertiseExtensions.WSI, Is.EqualTo(2));
                 Assert.That((uint)MVKConfigAdvertiseExtensions.Portability, Is.EqualTo(4));
             });
+        }
+
+        [TestCase(false, false, false)]
+        [TestCase(false, true, false)]
+        [TestCase(true, false, false)]
+        [TestCase(true, true, true)]
+        public void NativeVulkanPrimitiveRestartFollowsGuestAndTopology(
+            bool requestedEnable,
+            bool topologySupportsRestart,
+            bool expected)
+        {
+            bool actual = VulkanPlatformPolicy.GetPrimitiveRestartEnable(
+                requestedEnable,
+                topologySupportsRestart,
+                isMoltenVk: false);
+
+            Assert.That(actual, Is.EqualTo(expected));
+        }
+
+        [TestCase(false, false)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public void MoltenVkPrimitiveRestartAlwaysMatchesMetal(
+            bool requestedEnable,
+            bool topologySupportsRestart)
+        {
+            bool actual = VulkanPlatformPolicy.GetPrimitiveRestartEnable(
+                requestedEnable,
+                topologySupportsRestart,
+                isMoltenVk: true);
+
+            Assert.That(actual, Is.True);
+        }
+
+        [TestCase(true, false)]
+        [TestCase(false, true)]
+        public void IosDoesNotUseDriverPipelineCache(bool isIos, bool expected)
+        {
+            Assert.That(VulkanPlatformPolicy.ShouldUseDriverPipelineCache(isIos), Is.EqualTo(expected));
         }
     }
 }

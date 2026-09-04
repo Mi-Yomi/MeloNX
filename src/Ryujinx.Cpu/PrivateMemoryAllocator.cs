@@ -10,6 +10,8 @@ namespace Ryujinx.Cpu
     {
         public const ulong InvalidOffset = ulong.MaxValue;
 
+        private readonly Func<MemoryBlock, ulong, ulong, bool> _discardCallback;
+
         public class Block : IComparable<Block>
         {
             public MemoryBlock Memory { get; private set; }
@@ -156,8 +158,13 @@ namespace Ryujinx.Cpu
             }
         }
 
-        public PrivateMemoryAllocator(ulong blockAlignment, MemoryAllocationFlags allocationFlags) : base(blockAlignment, allocationFlags)
+        public PrivateMemoryAllocator(
+            ulong blockAlignment,
+            MemoryAllocationFlags allocationFlags,
+            Func<MemoryBlock, ulong, ulong, bool> discardCallback = null) : base(blockAlignment, allocationFlags)
         {
+            _discardCallback = discardCallback ??
+                (static (memory, offset, size) => memory.TryDiscard(offset, size));
         }
 
         public PrivateMemoryAllocation Allocate(ulong size, ulong alignment, bool zeroFill = false)
@@ -177,6 +184,14 @@ namespace Ryujinx.Cpu
         private Block CreateBlock(MemoryBlock memory, ulong size)
         {
             return new Block(memory, size);
+        }
+
+        protected override void OnFree(Block block, ulong offset, ulong size, bool isTotallyFree)
+        {
+            if (!isTotallyFree)
+            {
+                _discardCallback(block.Memory, offset, size);
+            }
         }
     }
 
@@ -247,11 +262,15 @@ namespace Ryujinx.Cpu
             return new Allocation(newBlock, newBlockOffset, size, newBlockReusedSize);
         }
 
-        public void Free(PrivateMemoryAllocator.Block block, ulong offset, ulong size)
+        public void Free(T block, ulong offset, ulong size)
         {
             block.Free(offset, size);
 
-            if (block.IsTotallyFree())
+            bool isTotallyFree = block.IsTotallyFree();
+
+            OnFree(block, offset, size, isTotallyFree);
+
+            if (isTotallyFree)
             {
                 for (int i = 0; i < _blocks.Count; i++)
                 {
@@ -264,6 +283,10 @@ namespace Ryujinx.Cpu
 
                 block.Destroy();
             }
+        }
+
+        protected virtual void OnFree(T block, ulong offset, ulong size, bool isTotallyFree)
+        {
         }
 
         private void InsertBlock(T block)

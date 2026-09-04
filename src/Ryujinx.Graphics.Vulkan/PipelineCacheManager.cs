@@ -17,6 +17,7 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly string _cacheDirectory;
         private readonly string _mainCachePath;
         private readonly string[] _workerCachePaths;
+        private readonly bool _enabled;
 
         private bool _disposed;
 
@@ -30,6 +31,17 @@ namespace Ryujinx.Graphics.Vulkan
             _workerCaches = new PipelineCache[workerCount];
             _checkpointPolicy = new(workerCount);
             _workerCachePaths = new string[workerCount];
+            _enabled = VulkanPlatformPolicy.ShouldUseDriverPipelineCache(OperatingSystem.IsIOS());
+
+            if (!_enabled)
+            {
+                MainCache = default;
+
+                Logger.Notice.PrintMsg(
+                    LogClass.Gpu,
+                    "Vulkan driver pipeline cache disabled on iOS to avoid retaining duplicate native cache data.");
+                return;
+            }
 
             PhysicalDeviceProperties properties = physicalDevice.PhysicalDeviceProperties;
             string cacheKey = $"{properties.VendorID:X8}-{properties.DeviceID:X8}-{properties.DriverVersion:X8}";
@@ -87,6 +99,11 @@ namespace Ryujinx.Graphics.Vulkan
 
         public bool IsWorkerCache(PipelineCache cache)
         {
+            if (!_enabled)
+            {
+                return false;
+            }
+
             ulong handle = cache.Handle;
 
             for (int index = 0; index < _workerCaches.Length; index++)
@@ -102,6 +119,11 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void NotifyWorkerPipelineCreated(int workerIndex)
         {
+            if (!_enabled)
+            {
+                return;
+            }
+
             // Independently implemented checkpoint pacing inspired by Eden PR #4294:
             // https://git.eden-emu.dev/eden-emu/eden/pulls/4294
             // Keep snapshots on the owning worker, between its pipeline creation operations.
@@ -123,6 +145,11 @@ namespace Ryujinx.Graphics.Vulkan
         public void MergeAndSave()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+
+            if (!_enabled)
+            {
+                return;
+            }
 
             if (MergeInto(MainCache, _workerCaches))
             {
@@ -313,6 +340,11 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             _disposed = true;
+
+            if (!_enabled)
+            {
+                return;
+            }
 
             for (int index = 0; index < _workerCaches.Length; index++)
             {

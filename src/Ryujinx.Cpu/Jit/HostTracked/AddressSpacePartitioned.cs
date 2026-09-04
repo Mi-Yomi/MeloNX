@@ -16,14 +16,21 @@ namespace Ryujinx.Cpu.Jit.HostTracked
         private readonly List<AddressSpacePartition> _partitions;
         private readonly AddressSpacePartitionAllocator _asAllocator;
         private readonly Action<ulong, nint, ulong> _updatePtCallback;
+        private readonly Func<MemoryBlock, ulong, ulong, bool> _discardCallback;
         private readonly bool _useProtectionMirrors;
 
-        public AddressSpacePartitioned(MemoryTracking tracking, MemoryBlock backingMemory, NativePageTable nativePageTable, bool useProtectionMirrors)
+        public AddressSpacePartitioned(
+            MemoryTracking tracking,
+            MemoryBlock backingMemory,
+            NativePageTable nativePageTable,
+            bool useProtectionMirrors,
+            Func<MemoryBlock, ulong, ulong, bool> discardCallback = null)
         {
             _backingMemory = backingMemory;
             _partitions = [];
             _asAllocator = new(tracking, nativePageTable.Read, _partitions);
             _updatePtCallback = nativePageTable.Update;
+            _discardCallback = discardCallback;
             _useProtectionMirrors = useProtectionMirrors;
         }
 
@@ -57,6 +64,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
         public void Unmap(ulong va, ulong size)
         {
             ulong endVa = va + size;
+            List<PrivateMemoryAllocation> releasedAllocations = [];
 
             while (va < endVa)
             {
@@ -76,11 +84,18 @@ namespace Ryujinx.Cpu.Jit.HostTracked
 
                     (ulong clampedVa, ulong clampedEndVa) = ClampRange(partition, va, endVa);
 
-                    partition.Unmap(clampedVa, clampedEndVa - clampedVa);
+                    partition.Unmap(clampedVa, clampedEndVa - clampedVa, releasedAllocations);
 
                     va += clampedEndVa - clampedVa;
 
                     InsertOrRemoveBridgeIfNeeded(partitionIndex);
+
+                    foreach (PrivateMemoryAllocation allocation in releasedAllocations)
+                    {
+                        allocation.Dispose();
+                    }
+
+                    releasedAllocations.Clear();
 
                     if (partition.IsEmpty())
                     {
@@ -376,7 +391,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
 
         private AddressSpacePartition CreateAsPartition(ulong va, ulong size)
         {
-            return new(CreateAsPartitionAllocation(va, size), _backingMemory, va, size);
+            return new(CreateAsPartitionAllocation(va, size), _backingMemory, va, size, _discardCallback);
         }
 
         public AddressSpacePartitionAllocation CreateAsPartitionAllocation(ulong va, ulong size)

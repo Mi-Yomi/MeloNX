@@ -481,8 +481,6 @@ namespace Ryujinx.Graphics.Vulkan
                     return null;
                 }
 
-                bool primitiveRestartEnable = PrimitiveRestartEnable;
-
                 bool topologySupportsRestart;
 
                 if (gd.Capabilities.SupportsPrimitiveTopologyListRestart)
@@ -498,7 +496,10 @@ namespace Ryujinx.Graphics.Vulkan
                                               PrimitiveTopology.TriangleStripWithAdjacency;
                 }
 
-                primitiveRestartEnable &= topologySupportsRestart;
+                bool primitiveRestartEnable = VulkanPlatformPolicy.GetPrimitiveRestartEnable(
+                    PrimitiveRestartEnable,
+                    topologySupportsRestart,
+                    isMoltenVk);
 
                 PipelineInputAssemblyStateCreateInfo inputAssemblyState = new()
                 {

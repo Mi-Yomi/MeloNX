@@ -933,12 +933,22 @@ namespace Ryujinx.Library
             else
                 appleHV = options.UseHypervisor;
 
-            MemoryConfiguration memoryConfiguration = options.ExpandRAM
+            bool expandRamEffective = options.ExpandRAM && !OperatingSystem.IsIOS();
+
+            if (options.ExpandRAM && !expandRamEffective)
+            {
+                Logger.Warning?.Print(
+                    LogClass.Application,
+                    "Expand RAM was requested but is disabled on iOS because an 8 GiB guest can exceed the app memory limit.");
+            }
+
+            MemoryConfiguration memoryConfiguration = expandRamEffective
                 ? MemoryConfiguration.MemoryConfiguration8GiB
                 : MemoryConfiguration.MemoryConfiguration4GiB;
 
             Logger.Info?.Print(LogClass.Application,
-                $"Guest memory configuration: {memoryConfiguration} (Expand RAM: {options.ExpandRAM}).");
+                $"Guest memory configuration: {memoryConfiguration} " +
+                $"(Expand RAM requested: {options.ExpandRAM}, effective: {expandRamEffective}).");
 
             var configuration = new HleConfiguration(
                 memoryConfiguration,

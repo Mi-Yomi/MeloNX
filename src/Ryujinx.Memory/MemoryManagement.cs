@@ -68,6 +68,11 @@ namespace Ryujinx.Memory
             }
         }
 
+        public static bool TryDiscard(nint address, ulong size)
+        {
+            return OperatingSystem.IsIOS() && MemoryManagementUnix.TryDiscard(address, size);
+        }
+
         public static void MapView(nint sharedMemory, ulong srcOffset, nint address, ulong size, MemoryBlock owner)
         {
             if (OperatingSystem.IsWindows())

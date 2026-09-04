@@ -380,7 +380,9 @@ struct Options {
         n.pointee.ScalingFilter           = scalingFilter
         n.pointee.ScalingFilterLevel      = scalingFilterLevel
         
-        n.pointee.ExpandRAM             = expandRAM
+        // MeloNX runs on iOS, where an 8 GiB guest can exceed the app's memory limit.
+        // Keep this guard in Swift as well as in the native core for stale per-game settings.
+        n.pointee.ExpandRAM             = false
         n.pointee.IgnoreMissingServices = ignoreMissingServices
         
         n.pointee.InputPath = utf8(inputPath)

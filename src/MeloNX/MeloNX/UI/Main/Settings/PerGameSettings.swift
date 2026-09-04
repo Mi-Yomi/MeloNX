@@ -485,18 +485,16 @@ struct PerGameSettingsView: View {
             
             Section {
                 NativeToggleRow("Expand Guest RAM", icon: "memorychip.fill",
-                                isOn: config.expandRAM,
-                                info: "Uses an alternative memory mode with 8 GiB DRAM to mimic a Switch dev unit. Only useful for high-res texture packs or 4K mods. Does NOT improve performance. Leave OFF if unsure.")
-                .disabled(totalMemory < 5723)
+                                isOn: .constant(false),
+                                info: "Unavailable on iOS because an 8 GiB guest can exceed the app memory limit and cause the system to terminate emulation.")
+                .disabled(true)
                 NativeToggleRow("Ignore Missing Services", icon: "waveform.path",
                                 isOn: config.ignoreMissingServices,
                                 info: "Ignores unimplemented Horizon OS services. May help bypass crashes on certain games. Leave OFF if unsure.")
             } header: {
                 Text("Memory")
             } footer: {
-                if totalMemory < 5723 {
-                    Text("Expand Guest RAM requires at least 6 GB of physical memory.")
-                }
+                Text("Expand Guest RAM is disabled on iOS. Games use the standard 4 GiB Switch memory configuration.")
             }
             
             Section("System Info") {

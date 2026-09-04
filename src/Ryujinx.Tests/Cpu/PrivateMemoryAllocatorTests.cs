@@ -1,5 +1,7 @@
 using NUnit.Framework;
 using Ryujinx.Cpu;
+using Ryujinx.Memory;
+using System.Collections.Generic;
 
 namespace Ryujinx.Tests.Cpu
 {
@@ -75,6 +77,41 @@ namespace Ryujinx.Tests.Cpu
             block.Free(4 * PageSize, PageSize);
             Assert.AreEqual(4 * PageSize, block.Allocate(2 * PageSize, 4 * PageSize, out ulong reusedSize));
             Assert.AreEqual(PageSize, reusedSize);
+        }
+
+        [Test]
+        public void PartialBlockFreeRequestsDiscardButWholeBlockFreeDoesNot()
+        {
+            List<(MemoryBlock Memory, ulong Offset, ulong Size)> discardRequests = [];
+
+            using PrivateMemoryAllocator allocator = new(
+                8 * PageSize,
+                MemoryAllocationFlags.Mirrorable,
+                (memory, offset, size) =>
+                {
+                    discardRequests.Add((memory, offset, size));
+                    return true;
+                });
+
+            PrivateMemoryAllocation first = allocator.Allocate(PageSize, PageSize);
+            PrivateMemoryAllocation second = allocator.Allocate(PageSize, PageSize);
+
+            MemoryBlock block = first.Memory;
+
+            first.Dispose();
+
+            Assert.That(discardRequests, Has.Count.EqualTo(1));
+            Assert.Multiple(() =>
+            {
+                Assert.That(discardRequests[0].Memory, Is.SameAs(block));
+                Assert.That(discardRequests[0].Offset, Is.EqualTo(0UL));
+                Assert.That(discardRequests[0].Size, Is.EqualTo(PageSize));
+            });
+
+            second.Dispose();
+
+            Assert.That(discardRequests, Has.Count.EqualTo(1),
+                "Destroying a wholly free backing block should replace a redundant discard request.");
         }
     }
 }
