@@ -48,6 +48,8 @@ namespace Ryujinx.Graphics.Gpu.Image
 
         private readonly AutoDeleteCache _cache;
 
+        internal ulong CachedBytes => _cache.CachedBytes;
+
         /// <summary>
         /// Constructs a new instance of the texture manager.
         /// </summary>

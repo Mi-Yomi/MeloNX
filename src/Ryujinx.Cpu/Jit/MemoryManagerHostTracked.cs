@@ -151,11 +151,24 @@ namespace Ryujinx.Cpu.Jit
         /// <inheritdoc/>
         public void Map(ulong va, ulong pa, ulong size, MemoryMapFlags flags)
         {
+            Map(va, pa, size, flags, zeroFill: false);
+        }
+
+        /// <summary>
+        /// Maps new private guest pages as zero, while leaving fresh OS allocations demand-paged.
+        /// </summary>
+        public void MapZeroed(ulong va, ulong pa, ulong size)
+        {
+            Map(va, pa, size, MemoryMapFlags.Private, zeroFill: true);
+        }
+
+        private void Map(ulong va, ulong pa, ulong size, MemoryMapFlags flags, bool zeroFill)
+        {
             AssertValidAddressAndSize(va, size);
 
             if (flags.HasFlag(MemoryMapFlags.Private))
             {
-                _addressSpace.Map(va, pa, size);
+                _addressSpace.Map(va, pa, size, zeroFill);
             }
 
             _pages.AddMapping(va, size);

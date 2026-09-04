@@ -20,11 +20,11 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly Device _device;
         private SwapchainKHR _swapchain;
 
-        private Image[] _swapchainImages;
-        private TextureView[] _swapchainImageViews;
+        private Image[] _swapchainImages = [];
+        private TextureView[] _swapchainImageViews = [];
 
-        private Semaphore[] _imageAvailableSemaphores;
-        private Semaphore[] _renderFinishedSemaphores;
+        private Semaphore[] _imageAvailableSemaphores = [];
+        private Semaphore[] _renderFinishedSemaphores = [];
 
         private int _frameIndex;
 
@@ -50,13 +50,68 @@ namespace Ryujinx.Graphics.Vulkan
             _device = device;
             _surface = surface;
 
-            CreateSwapchain();
+            TryCreateSwapchain();
         }
 
-        private void RecreateSwapchain()
+        private unsafe bool TryCreateSwapchain()
+        {
+            Result result = _gd.SurfaceApi.GetPhysicalDeviceSurfaceCapabilities(_physicalDevice, _surface, out SurfaceCapabilitiesKHR capabilities);
+            result.ThrowOnError();
+
+            if (!TryChooseSwapExtent(capabilities, out Extent2D extent))
+            {
+                _swapchainIsDirty = true;
+                return false;
+            }
+
+            CreateSwapchain(capabilities, extent);
+            _swapchainIsDirty = false;
+            return true;
+        }
+
+        private unsafe bool TryRecreateSwapchain()
+        {
+            Result result = _gd.SurfaceApi.GetPhysicalDeviceSurfaceCapabilities(_physicalDevice, _surface, out SurfaceCapabilitiesKHR capabilities);
+            result.ThrowOnError();
+
+            if (!TryChooseSwapExtent(capabilities, out Extent2D extent))
+            {
+                // A zero-sized drawable is temporarily unavailable (for example while the app is
+                // backgrounded). Keep the current swapchain intact and try again on the next frame.
+                _swapchainIsDirty = true;
+                return false;
+            }
+
+            if (_swapchain.Handle == 0)
+            {
+                CreateSwapchain(capabilities, extent);
+                _swapchainIsDirty = false;
+            }
+            else
+            {
+                return RecreateSwapchain();
+            }
+
+            return true;
+        }
+
+        private unsafe bool RecreateSwapchain()
         {
             SwapchainKHR oldSwapchain = _swapchain;
-            _swapchainIsDirty = false;
+
+            // All views and synchronization objects below may still be referenced by queued work.
+            _gd.Api.DeviceWaitIdle(_device).ThrowOnError();
+
+            // DeviceWaitIdle can block long enough for the drawable size to change. Query again
+            // immediately before destruction so a working swapchain is not replaced with 0x0.
+            Result result = _gd.SurfaceApi.GetPhysicalDeviceSurfaceCapabilities(_physicalDevice, _surface, out SurfaceCapabilitiesKHR capabilities);
+            result.ThrowOnError();
+
+            if (!TryChooseSwapExtent(capabilities, out Extent2D extent))
+            {
+                _swapchainIsDirty = true;
+                return false;
+            }
 
             for (int i = 0; i < _swapchainImageViews.Length; i++)
             {
@@ -64,8 +119,6 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             // Destroy old Swapchain.
-
-            _gd.Api.DeviceWaitIdle(_device);
 
             unsafe
             {
@@ -82,13 +135,13 @@ namespace Ryujinx.Graphics.Vulkan
 
             _gd.SwapchainApi.DestroySwapchain(_device, oldSwapchain, Span<AllocationCallbacks>.Empty);
 
-            CreateSwapchain();
+            CreateSwapchain(capabilities, extent);
+            _swapchainIsDirty = false;
+            return true;
         }
 
-        private unsafe void CreateSwapchain()
+        private unsafe void CreateSwapchain(SurfaceCapabilitiesKHR capabilities, Extent2D extent)
         {
-            _gd.SurfaceApi.GetPhysicalDeviceSurfaceCapabilities(_physicalDevice, _surface, out SurfaceCapabilitiesKHR capabilities);
-
             uint surfaceFormatsCount;
 
             _gd.SurfaceApi.GetPhysicalDeviceSurfaceFormats(_physicalDevice, _surface, &surfaceFormatsCount, null);
@@ -119,13 +172,9 @@ namespace Ryujinx.Graphics.Vulkan
 
             SurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(surfaceFormats, _colorSpacePassthroughEnabled);
 
-            Extent2D extent = ChooseSwapExtent(capabilities);
-
             _width = (int)extent.Width;
             _height = (int)extent.Height;
             _format = surfaceFormat.Format;
-
-            SwapchainKHR oldSwapchain = _swapchain;
 
             SwapchainCreateInfoKHR swapchainCreateInfo = new()
             {
@@ -309,6 +358,28 @@ namespace Ryujinx.Graphics.Vulkan
             return new Extent2D(width, height);
         }
 
+        internal static bool TryChooseSwapExtent(SurfaceCapabilitiesKHR capabilities, out Extent2D extent)
+        {
+            extent = ChooseSwapExtent(capabilities);
+            return extent.Width != 0 && extent.Height != 0;
+        }
+
+        private static bool IsSwapchainInvalidated(Result result, string operation)
+        {
+            if (result == Result.Success)
+            {
+                return false;
+            }
+
+            if (result == Result.ErrorOutOfDateKhr || result == Result.SuboptimalKhr)
+            {
+                return true;
+            }
+
+            result.ThrowOnError();
+            throw new VulkanException($"{operation} returned unexpected result \"{result}\".");
+        }
+
         public unsafe override void Present(ITexture texture, ImageCrop crop, Action swapBuffersCallback)
         {
             TextureView view = (TextureView)texture;
@@ -316,8 +387,21 @@ namespace Ryujinx.Graphics.Vulkan
             _gd.RegisterPresentationTexture(view);
             _gd.PipelineInternal.AutoFlush.Present();
 
+            bool swapchainRecreated = false;
+
+            if (_swapchainIsDirty)
+            {
+                if (!TryRecreateSwapchain())
+                {
+                    return;
+                }
+
+                swapchainRecreated = true;
+            }
+
             uint nextImage = 0;
-            int semaphoreIndex = _frameIndex++ % _imageAvailableSemaphores.Length;
+            int frameIndex = _frameIndex++;
+            int semaphoreIndex = (int)((uint)frameIndex % (uint)_imageAvailableSemaphores.Length);
 
             while (true)
             {
@@ -329,17 +413,35 @@ namespace Ryujinx.Graphics.Vulkan
                     new Fence(),
                     ref nextImage);
 
-                if (acquireResult == Result.ErrorOutOfDateKhr ||
-                    acquireResult == Result.SuboptimalKhr ||
-                    _swapchainIsDirty)
+                if (acquireResult == Result.ErrorOutOfDateKhr)
                 {
-                    RecreateSwapchain();
-                    semaphoreIndex = (_frameIndex - 1) % _imageAvailableSemaphores.Length;
+                    _swapchainIsDirty = true;
+
+                    // ERROR_OUT_OF_DATE does not acquire an image or signal the acquire semaphore,
+                    // so it is safe to recreate immediately and retry with the new semaphore set.
+                    // Limit each Present call to one recreation in case the surface keeps changing.
+                    if (swapchainRecreated || !TryRecreateSwapchain())
+                    {
+                        return;
+                    }
+
+                    swapchainRecreated = true;
+                    semaphoreIndex = (int)((uint)frameIndex % (uint)_imageAvailableSemaphores.Length);
+                }
+                else if (acquireResult == Result.SuboptimalKhr)
+                {
+                    // SUBOPTIMAL still acquires an image and signals the semaphore. Present this
+                    // image once so both binary semaphores are consumed, then recreate next frame.
+                    _swapchainIsDirty = true;
+                    break;
+                }
+                else if (acquireResult == Result.Success)
+                {
+                    break;
                 }
                 else
                 {
-                    acquireResult.ThrowOnError();
-                    break;
+                    IsSwapchainInvalidated(acquireResult, "vkAcquireNextImageKHR");
                 }
             }
 
@@ -477,7 +579,7 @@ namespace Ryujinx.Graphics.Vulkan
             Semaphore semaphore = _renderFinishedSemaphores[semaphoreIndex];
             SwapchainKHR swapchain = _swapchain;
 
-            Result result;
+            Result presentResult = Result.Success;
 
             PresentInfoKHR presentInfo = new()
             {
@@ -487,12 +589,25 @@ namespace Ryujinx.Graphics.Vulkan
                 SwapchainCount = 1,
                 PSwapchains = &swapchain,
                 PImageIndices = &nextImage,
-                PResults = &result,
+                PResults = &presentResult,
             };
+
+            Result queueResult;
 
             lock (_gd.QueueLock)
             {
-                _gd.SwapchainApi.QueuePresent(_gd.Queue, in presentInfo);
+                queueResult = _gd.SwapchainApi.QueuePresent(_gd.Queue, in presentInfo);
+            }
+
+            // The render-finished semaphore may already be signaled or queued for a wait when the
+            // surface becomes stale. Defer recreation to the next frame, where DeviceWaitIdle makes
+            // its destruction and replacement safe instead of risking binary-semaphore reuse.
+            bool queueInvalidated = IsSwapchainInvalidated(queueResult, "vkQueuePresentKHR");
+            bool swapchainInvalidated = IsSwapchainInvalidated(presentResult, "vkQueuePresentKHR (per-swapchain)");
+
+            if (queueInvalidated || swapchainInvalidated)
+            {
+                _swapchainIsDirty = true;
             }
         }
 
@@ -677,7 +792,10 @@ namespace Ryujinx.Graphics.Vulkan
                         _gd.Api.DestroySemaphore(_device, _renderFinishedSemaphores[i], null);
                     }
 
-                    _gd.SwapchainApi.DestroySwapchain(_device, _swapchain, null);
+                    if (_swapchain.Handle != 0)
+                    {
+                        _gd.SwapchainApi.DestroySwapchain(_device, _swapchain, null);
+                    }
                 }
 
                 _effect?.Dispose();

@@ -80,6 +80,7 @@ cmp "$PACKAGE_LOCK" "$OUTPUT_ROOT/Package.resolved"
 BUILD_STAGE=compile-native-and-swift
 xcodebuild "${XCODE_ARGUMENTS[@]}" build -jobs 2 \
   "CONFIGURATION_BUILD_DIR=$WORK_ROOT/products" \
+  "MELO_NX_SOURCE_COMMIT=$SOURCE_SHA" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= \
   2>&1 | tee "$OUTPUT_ROOT/logs/xcodebuild.log"
 cmp "$PACKAGE_LOCK" "$OUTPUT_ROOT/Package.resolved"
@@ -94,6 +95,9 @@ case "$EXECUTABLE" in
 esac
 xcrun lipo "$APP/$EXECUTABLE" -verify_arch arm64
 xcrun lipo "$APP/Frameworks/Ryujinx.Library.dylib" -verify_arch arm64
+test "$(/usr/libexec/PlistBuddy -c 'Print :MeloNXSourceCommit' "$APP/Info.plist")" = "$SOURCE_SHA"
+nm -g "$APP/Frameworks/Ryujinx.Library.dylib" > "$OUTPUT_ROOT/logs/native-symbols.log"
+grep -Eq '(^|[[:space:]_])report_memory_pressure$' "$OUTPUT_ROOT/logs/native-symbols.log"
 
 # Ad-hoc sign the main Mach-O only to preserve the requested memory entitlement
 # for the sideload tool. This does not create a device provisioning profile.

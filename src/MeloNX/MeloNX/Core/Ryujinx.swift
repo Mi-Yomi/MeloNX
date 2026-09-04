@@ -29,6 +29,10 @@ final class Ryujinx {
     static func setNativeWindow(_ layerPtr: UnsafeMutableRawPointer) {
         MeloNX.set_native_window(layerPtr)
     }
+
+    nonisolated static func reportMemoryPressure(availableBytes: UInt64, severity: Int32, source: Int32) -> Int32 {
+        report_memory_pressure(availableBytes, severity, source)
+    }
     
     static func getGameInfo(arg0: Int32, arg1: NSString, path: URL) -> GameInfo {
         let arg1Ptr = UnsafeMutablePointer<CChar>(mutating: arg1.utf8String)
@@ -453,6 +457,9 @@ fileprivate func set_view_size(_ width: Int32, _ height: Int32)
 
 @_silgen_name("set_unbounded_present_target_fps")
 fileprivate func set_unbounded_present_target_fps(_ targetFps: Int32)
+
+@_silgen_name("report_memory_pressure")
+nonisolated fileprivate func report_memory_pressure(_ availableBytes: UInt64, _ severity: Int32, _ source: Int32) -> Int32
 
 @_silgen_name("get_dlc_nca_list")
 func get_dlc_nca_list(_ titleIdPtr: UnsafePointer<CChar>!, _ pathPtr: UnsafePointer<CChar>!) -> DlcNcaListC

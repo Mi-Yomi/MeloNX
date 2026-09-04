@@ -2,37 +2,41 @@ using LibHac;
 using LibHac.Common;
 using LibHac.Fs;
 using System;
-using System.IO;
+using VfsFile = LibHac.Fs.Fsa.IFile;
+using VfsFileSystem = LibHac.Fs.Fsa.IFileSystem;
 
 namespace Ryujinx.HLE.HOS.Services.Fs.FileSystemProxy
 {
-    class LazyFile : LibHac.Fs.Fsa.IFile
+    class LazyFile : VfsFile
     {
-        private readonly LibHac.Fs.Fsa.IFileSystem _fs;
+        private readonly object _lock = new();
+        private SharedRef<VfsFileSystem> _fileSystem;
         private readonly string _filePath;
-        private readonly UniqueRef<LibHac.Fs.Fsa.IFile> _fileReference = new();
-        private readonly FileInfo _fileInfo;
+        private bool _disposed;
 
-        public LazyFile(string filePath, string prefix, LibHac.Fs.Fsa.IFileSystem fs)
+        public LazyFile(string filePath, in SharedRef<VfsFileSystem> fileSystem)
         {
-            _fs = fs;
+            _fileSystem = SharedRef<VfsFileSystem>.CreateCopy(in fileSystem);
             _filePath = filePath;
-            _fileInfo = new FileInfo(prefix + "/" + filePath);
-        }
-
-        private void PrepareFile()
-        {
-            if (_fileReference.Get == null)
-            {
-                _fs.OpenFile(ref _fileReference.Ref, _filePath.ToU8Span(), OpenMode.Read).ThrowIfFailure();
-            }
         }
 
         protected override Result DoRead(out long bytesRead, long offset, Span<byte> destination, in ReadOption option)
         {
-            PrepareFile();
+            lock (_lock)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                bytesRead = 0;
+                // RomFS views can retain thousands of assets. Keep the host file open
+                // only for this operation, instead of retaining a handle per asset.
+                using UniqueRef<VfsFile> file = new();
+                Result result = _fileSystem.Get.OpenFile(ref file.Ref, _filePath.ToU8Span(), OpenMode.Read);
+                if (result.IsFailure())
+                {
+                    return result;
+                }
 
-            return _fileReference.Get!.Read(out bytesRead, offset, destination);
+                return file.Get.Read(out bytesRead, offset, destination, in option);
+            }
         }
 
         protected override Result DoWrite(long offset, ReadOnlySpan<byte> source, in WriteOption option)
@@ -52,14 +56,41 @@ namespace Ryujinx.HLE.HOS.Services.Fs.FileSystemProxy
 
         protected override Result DoGetSize(out long size)
         {
-            size = _fileInfo.Length;
+            lock (_lock)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                // Building a RomFS asks for every asset's size. Keep these opens temporary
+                // so metadata collection does not retain one host handle per loose file.
+                using UniqueRef<VfsFile> file = new();
+                Result result = _fileSystem.Get.OpenFile(ref file.Ref, _filePath.ToU8Span(), OpenMode.Read);
+                if (result.IsFailure())
+                {
+                    size = 0;
+                    return result;
+                }
 
-            return Result.Success;
+                return file.Get.GetSize(out size);
+            }
         }
 
         protected override Result DoOperateRange(Span<byte> outBuffer, OperationId operationId, long offset, long size, ReadOnlySpan<byte> inBuffer)
         {
             throw new NotSupportedException();
+        }
+
+        public override void Dispose()
+        {
+            lock (_lock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+                _fileSystem.Destroy();
+                base.Dispose();
+            }
         }
     }
 }

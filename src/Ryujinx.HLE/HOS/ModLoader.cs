@@ -10,6 +10,7 @@ using LibHac.Util;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.Common.Utilities;
+using Ryujinx.HLE.FileSystem;
 using Ryujinx.HLE.HOS.Kernel.Process;
 using Ryujinx.HLE.Loaders.Executables;
 using Ryujinx.HLE.Loaders.Mods;
@@ -517,7 +518,7 @@ namespace Ryujinx.HLE.HOS
             }
 
             HashSet<string> fileSet = [];
-            RomFsBuilder builder = new();
+            using OwnedRomFsBuilder builder = new();
             int count = 0;
 
             Logger.Info?.Print(LogClass.ModLoader, $"Applying RomFS mods for Application {applicationId:X16}");
@@ -530,9 +531,9 @@ namespace Ryujinx.HLE.HOS
                     continue;
                 }
 
-                using (IFileSystem fs = new LocalFileSystem(mod.Path.FullName))
+                using (SharedRef<IFileSystem> fs = new(new LocalFileSystem(mod.Path.FullName)))
                 {
-                    AddFiles(fs, mod.Name, mod.Path.FullName, fileSet, builder);
+                    AddFiles(in fs, mod.Name, fileSet, builder);
                 }
 
                 count++;
@@ -547,9 +548,10 @@ namespace Ryujinx.HLE.HOS
                 }
 
                 Logger.Info?.Print(LogClass.ModLoader, $"Found 'romfs.bin' for Application {applicationId:X16}");
-                using (IFileSystem fs = new RomFsFileSystem(mod.Path.OpenRead().AsStorage()))
+                using (SharedRef<IStorage> storage = new(mod.Path.OpenRead().AsStorage(false)))
+                using (SharedRef<IFileSystem> fs = new(new RomFsFileSystem(in storage)))
                 {
-                    AddFiles(fs, mod.Name, mod.Path.FullName, fileSet, builder);
+                    AddFiles(in fs, mod.Name, fileSet, builder);
                 }
 
                 count++;
@@ -565,7 +567,7 @@ namespace Ryujinx.HLE.HOS
             Logger.Info?.Print(LogClass.ModLoader, $"Replaced {fileSet.Count} file(s) over {count} mod(s). Processing base storage...");
 
             // And finally, the base romfs
-            RomFsFileSystem baseRom = new(baseStorage);
+            using RomFsFileSystem baseRom = new(baseStorage);
             foreach (DirectoryEntryEx entry in baseRom.EnumerateEntries()
                                          .Where(f => f.Type == DirectoryEntryType.File && !fileSet.Contains(f.FullPath))
                                          .OrderBy(f => f.FullPath, StringComparer.Ordinal))
@@ -577,23 +579,22 @@ namespace Ryujinx.HLE.HOS
             }
 
             Logger.Info?.Print(LogClass.ModLoader, "Building new RomFS...");
-            IStorage newStorage = builder.Build();
+            IStorage newStorage = builder.Build(baseStorage);
             Logger.Info?.Print(LogClass.ModLoader, "Using modded RomFS");
 
             return newStorage;
         }
 
-        private static void AddFiles(IFileSystem fs, string modName, string rootPath, HashSet<string> fileSet, RomFsBuilder builder)
+        private static void AddFiles(in SharedRef<IFileSystem> fs, string modName, HashSet<string> fileSet, OwnedRomFsBuilder builder)
         {
-            foreach (DirectoryEntryEx entry in fs.EnumerateEntries()
+            foreach (DirectoryEntryEx entry in fs.Get.EnumerateEntries()
                                     .AsParallel()
                                     .Where(f => f.Type == DirectoryEntryType.File)
                                     .OrderBy(f => f.FullPath, StringComparer.Ordinal))
             {
-                LazyFile file = new(entry.FullPath, rootPath, fs);
-
                 if (fileSet.Add(entry.FullPath))
                 {
+                    LazyFile file = new(entry.FullPath, in fs);
                     builder.AddFile(entry.FullPath, file);
                 }
                 else

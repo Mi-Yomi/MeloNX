@@ -1,11 +1,14 @@
 # Аудит Eden и MeloNX для iPhone 16 Pro Max
 
-Дата: 3 сентября 2026 года. Рабочая ветка: `audit/eden-ios-memory`.
+Первичный аудит: 3 сентября 2026 года. Состояние домашнего обновления и первый
+полный лог устройства проверены 4 сентября 2026 года. Рабочая ветка:
+`audit/eden-ios-memory`.
 
 Исходная копия вашего форка загружена прежде сравнения с Eden: `Mi-Yomi/MeloNX`,
 `master`, commit `bce7c22c62916cbba6f6a4407f4b94245773a70c`. Сохранены все семь ваших
-коммитов относительно `6a1c15962e61`. Клон содержит все 4963 отслеживаемых файла;
-история ограничена последними коммитами, поскольку загрузка всей истории остановилась.
+коммитов относительно `6a1c15962e61`. Клон не является shallow: на исходной базе
+доступна история из 4737 коммитов. Домашняя ветка добавляет ещё три коммита и на
+`08d0ac9c8eb9786cfc761fd025e5b179ca7e944c` содержит 4740 коммитов.
 
 Eden загружен из официального Forgejo: commit
 `1dcc5745918761f5a554fec981b4d144034f6201`, 4527 отслеживаемых файлов.
@@ -28,21 +31,27 @@ Eden загружен из официального Forgejo: commit
 Это статический инженерный аудит запуска, iOS build pipeline, JIT, диагностики памяти,
 кэширования Vulkan и соответствующих подсистем Eden с компиляцией и целевыми тестами.
 Он не является построчной проверкой всех тысяч файлов, всех служб HLE, всей математики
-шейдеров и всех сторонних бинарных библиотек. Замеры на iPhone, исполнение Darwin JIT API
-и запуск конкретной сборки GTA V в этой среде не выполнялись.
+шейдеров и всех сторонних бинарных библиотек. Во время первичного аудита замеры на
+iPhone и запуск конкретной сборки GTA V не выполнялись. 4 сентября получены и отдельно
+разобраны полный лог MeloNX и телеметрия реального запуска; результаты находятся в
+[отчёте о вылете после пролога](GTA-V-CRASH-2026-09-04.ru.md).
 
-## Что уже было в вашем форке
+## Исходная база и домашнее обновление
 
 - Настройка Automatic / 512 / 768 / 1024 MiB для исполняемого JIT-кэша.
 - Диагностика заполнения кэша, `phys_footprint`, доступной памяти процесса и экспорт сессии.
 - Ручной workflow для NativeAOT → Swift/Xcode → IPA.
 - Успешный [run 33763880056](https://github.com/Mi-Yomi/MeloNX/actions/runs/33763880056)
-  на commit `3da533d714921dcb06f356791db9e686c062d948`.
+  на commit `3da533d714921dcb06f356791db9e686c062d948` был исходной контрольной сборкой.
 
-Последний исходный commit `bce7c22c` отличается от успешно собранного commit только
-документацией. Однако новые изменения этой ветки в прежний IPA не входят.
+`bce7c22c` теперь является базой, а не последним commit работы. Домашнее обновление
+состоит из `07ade37c5`, `4dc354f85` и `08d0ac9c8`. Все три состояния успешно прошли
+NativeAOT/Swift workflow: [run 33780225735](https://github.com/Mi-Yomi/MeloNX/actions/runs/33780225735),
+[run 33785877548](https://github.com/Mi-Yomi/MeloNX/actions/runs/33785877548) и
+[run 33805254812](https://github.com/Mi-Yomi/MeloNX/actions/runs/33805254812).
 
-Прежний IPA сохранён рядом с каталогом репозитория:
+Прежний IPA на `3da533d7` сохранён как контрольная сборка и не содержит домашнее
+обновление:
 `MeloNX-3da533d71492-unprovisioned.ipa`, 46 183 271 байт.
 SHA256: `275de59c99edb7fb232e60f6a7be98d678922f8986a673cdeb1e5da016b67a7b`.
 Архив Actions также проверен по опубликованному GitHub digest:
@@ -301,8 +310,9 @@ GPU shader cache не ускоряет первую компиляцию, но �
 HostMapped/LightningJit вызов PTC пока возвращает `DummyDiskCacheLoadState`, поэтому реальный
 PTC работает только при выборе обычного JIT, например после fallback на software page table.
 Девятнадцать тестов проверяют платформенную политику workers, формат program ID, отказ при нуле
-и выбор build ID. Конкретный NACP порта GTA V пока не предоставлен, поэтому фактическое
-включение GPU shader cache нужно подтвердить строкой `NRO cache identity` в логе устройства.
+и выбор build ID. Полученный 4 сентября лог подтверждает, что исследованный порт загружен
+как NSP с title ID `0100B00B51230000`, а не как NRO. Поэтому NRO cache identity не участвует
+в данном вылете; этот раздел остаётся применимым только к другим homebrew-запускам.
 
 ## Оставшиеся риски и условные блокеры порта
 
@@ -311,15 +321,17 @@ PTC работает только при выборе обычного JIT, на
    проверяет длины/полноту данных. Ошибки могут выйти за штатные catch загрузчика;
    завершение его очередей не защищено общим `finally`. Нужны тесты испорченных файлов,
    проверки формата и ограничение ресурсов без произвольного отсечения корректных shaders.
-2. **Внешние данные.** Импорт в библиотеку копирует исполняемый файл в `Documents/roms`,
-   SD размещается в `Documents/sdcard`. Порту с чтением `sdmc:/…` нужны соответствующие
-   внешние файлы. Какая раскладка нужна версии из Rutracker, не установлено.
+2. **Внешние данные.** Полученный лог подтверждает NSP, title ID `0100B00B51230000`
+   и активный RomFS mod с 105 заменёнными файлами. Полная раскладка внешних данных не
+   включена в аудит, но её уже нельзя считать неизвестным условием самого запуска.
 3. **Аргументы homebrew.** MeloNX запускает NRO без `argv`; Eden имеет такой путь.
-   Влияние зависит от того, использует ли конкретный порт аргументы для путей/настроек.
-4. **Диагностика GPU-памяти.** Apple cache budgets вычисляются из размера гостевой RAM,
-   а не `os_proc_available_memory`. Memory warning сейчас только записывается.
-   Счётчиков native allocations/текстур/буферов/очередей компиляции нет; для их
-   безопасного добавления нужны снимки на потоках-владельцах ресурсов.
+   Исследованная сессия использует NSP, поэтому этот риск к текущему вылету не относится.
+4. **Диагностика GPU-памяти.** В исходном `08d0ac9c8` Apple cache budgets вычислялись
+   из размера гостевой RAM, а memory warning только записывался. В текущем рабочем
+   дереве добавлен mailbox: пороги `os_proc_available_memory` и UIKit warning передают
+   запрос на GPU-поток, который безопасно вытесняет допустимые clean buffers. Texture
+   cache пока только измеряется. Счётчиков всех native allocations MoltenVK по-прежнему
+   нет, поэтому логический результат trim нельзя приравнивать к освобождённому RSS.
 5. **Предел проверки buffer eviction.** Политика и компиляция проверяются управляемыми
    тестами, но реальный submit с многодиапазонными buffers на MoltenVK ещё не прогнан.
    При графическом повреждении или GPU fault нужен полный лог и участок воспроизведения.
@@ -352,32 +364,44 @@ Actions используют major-теги, `macos-26` — обновляемы
 проверяет точную версию .NET и Swift lock. При повторном локальном запуске старые файлы
 `artifacts/ios` могут сохраняться после неудачной сборки: проверять exit code и `build-info.txt`.
 
-## Проверки этой ветки
+## Проверки домашнего обновления
 
-Все перечисленные ниже финальные проверки выполнены локальным .NET SDK 10.0.400.
+Ниже зафиксирована повторная проверка чистого commit `08d0ac9c8` до разработки
+исправления нового вылета. Она выполнена локальным .NET SDK 10.0.400.
 
 | Проверка | Результат | Граница результата |
 | --- | --- | --- |
-| `scripts/prepare-build.ps1` | Успех; 177 каталогов NuGet-пакетов, два SDK и Swift pins | Подготовка Windows и Apple build packs |
 | `scripts/build-local.ps1`, Desktop Release | 0 ошибок, 2 предупреждения | Компиляция решения после исправлений |
 | Тот же скрипт, managed `ios-arm64` Release | 0 ошибок, 15 предупреждений | Компиляция C# части новой iOS-библиотеки |
-| `DualMappedJitCacheTests`, `PipelineCacheCheckpointTests`, `AutoDeleteCacheTests` | 30/30 | Конфигурация/учёт JIT, checkpoint, ссылки/expiry/oversized-текстура |
-| `CacheEvictionPolicyTests` | 13/13 | LRU, sequence, selective sparse aliases, PTE sentinel и budget refresh |
-| `DiskCacheLoadPolicyTests` | 15/15 | Translation и backend in-flight limits на iOS/других платформах |
-| `HomebrewCacheIdentityTests` | 4/4 | NACP program ID, нулевые ID и NRO build ID selector |
-| Новые `DualMappedJitAllocatorTests` | 8/8 | Владение mappings и освобождение на управляемых заглушках |
-| Desktop `project.assets.json` | `Tmds.DBus.Protocol/0.21.3` | Исправленная версия реально выбрана restore |
-| Прежний IPA и архив Actions | SHA256 совпали | Целостность скачанной контрольной сборки |
+| Целевой набор `Ryujinx.Tests` для домашней ветки | 44/44 | GPU budgets/eviction, shader load/cache identity и SPIR-V I/O |
+| `DualMappedJitAllocatorTests` | 8/8 | Владение mappings и освобождение на управляемых заглушках |
 | `git diff --check` | Успех | Проверка пробелов в изменениях |
-| Swift/Xcode/NativeAOT → IPA | Отдельный workflow после публикации commit | Сверять `source_commit` и `SHA256SUMS.txt` в его артефакте |
-| Запуск на iPhone / GTA V | Не выполнялся | Нужны конкретная сборка порта, внешние данные и диагностика устройства |
+| Swift/Xcode/NativeAOT → IPA | Успех, run `33805254812` для точного `08d0ac9c8` | Подтверждает нативную сборку исходного состояния домашней ветки |
+| Запуск на iPhone / GTA V | Получены 14:04 лога и телеметрии | Подтверждает прохождение пролога со слов пользователя и рост footprint до предела; не подтверждает исправление нового вылета |
 
-Всего 70 целевых проверок пройдены, из них 51 добавлена в этой ветке. Предупреждения
-компиляции остаются в существующих участках (nullable/неиспользуемые поля/анализ платформ);
-успешная C# компиляция не является подтверждением Swift или исполнения iOS.
-Логи: `artifacts/logs/build-windows.log`, `build-ios-managed.log`.
-Результаты: `artifacts/test-results/low-memory-audit-final.trx`,
-`jit-allocator-audit-final.trx`.
+В повторном прогоне прошло 52 целевых теста: 44 в `Ryujinx.Tests` и 8 в
+`Ryujinx.Tests.Memory`. Ранее указанное здесь число 70 относилось к другому набору
+первичного аудита и не должно смешиваться с этим контрольным прогоном. Предупреждения
+компиляции остаются в существующих участках (nullable/неиспользуемые поля/анализ платформ).
+Логи сборки: `artifacts/audit-home-update/desktop-build.log` и
+`artifacts/audit-home-update/ios-managed-build.log`. Результаты тестов:
+`artifacts/audit-home-update/fork-tests.trx` и `jit-tests.trx`.
+
+После анализа лога в рабочем дереве реализованы реакция на давление памяти через
+NativeAOT mailbox, buffer-only trim на GPU sequence, корректная инициализация повторно
+используемой private memory, синхронизация Vulkan allocator, защита от swapchain 0×0,
+включённый Error-лог на iOS и запись source SHA. Для этого состояния локально прошли
+106/106 тестов `Ryujinx.Tests` и 8/8 `Ryujinx.Tests.Memory`, всего 114/114. Отдельные
+16/16 memory-pressure/swapchain проверок входят в число 106. Lifecycle-проверка
+подтверждает, что `StopAccepting` отклоняет новые отчёты и удаляет pending-запрос.
+
+Managed `ios-arm64` и Desktop Release в этом этапе являются локальными проверками C#
+на Windows. Managed `ios-arm64` завершился с 0 ошибок и 15 существующими
+предупреждениями; Desktop после чистого restore — с 0 ошибок и 0 предупреждений.
+Это не проверяет macOS/Xcode-путь. GitHub Actions, полный NativeAOT/Swift IPA и запуск
+исправления на iPhone ещё не подтверждены. Подробная
+архитектура, пороги, ограничения buffer-only очистки и план device-теста описаны в
+[отчёте о вылете после пролога](GTA-V-CRASH-2026-09-04.ru.md).
 
 Повторяемые команды из каталога репозитория:
 
@@ -385,21 +409,23 @@ Actions используют major-теги, `macos-26` — обновляемы
 powershell -NoProfile -File scripts/prepare-build.ps1
 powershell -NoProfile -File scripts/build-local.ps1
 $env:NUGET_PACKAGES = Join-Path $PWD '.tools/nuget/packages'
-./.tools/dotnet/dotnet.exe test src/Ryujinx.Tests/Ryujinx.Tests.csproj -c Release --filter 'FullyQualifiedName~PipelineCacheCheckpointTests|FullyQualifiedName~DualMappedJitCacheTests|FullyQualifiedName~AutoDeleteCacheTests|FullyQualifiedName~CacheEvictionPolicyTests|FullyQualifiedName~DiskCacheLoadPolicyTests|FullyQualifiedName~HomebrewCacheIdentityTests'
+./.tools/dotnet/dotnet.exe test src/Ryujinx.Tests/Ryujinx.Tests.csproj -c Release --filter 'FullyQualifiedName~CacheEvictionPolicyTests|FullyQualifiedName~DiskCacheLoadPolicyTests|FullyQualifiedName~HomebrewCacheIdentityTests|FullyQualifiedName~SpirvIoTests'
 ./.tools/dotnet/dotnet.exe test src/Ryujinx.Tests.Memory/Ryujinx.Tests.Memory.csproj -c Release --filter 'FullyQualifiedName~DualMappedJitAllocatorTests'
 ```
 
-Прежний IPA на commit `3da533d71492` пригоден как контрольная сборка и не содержит
-описанные выше исправления. Для новой ветки используется существующий
-[ручной workflow](https://github.com/Mi-Yomi/MeloNX/actions/workflows/ios-experimental.yml).
-Успешный статус run и его `build-info.txt` подтверждают нативную сборку именно
-указанного commit; они не подтверждают установку, JIT или игровой FPS на телефоне.
+Прежний IPA на commit `3da533d71492` пригоден только как контроль до домашнего
+обновления. Последняя проверенная GitHub-сборка исходного состояния новой ветки —
+[run 33805254812](https://github.com/Mi-Yomi/MeloNX/actions/runs/33805254812) для
+`08d0ac9c8`. Успешный status Actions подтверждает NativeAOT/Swift-компиляцию, но сам
+по себе не подтверждает установку, работу JIT или исправление вылета на телефоне.
 
 ## Как проверить GTA V дальше
 
-Нужны точные версия iOS, название/версия Switch-порта и внешних данных, формат игры,
-firmware, участок воспроизведения и экспорт диагностики с телефона. Номер темы или
-ролик с другим устройством эти данные не заменяют.
+Теперь зафиксированы iOS `27.0 (24A5430a)`, NSP `0100B00B51230000` версии `6.9.420`,
+firmware `22.5.0`, активный RomFS mod, участок воспроизведения и экспорт диагностики.
+Подробная временная шкала и границы вывода находятся в
+[отчёте от 4 сентября](GTA-V-CRASH-2026-09-04.ru.md). Для строгого различения Jetsam
+и ошибки выделения памяти ещё нужен системный `JetsamEvent` либо crash report.
 
 Сравнивать исходный и новый commit с одинаковыми настройками JIT, разрешением и одним
 участком игры. Начинать с Automatic JIT и выключенного Expand RAM; увеличение JIT-кэша проверять отдельно при

@@ -5,7 +5,7 @@ This repo includes several documents that explain both high-level and low-level 
 Intro to Ryujinx
 ==================
 
-Ryujinx is an open-source Nintendo Switch emulator, created by gdkchan, written in C#. 
+Ryujinx is an open-source Nintendo Switch emulator, created by gdkchan, written in C#.
 * The CPU emulator, ARMeilleure, emulates an ARMv8 CPU and currently has support for most 64-bit ARMv8 and some of the ARMv7 (and older) instructions.
 * The GPU emulator emulates the Switch's Maxwell GPU using either the OpenGL (version 4.5 minimum), Vulkan, or Metal (via MoltenVK) APIs through a custom build of OpenTK or Silk.NET respectively.
 * Audio output is entirely supported via C# wrappers for SDL3, with OpenAL & libsoundio as fallbacks.
@@ -32,4 +32,9 @@ Coding Guidelines
 Project Docs
 =================
 
-To be added. Many project files will contain basic XML docs for key functions and classes in the meantime.
+- [Аудит Eden и MeloNX для iPhone 16 Pro Max](EDEN-AUDIT.ru.md)
+- [GTA V: аудит домашнего обновления и вылета после пролога](GTA-V-CRASH-2026-09-04.ru.md)
+- [План эксперимента GTA V](GTAV-EXPERIMENT.ru.md)
+- [Исследование GTA V](GTA-V-RESEARCH.ru.md)
+
+Many project files also contain basic XML docs for key functions and classes.

@@ -188,7 +188,8 @@ namespace Ryujinx.Graphics.Vulkan
                 throw new ArgumentOutOfRangeException(nameof(alignment), $"Invalid alignment 0x{alignment:X}.");
             }
 
-            _lock.EnterReadLock();
+            // Allocation changes the free ranges, so readers must not share this lock.
+            _lock.EnterWriteLock();
 
             try
             {
@@ -205,51 +206,54 @@ namespace Ryujinx.Graphics.Vulkan
                         }
                     }
                 }
-            }
-            finally
-            {
-                _lock.ExitReadLock();
-            }
 
-            ulong blockAlignedSize = BitUtils.AlignUp(size, (ulong)_blockAlignment);
+                ulong blockAlignedSize = BitUtils.AlignUp(size, (ulong)_blockAlignment);
 
-            MemoryAllocateInfo memoryAllocateInfo = new()
-            {
-                SType = StructureType.MemoryAllocateInfo,
-                AllocationSize = blockAlignedSize,
-                MemoryTypeIndex = (uint)MemoryTypeIndex,
-            };
+                MemoryAllocateInfo memoryAllocateInfo = new()
+                {
+                    SType = StructureType.MemoryAllocateInfo,
+                    AllocationSize = blockAlignedSize,
+                    MemoryTypeIndex = (uint)MemoryTypeIndex,
+                };
 
-            _api.AllocateMemory(_device, in memoryAllocateInfo, null, out DeviceMemory deviceMemory).ThrowOnError();
+                _api.AllocateMemory(_device, in memoryAllocateInfo, null, out DeviceMemory deviceMemory).ThrowOnError();
 
-            nint hostPointer = nint.Zero;
-
-            if (map)
-            {
-                void* pointer = null;
+                nint hostPointer = nint.Zero;
 
                 try
                 {
-                    _api.MapMemory(_device, deviceMemory, 0, blockAlignedSize, 0, ref pointer).ThrowOnError();
+                    if (map)
+                    {
+                        void* pointer = null;
+                        _api.MapMemory(_device, deviceMemory, 0, blockAlignedSize, 0, ref pointer).ThrowOnError();
+                        hostPointer = (nint)pointer;
+                    }
+
+                    Block newBlock = new(deviceMemory, hostPointer, blockAlignedSize);
+
+                    // Reserve our range before making this block available to other allocations.
+                    ulong newBlockOffset = newBlock.Allocate(size, alignment);
+                    Debug.Assert(newBlockOffset != InvalidOffset);
+
+                    InsertBlock(newBlock);
+
+                    return new MemoryAllocation(this, newBlock, deviceMemory, GetHostPointer(newBlock, newBlockOffset), newBlockOffset, size);
                 }
                 catch
                 {
-                    // No registered block owns this allocation yet.
+                    if (hostPointer != nint.Zero)
+                    {
+                        _api.UnmapMemory(_device, deviceMemory);
+                    }
+
                     _api.FreeMemory(_device, deviceMemory, null);
                     throw;
                 }
-
-                hostPointer = (nint)pointer;
             }
-
-            Block newBlock = new(deviceMemory, hostPointer, blockAlignedSize);
-
-            InsertBlock(newBlock);
-
-            ulong newBlockOffset = newBlock.Allocate(size, alignment);
-            Debug.Assert(newBlockOffset != InvalidOffset);
-
-            return new MemoryAllocation(this, newBlock, deviceMemory, GetHostPointer(newBlock, newBlockOffset), newBlockOffset, size);
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
         }
 
         private static nint GetHostPointer(Block block, ulong offset)
@@ -264,57 +268,62 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void Free(Block block, ulong offset, ulong size)
         {
-            block.Free(offset, size);
+            bool destroy;
 
-            if (block.IsTotallyFree())
+            _lock.EnterWriteLock();
+
+            try
             {
-                _lock.EnterWriteLock();
+                block.Free(offset, size);
+                destroy = block.IsTotallyFree();
 
-                try
+                if (destroy)
                 {
-                    for (int i = 0; i < _blocks.Count; i++)
-                    {
-                        if (_blocks[i] == block)
-                        {
-                            _blocks.RemoveAt(i);
-                            break;
-                        }
-                    }
+                    // Detach while still holding the lock; no allocation may reuse an empty block
+                    // between this test and its destruction.
+                    _blocks.Remove(block);
                 }
-                finally
-                {
-                    _lock.ExitWriteLock();
-                }
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
+            }
 
+            if (destroy)
+            {
                 block.Destroy(_api, _device);
             }
         }
 
         private void InsertBlock(Block block)
         {
-            _lock.EnterWriteLock();
+            Debug.Assert(_lock.IsWriteLockHeld);
 
-            try
+            int index = _blocks.BinarySearch(block);
+            if (index < 0)
             {
-                int index = _blocks.BinarySearch(block);
-                if (index < 0)
-                {
-                    index = ~index;
-                }
+                index = ~index;
+            }
 
-                _blocks.Insert(index, block);
-            }
-            finally
-            {
-                _lock.ExitWriteLock();
-            }
+            _blocks.Insert(index, block);
         }
 
         public void Dispose()
         {
-            for (int i = 0; i < _blocks.Count; i++)
+            _lock.EnterWriteLock();
+
+            try
             {
-                _blocks[i].Destroy(_api, _device);
+                for (int i = 0; i < _blocks.Count; i++)
+                {
+                    _blocks[i].Destroy(_api, _device);
+                }
+
+                _blocks.Clear();
+            }
+            finally
+            {
+                _lock.ExitWriteLock();
             }
         }
     }

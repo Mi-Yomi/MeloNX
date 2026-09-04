@@ -1,5 +1,6 @@
 using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
+using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.Device;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Engine.GPFifo;
@@ -9,6 +10,7 @@ using Ryujinx.Graphics.Gpu.Synchronization;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 
 namespace Ryujinx.Graphics.Gpu
@@ -111,6 +113,7 @@ namespace Ryujinx.Graphics.Gpu
 
         private Thread _gpuThread;
         private bool _pendingSync;
+        private readonly MemoryPressureMailbox _memoryPressureMailbox;
 
         private long _modifiedSequence;
         private readonly ulong _firstTimestamp;
@@ -140,6 +143,8 @@ namespace Ryujinx.Graphics.Gpu
 
             DeferredActions = new Queue<Action>();
 
+            _memoryPressureMailbox = new MemoryPressureMailbox();
+
             PhysicalMemoryRegistry = new ConcurrentDictionary<ulong, PhysicalMemory>();
 
             SupportBufferUpdater = new SupportBufferUpdater(renderer);
@@ -156,6 +161,22 @@ namespace Ryujinx.Graphics.Gpu
         public GpuChannel CreateChannel()
         {
             return new GpuChannel(this);
+        }
+
+        /// <summary>
+        /// Queues a host memory-pressure report for safe processing on the GPU thread.
+        /// </summary>
+        public bool ReportMemoryPressure(ulong availableMemoryBytes, int severity, int source)
+        {
+            return _memoryPressureMailbox.Report(availableMemoryBytes, severity, source);
+        }
+
+        /// <summary>
+        /// Stops accepting host memory-pressure reports before this context is unpublished or torn down.
+        /// </summary>
+        public void StopAcceptingMemoryPressureReports()
+        {
+            _memoryPressureMailbox.StopAccepting();
         }
 
         /// <summary>
@@ -348,6 +369,34 @@ namespace Ryujinx.Graphics.Gpu
         {
             SequenceNumber++;
 
+            if (_memoryPressureMailbox.TryConsume(out MemoryPressureRequest request))
+            {
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                ulong bufferBefore = 0;
+                ulong bufferAfter = 0;
+                ulong bufferTarget = 0;
+                ulong textureTracked = 0;
+
+                foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
+                {
+                    var result = physicalMemory.TrimForMemoryPressure(request.Severity);
+                    bufferBefore += result.BufferBefore;
+                    bufferAfter += result.BufferAfter;
+                    bufferTarget += result.BufferTarget;
+                    textureTracked += result.TextureTracked;
+                }
+
+                stopwatch.Stop();
+                Logger.Warning?.Print(
+                    LogClass.Gpu,
+                    $"Memory pressure cache trim: severity={request.Severity}, sources={request.Sources}, " +
+                    $"available={request.AvailableMemoryBytes / (1024 * 1024)} MiB, sequence={SequenceNumber}, " +
+                    $"buffer_before={bufferBefore / (1024 * 1024)} MiB, buffer_after={bufferAfter / (1024 * 1024)} MiB, " +
+                    $"buffer_target={bufferTarget / (1024 * 1024)} MiB, texture_tracked={textureTracked / (1024 * 1024)} MiB, " +
+                    $"duration_ms={stopwatch.Elapsed.TotalMilliseconds:F1}. " +
+                    "Reported byte counts are logical cache accounting; dirty and in-flight resources are retained.");
+            }
+
             foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
             {
                 physicalMemory.BufferCache.TrimToCapacity();
@@ -471,6 +520,7 @@ namespace Ryujinx.Graphics.Gpu
         /// </summary>
         public void Dispose()
         {
+            StopAcceptingMemoryPressureReports();
             GPFifo.Dispose();
             HostInitalized.Dispose();
             _gpuReadyEvent.Dispose();

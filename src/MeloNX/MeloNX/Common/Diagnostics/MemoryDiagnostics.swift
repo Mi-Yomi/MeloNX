@@ -12,6 +12,9 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private let queueKey = DispatchSpecificKey<Bool>()
     private let segmentLimit = 512 * 1024
     private let sessionsToKeep = 5
+    private let lowAvailableMemory: UInt64 = 768 * 1024 * 1024
+    private let criticalAvailableMemory: UInt64 = 256 * 1024 * 1024
+    private let recoveredAvailableMemory: UInt64 = 1024 * 1024 * 1024
     private var timer: DispatchSourceTimer?
     private var observers: [NSObjectProtocol] = []
     private var file: FileHandle?
@@ -19,6 +22,10 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private var bytesWritten = 0
     private var sampledPeak: UInt64 = 0
     private var startedAtUptime: TimeInterval = 0
+    private var lowSampleStreak = 0
+    private var recoverySampleStreak = 0
+    private var sampledPressureLevel: Int32 = 0
+    private var lastUIKitTrimUptime: TimeInterval = -Double.infinity
 
     private init() {
         queue.setSpecific(key: queueKey, value: true)
@@ -44,7 +51,8 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             jit: jit,
             selectedJit: JitCacheChoice(rawValue: UserDefaults.standard.integer(forKey: JitCacheSettings.defaultsKey)) ?? .automatic,
             increasedMemoryLimit: checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit"),
-            extendedVirtualAddressing: checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing")
+            extendedVirtualAddressing: checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing"),
+            sourceCommit: Self.sourceCommit()
         )
 
         // Synchronous startup ensures the first record exists before game loading starts.
@@ -56,10 +64,14 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 pruneSessions()
                 startedAtUptime = ProcessInfo.processInfo.systemUptime
                 sampledPeak = 0
+                lowSampleStreak = 0
+                recoverySampleStreak = 0
+                sampledPressureLevel = 0
+                lastUIKitTrimUptime = -Double.infinity
                 try openSegment()
 
                 var header: [String: Any] = [
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "event": "session_start",
                     "time_utc": Self.timestamp(),
                     "device_model": metadata.model,
@@ -68,8 +80,13 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                     "sample_interval_seconds": 2,
                     "selected_jit_cache": metadata.selectedJit.title,
                     "increased_memory_limit_entitlement": metadata.increasedMemoryLimit,
-                    "extended_virtual_addressing_entitlement": metadata.extendedVirtualAddressing
+                    "extended_virtual_addressing_entitlement": metadata.extendedVirtualAddressing,
+                    "memory_pressure_low_available_bytes": lowAvailableMemory,
+                    "memory_pressure_critical_available_bytes": criticalAvailableMemory
                 ]
+                if let sourceCommit = metadata.sourceCommit {
+                    header["source_commit"] = sourceCommit
+                }
                 if let jit = metadata.jit {
                     header["launch_jit_cache_selection"] = jit.selected.title
                     header["requested_jit_cache_mib"] = jit.appliedMiB
@@ -127,6 +144,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         let selectedJit: JitCacheChoice
         let increasedMemoryLimit: Bool
         let extendedVirtualAddressing: Bool
+        let sourceCommit: String?
     }
 
     private func installObservers() {
@@ -151,6 +169,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
 
     private func recordSample(event: String, exitCode: Int? = nil) {
         guard file != nil else { return }
+        let availableMemory = UInt64(os_proc_available_memory())
         var info = task_vm_info_data_t()
         let capacity = MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<integer_t>.stride
         var count = mach_msg_type_number_t(capacity)
@@ -163,8 +182,13 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             "event": event,
             "time_utc": Self.timestamp(),
             "elapsed_seconds": (ProcessInfo.processInfo.systemUptime - startedAtUptime).rounded(),
-            "os_proc_available_memory_bytes": UInt64(os_proc_available_memory())
+            "os_proc_available_memory_bytes": availableMemory
         ]
+        if let pressure = evaluateMemoryPressure(event: event, availableMemory: availableMemory) {
+            record["gpu_trim_request"] = pressure.level
+            record["gpu_trim_source"] = pressure.source
+            record["gpu_trim_request_result"] = pressure.result
+        }
         if result == KERN_SUCCESS {
             sampledPeak = max(sampledPeak, info.phys_footprint)
             record["phys_footprint_bytes"] = info.phys_footprint
@@ -181,6 +205,55 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             closeSession()
             print("Memory diagnostics stopped after a write error.")
         }
+    }
+
+    private func evaluateMemoryPressure(event: String, availableMemory: UInt64) -> (level: String, source: String, result: Int32)? {
+        let now = ProcessInfo.processInfo.systemUptime
+
+        if event == "memory_warning", now - lastUIKitTrimUptime >= 10 {
+            let result = Ryujinx.reportMemoryPressure(availableBytes: availableMemory, severity: 2, source: 2)
+            if result > 0 {
+                lastUIKitTrimUptime = now
+            }
+            return ("critical", "uikit_warning", result)
+        }
+
+        guard event == "sample" else { return nil }
+
+        if availableMemory >= recoveredAvailableMemory {
+            recoverySampleStreak += 1
+            lowSampleStreak = 0
+            if recoverySampleStreak >= 3 {
+                sampledPressureLevel = 0
+            }
+            return nil
+        }
+
+        recoverySampleStreak = 0
+
+        if availableMemory <= criticalAvailableMemory {
+            lowSampleStreak = 0
+            guard sampledPressureLevel < 2 else { return nil }
+            let result = Ryujinx.reportMemoryPressure(availableBytes: availableMemory, severity: 2, source: 1)
+            if result > 0 {
+                sampledPressureLevel = 2
+            }
+            return ("critical", "available_memory", result)
+        }
+
+        guard availableMemory <= lowAvailableMemory else {
+            lowSampleStreak = 0
+            return nil
+        }
+
+        lowSampleStreak += 1
+        guard lowSampleStreak >= 2, sampledPressureLevel < 1 else { return nil }
+
+        let result = Ryujinx.reportMemoryPressure(availableBytes: availableMemory, severity: 1, source: 1)
+        if result > 0 {
+            sampledPressureLevel = 1
+        }
+        return ("low", "available_memory", result)
     }
 
     private func writeRecord(_ record: [String: Any]) throws {
@@ -313,5 +386,13 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
 
     private static func timestamp() -> String {
         ISO8601DateFormatter().string(from: Date())
+    }
+
+    private static func sourceCommit() -> String? {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "MeloNXSourceCommit") as? String else {
+            return nil
+        }
+        let commit = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return commit.isEmpty || commit.contains("$(") ? nil : commit
     }
 }

@@ -125,6 +125,21 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
+        /// Releases clean buffer-cache entries in response to host process memory pressure.
+        /// This runs on the GPU thread and deliberately leaves dirty and in-flight resources alone.
+        /// </summary>
+        internal (ulong BufferBefore, ulong BufferAfter, ulong BufferTarget, ulong TextureTracked) TrimForMemoryPressure(
+            MemoryPressureSeverity severity)
+        {
+            ulong bufferBefore = BufferCache.CachedBytes;
+            ulong target = MemoryPressureTrimPolicy.CalculateBufferTarget(BufferCache.Capacity, severity);
+
+            BufferCache.TrimToCapacity(target);
+
+            return (bufferBefore, BufferCache.CachedBytes, target, TextureCache.CachedBytes);
+        }
+
+        /// <summary>
         /// Gets a host pointer for a given range of application memory.
         /// If the memory region is not a single contiguous block, this method returns 0.
         /// </summary>

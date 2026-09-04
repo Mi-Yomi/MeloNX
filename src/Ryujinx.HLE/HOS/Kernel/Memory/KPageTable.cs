@@ -1,3 +1,4 @@
+using Ryujinx.Cpu.Jit;
 using Ryujinx.Horizon.Common;
 using Ryujinx.Memory;
 using Ryujinx.Memory.Range;
@@ -119,16 +120,11 @@ namespace Ryujinx.HLE.HOS.Kernel.Memory
 
             Context.CommitMemory(srcPa - DramMemoryMap.DramBase, size);
 
-            _cpuMemory.Map(dstVa, srcPa - DramMemoryMap.DramBase, size, flags);
+            MapAndFillPages(dstVa, srcPa - DramMemoryMap.DramBase, size, flags, shouldFillPages, fillValue);
 
             if (DramMemoryMap.IsHeapPhysicalAddress(srcPa))
             {
                 Context.MemoryManager.IncrementPagesReferenceCount(srcPa, pagesCount);
-            }
-
-            if (shouldFillPages && (!OperatingSystem.IsIOS() || !flags.HasFlag(MemoryMapFlags.Private) || fillValue != 0))
-            {
-                _cpuMemory.Fill(dstVa, size, fillValue);
             }
 
             return Result.Success;
@@ -154,12 +150,7 @@ namespace Ryujinx.HLE.HOS.Kernel.Memory
 
                 Context.CommitMemory(addr, size);
 
-                _cpuMemory.Map(currentVa, addr, size, flags);
-
-                if (shouldFillPages && (!OperatingSystem.IsIOS() || !flags.HasFlag(MemoryMapFlags.Private) || fillValue != 0))
-                {
-                    _cpuMemory.Fill(currentVa, size, fillValue);
-                }
+                MapAndFillPages(currentVa, addr, size, flags, shouldFillPages, fillValue);
 
                 currentVa += size;
             }
@@ -167,6 +158,24 @@ namespace Ryujinx.HLE.HOS.Kernel.Memory
             scopedPageList.SignalSuccess();
 
             return Result.Success;
+        }
+
+        private void MapAndFillPages(ulong va, ulong pa, ulong size, MemoryMapFlags flags, bool shouldFillPages, byte fillValue)
+        {
+            if (OperatingSystem.IsIOS() && shouldFillPages && fillValue == 0 &&
+                flags.HasFlag(MemoryMapFlags.Private) && _cpuMemory is MemoryManagerHostTracked hostTracked)
+            {
+                hostTracked.MapZeroed(va, pa, size);
+            }
+            else
+            {
+                _cpuMemory.Map(va, pa, size, flags);
+
+                if (shouldFillPages)
+                {
+                    _cpuMemory.Fill(va, size, fillValue);
+                }
+            }
         }
 
         /// <inheritdoc/>

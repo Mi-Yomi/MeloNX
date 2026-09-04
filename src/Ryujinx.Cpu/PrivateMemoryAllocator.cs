@@ -33,6 +33,7 @@ namespace Ryujinx.Cpu
             }
 
             private readonly List<Range> _freeRanges;
+            private ulong _allocatedEnd;
 
             public Block(MemoryBlock memory, ulong size)
             {
@@ -46,6 +47,13 @@ namespace Ryujinx.Cpu
 
             public ulong Allocate(ulong size, ulong alignment)
             {
+                return Allocate(size, alignment, out _);
+            }
+
+            public ulong Allocate(ulong size, ulong alignment, out ulong reusedSize)
+            {
+                reusedSize = 0;
+
                 for (int i = 0; i < _freeRanges.Count; i++)
                 {
                     Range range = _freeRanges[i];
@@ -69,6 +77,11 @@ namespace Ryujinx.Cpu
                         {
                             InsertFreeRange(endOffset - remainingSize, remainingSize);
                         }
+
+                        // Only the prefix below the previous high-water mark can contain old data.
+                        // Keep the mark on free so a later, larger allocation clears its reused prefix.
+                        reusedSize = alignedOffset < _allocatedEnd ? Math.Min(size, _allocatedEnd - alignedOffset) : 0;
+                        _allocatedEnd = Math.Max(_allocatedEnd, alignedOffset + size);
 
                         return alignedOffset;
                     }
@@ -147,9 +160,16 @@ namespace Ryujinx.Cpu
         {
         }
 
-        public PrivateMemoryAllocation Allocate(ulong size, ulong alignment)
+        public PrivateMemoryAllocation Allocate(ulong size, ulong alignment, bool zeroFill = false)
         {
             Allocation allocation = Allocate(size, alignment, CreateBlock);
+
+            // The never-allocated tail remains OS-zero and can stay physically uncommitted.
+            // Clear only the prefix that may contain an earlier guest allocation.
+            if (zeroFill && allocation.ReusedSize != 0)
+            {
+                allocation.Block.Memory.Fill(allocation.Offset, allocation.ReusedSize, 0);
+            }
 
             return new PrivateMemoryAllocation(this, allocation.Block, allocation.Offset, allocation.Size);
         }
@@ -169,12 +189,14 @@ namespace Ryujinx.Cpu
             public T Block { get; }
             public ulong Offset { get; }
             public ulong Size { get; }
+            public ulong ReusedSize { get; }
 
-            public Allocation(T block, ulong offset, ulong size)
+            public Allocation(T block, ulong offset, ulong size, ulong reusedSize)
             {
                 Block = block;
                 Offset = offset;
                 Size = size;
+                ReusedSize = reusedSize;
             }
         }
 
@@ -204,10 +226,10 @@ namespace Ryujinx.Cpu
 
                 if (block.Size >= size)
                 {
-                    ulong offset = block.Allocate(size, alignment);
+                    ulong offset = block.Allocate(size, alignment, out ulong reusedSize);
                     if (offset != InvalidOffset)
                     {
-                        return new Allocation(block, offset, size);
+                        return new Allocation(block, offset, size, reusedSize);
                     }
                 }
             }
@@ -219,10 +241,10 @@ namespace Ryujinx.Cpu
 
             InsertBlock(newBlock);
 
-            ulong newBlockOffset = newBlock.Allocate(size, alignment);
+            ulong newBlockOffset = newBlock.Allocate(size, alignment, out ulong newBlockReusedSize);
             Debug.Assert(newBlockOffset != InvalidOffset);
 
-            return new Allocation(newBlock, newBlockOffset, size);
+            return new Allocation(newBlock, newBlockOffset, size, newBlockReusedSize);
         }
 
         public void Free(PrivateMemoryAllocator.Block block, ulong offset, ulong size)

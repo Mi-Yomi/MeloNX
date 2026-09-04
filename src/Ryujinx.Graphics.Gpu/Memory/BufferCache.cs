@@ -48,6 +48,9 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private bool _memoryBudgetConfigured;
         private bool _isAppleUnifiedMemory;
 
+        internal ulong CachedBytes => _evictionPolicy.CachedBytes + _multiRangeEvictionPolicy.CachedBytes;
+        internal ulong Capacity => _evictionPolicy.Capacity;
+
         private readonly Dictionary<ulong, BufferCacheEntry> _dirtyCache;
         private readonly Dictionary<ulong, BufferCacheEntry> _modifiedCache;
         private bool _pruneCaches;
@@ -175,7 +178,15 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// </summary>
         internal void TrimToCapacity()
         {
-            ulong capacity = _evictionPolicy.Capacity;
+            TrimToCapacity(_evictionPolicy.Capacity);
+        }
+
+        /// <summary>
+        /// Evicts clean least-recently-used buffers against a temporary target without changing the normal cache budget.
+        /// </summary>
+        /// <param name="capacity">Temporary target in bytes</param>
+        internal void TrimToCapacity(ulong capacity)
+        {
             ulong physicalBytes = _evictionPolicy.CachedBytes;
             ulong virtualBytes = _multiRangeEvictionPolicy.CachedBytes;
             bool overCapacity = physicalBytes > capacity || virtualBytes > capacity - physicalBytes;

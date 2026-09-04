@@ -27,7 +27,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             _useProtectionMirrors = useProtectionMirrors;
         }
 
-        public void Map(ulong va, ulong pa, ulong size)
+        public void Map(ulong va, ulong pa, ulong size, bool zeroFill = false)
         {
             ulong endVa = va + size;
 
@@ -42,7 +42,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
 
                     (ulong clampedVa, ulong clampedEndVa) = ClampRange(partition, va, endVa);
 
-                    partition.Map(clampedVa, pa, clampedEndVa - clampedVa);
+                    partition.Map(clampedVa, pa, clampedEndVa - clampedVa, zeroFill);
 
                     ulong currentSize = clampedEndVa - clampedVa;
 

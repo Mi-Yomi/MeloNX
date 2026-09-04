@@ -77,6 +77,7 @@ namespace Ryujinx.Library
         private static UserChannelPersistence _userChannelPersistence;
         private static InputManager _inputManager;
         private static Switch _emulationContext;
+        private static GpuContext _activeMemoryPressureContext;
         private static WindowBase _window;
         private static WindowsMultimediaTimerResolution _windowsMultimediaTimerResolution;
         private static List<InputConfig> _inputConfiguration;
@@ -177,14 +178,46 @@ namespace Ryujinx.Library
             _emulationContext?.SetUnboundedPresentTargetFps(targetFps);
         }
 
+        [UnmanagedCallersOnly(EntryPoint = "report_memory_pressure")]
+        public static int ReportMemoryPressure(ulong availableMemoryBytes, int severity, int source)
+        {
+            try
+            {
+                GpuContext context = Volatile.Read(ref _activeMemoryPressureContext);
+                return context?.ReportMemoryPressure(availableMemoryBytes, severity, source) == true ? 1 : 0;
+            }
+            catch
+            {
+                // This ABI is called from a diagnostics queue and must never unwind across the native boundary.
+                return -1;
+            }
+        }
+
         [UnmanagedCallersOnly(EntryPoint = "stop_emulation")]
         public static void StopEmulation()
         {
             if (_window != null)
             {
                 _window.Exit();
-                _emulationContext.Dispose();
+                DisposeEmulationContext();
             }
+        }
+
+        private static void DisposeEmulationContext()
+        {
+            GpuContext activeContext = Volatile.Read(ref _activeMemoryPressureContext);
+            Switch emulationContext = Volatile.Read(ref _emulationContext);
+
+            activeContext?.StopAcceptingMemoryPressureReports();
+
+            if (!ReferenceEquals(activeContext, emulationContext?.Gpu))
+            {
+                emulationContext?.Gpu.StopAcceptingMemoryPressureReports();
+            }
+
+            Interlocked.Exchange(ref _activeMemoryPressureContext, null);
+            emulationContext = Interlocked.Exchange(ref _emulationContext, null);
+            emulationContext?.Dispose();
         }
         
         public static nint GetNativeMetalLayer()
@@ -797,10 +830,16 @@ namespace Ryujinx.Library
             Logger.SetEnable(LogLevel.Stub, !option.LoggingDisableStub);
             Logger.SetEnable(LogLevel.Info, !option.LoggingDisableInfo);
             Logger.SetEnable(LogLevel.Warning, !option.LoggingDisableWarning);
-            Logger.SetEnable(LogLevel.Error, option.LoggingEnableError);
+            Logger.SetEnable(LogLevel.Error, OperatingSystem.IsIOS() || option.LoggingEnableError);
             Logger.SetEnable(LogLevel.Trace, option.LoggingEnableTrace);
             Logger.SetEnable(LogLevel.Guest, !option.LoggingDisableGuest);
             Logger.SetEnable(LogLevel.AccessLog, option.LoggingEnableFsAccessLog);
+
+            Logger.Info?.Print(
+                LogClass.Application,
+                $"Runtime graphics settings: resolution_scale={option.ResScale}, texture_recompression={option.EnableTextureRecompression}, " +
+                $"docked={!option.DisableDockedMode}, backend_threading={option.BackendThreading}, " +
+                $"vsync={(option.DisableVSync ? "Unbounded" : option.VSyncMode)}, error_logging={OperatingSystem.IsIOS() || option.LoggingEnableError}.");
 
 
             AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
@@ -989,9 +1028,19 @@ namespace Ryujinx.Library
             DisplaySleep.Prevent();
 
             _window.Initialize(_emulationContext, _inputConfiguration, _enableKeyboard, _enableMouse);
-            _window.Execute();
+            Volatile.Write(ref _activeMemoryPressureContext, _emulationContext.Gpu);
 
-            _emulationContext.Dispose();
+            try
+            {
+                _window.Execute();
+            }
+            finally
+            {
+                Volatile.Read(ref _activeMemoryPressureContext)?.StopAcceptingMemoryPressureReports();
+                Interlocked.Exchange(ref _activeMemoryPressureContext, null);
+            }
+
+            DisposeEmulationContext();
             _window.Dispose();
 
             if (OperatingSystem.IsWindows())
@@ -1053,12 +1102,12 @@ namespace Ryujinx.Library
                 if (romFsFiles.Length > 0)
                 {
                     Logger.Info?.Print(LogClass.Application, "Loading as cart with RomFS.");
-                    if (!_emulationContext.LoadCart(path, romFsFiles[0])) { _emulationContext.Dispose(); return false; }
+                    if (!_emulationContext.LoadCart(path, romFsFiles[0])) { DisposeEmulationContext(); return false; }
                 }
                 else
                 {
                     Logger.Info?.Print(LogClass.Application, "Loading as cart WITHOUT RomFS.");
-                    if (!_emulationContext.LoadCart(path)) { _emulationContext.Dispose(); return false; }
+                    if (!_emulationContext.LoadCart(path)) { DisposeEmulationContext(); return false; }
                 }
             }
             else if (File.Exists(path))
@@ -1067,34 +1116,34 @@ namespace Ryujinx.Library
                 {
                     case ".xci":
                         Logger.Info?.Print(LogClass.Application, "Loading as XCI.");
-                        if (!_emulationContext.LoadXci(path)) { _emulationContext.Dispose(); return false; }
+                        if (!_emulationContext.LoadXci(path)) { DisposeEmulationContext(); return false; }
                         break;
                     case ".nca":
                         Logger.Info?.Print(LogClass.Application, "Loading as NCA.");
-                        if (!_emulationContext.LoadNca(path)) { _emulationContext.Dispose(); return false; }
+                        if (!_emulationContext.LoadNca(path)) { DisposeEmulationContext(); return false; }
                         break;
                     case ".nsp":
                     case ".pfs0":
                         Logger.Info?.Print(LogClass.Application, "Loading as NSP.");
-                        if (!_emulationContext.LoadNsp(path)) { _emulationContext.Dispose(); return false; }
+                        if (!_emulationContext.LoadNsp(path)) { DisposeEmulationContext(); return false; }
                         break;
                     default:
                         if (isFirmwareTitle)
                         {
                             Logger.Info?.Print(LogClass.Application, "Loading as Firmware Title (NCA).");
-                            if (!_emulationContext.LoadNca(path)) { _emulationContext.Dispose(); return false; }
+                            if (!_emulationContext.LoadNca(path)) { DisposeEmulationContext(); return false; }
                         }
                         else
                         {
                             Logger.Info?.Print(LogClass.Application, "Loading as Homebrew.");
                             try
                             {
-                                if (!_emulationContext.LoadProgram(path)) { _emulationContext.Dispose(); return false; }
+                                if (!_emulationContext.LoadProgram(path)) { DisposeEmulationContext(); return false; }
                             }
                             catch (ArgumentOutOfRangeException)
                             {
                                 Logger.Error?.Print(LogClass.Application, "The specified file is not supported by Ryujinx.");
-                                _emulationContext.Dispose();
+                                DisposeEmulationContext();
                                 return false;
                             }
                         }
@@ -1104,7 +1153,7 @@ namespace Ryujinx.Library
             else
             {
                 Logger.Warning?.Print(LogClass.Application, $"Couldn't load '{options.InputPath}'. Please specify a valid XCI/NCA/NSP/PFS0/NRO file.");
-                _emulationContext.Dispose();
+                DisposeEmulationContext();
                 return false;
             }
 

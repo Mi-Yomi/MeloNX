@@ -253,7 +253,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             }
         }
 
-        public void Map(ulong va, ulong pa, ulong size)
+        public void Map(ulong va, ulong pa, ulong size, bool zeroFill = false)
         {
             Debug.Assert(va >= Address);
             Debug.Assert(va + size <= EndAddress);
@@ -268,7 +268,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                 _lastPagePa = pa + ((EndAddress - GuestPageSize) - va);
             }
 
-            Update(va, pa, size, MappingType.Private);
+            Update(va, pa, size, MappingType.Private, zeroFill);
         }
 
         public void Unmap(ulong va, ulong size)
@@ -412,7 +412,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             return PrivateRange.Empty;
         }
 
-        private void Update(ulong va, ulong pa, ulong size, MappingType type)
+        private void Update(ulong va, ulong pa, ulong size, MappingType type, bool zeroFill = false)
         {
             _treeLock.EnterWriteLock();
 
@@ -420,7 +420,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             {
                 Mapping map = _mappingTree.GetNode(va);
 
-                Update(map, va, pa, size, type);
+                Update(map, va, pa, size, type, zeroFill);
             }
             finally
             {
@@ -428,7 +428,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             }
         }
 
-        private Mapping Update(Mapping map, ulong va, ulong pa, ulong size, MappingType type)
+        private Mapping Update(Mapping map, ulong va, ulong pa, ulong size, MappingType type, bool zeroFill)
         {
             ulong endAddress = va + size;
 
@@ -460,7 +460,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                         UnmapPrivate(va, size, unmappedBefore, unmappedAfter);
                         break;
                     case MappingType.Private:
-                        MapPrivate(va, size);
+                        MapPrivate(va, size, zeroFill);
                         break;
                 }
 
@@ -502,7 +502,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
             return left.Type == right.Type;
         }
 
-        private void MapPrivate(ulong va, ulong size)
+        private void MapPrivate(ulong va, ulong size, bool zeroFill)
         {
             ulong endAddress = va + size;
 
@@ -530,7 +530,15 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                         map = newMap;
                     }
 
-                    map.Map(_baseMemory, Address, _privateMemoryAllocator.Allocate(map.Size, _hostPageSize));
+                    map.Map(_baseMemory, Address, _privateMemoryAllocator.Allocate(map.Size, _hostPageSize, zeroFill));
+                }
+                else if (zeroFill)
+                {
+                    // A live neighbour can retain the host page when a 4 KiB guest page is unmapped.
+                    // Clear only the newly mapped guest range, leaving neighbouring pages intact.
+                    ulong clearStart = Math.Max(va, map.Address);
+                    ulong clearEnd = Math.Min(endAddress, map.EndAddress);
+                    map.PrivateAllocation.Memory.Fill(map.PrivateAllocation.Offset + clearStart - map.Address, clearEnd - clearStart, 0);
                 }
 
                 if (map.EndAddress >= endAddressAligned)

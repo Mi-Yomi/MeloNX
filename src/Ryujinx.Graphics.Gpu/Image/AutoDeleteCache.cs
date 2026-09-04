@@ -55,6 +55,8 @@ namespace Ryujinx.Graphics.Gpu.Image
         private readonly LinkedList<Texture> _textures;
         private ulong _totalSize;
 
+        internal ulong CachedBytes => _totalSize;
+
         private HashSet<ShortTextureCacheEntry> _shortCacheBuilder;
         private HashSet<ShortTextureCacheEntry> _shortCache;
 
