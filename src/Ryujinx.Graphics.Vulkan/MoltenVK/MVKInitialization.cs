@@ -11,30 +11,43 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
     public static partial class MVKInitialization
     {
         private const string VulkanLib = "libvulkan.dylib";
-        private const uint MaxActiveMetalCommandBuffersPerQueue = 32;
+        private const uint DefaultMaxActiveMetalCommandBuffersPerQueue = 32;
+        private const uint IosMaxActiveMetalCommandBuffersPerQueue = 8;
 
         [LibraryImport("libMoltenVK.dylib")]
-        private static partial Result vkGetMoltenVKConfigurationMVK(nint unusedInstance, out MVKConfiguration config, in nint configSize);
+        private static partial Result vkGetMoltenVKConfigurationMVK(nint unusedInstance, out MVKConfiguration config, ref nuint configSize);
 
         [LibraryImport("libMoltenVK.dylib")]
-        private static partial Result vkSetMoltenVKConfigurationMVK(nint unusedInstance, in MVKConfiguration config, in nint configSize);
+        private static partial Result vkSetMoltenVKConfigurationMVK(nint unusedInstance, in MVKConfiguration config, ref nuint configSize);
 
         public static void Initialize()
         {
-            nint configSize = (nint)Marshal.SizeOf<MVKConfiguration>();
+            nuint configSize = (nuint)Marshal.SizeOf<MVKConfiguration>();
 
-            vkGetMoltenVKConfigurationMVK(nint.Zero, out MVKConfiguration config, configSize);
+            vkGetMoltenVKConfigurationMVK(nint.Zero, out MVKConfiguration config, ref configSize);
 
             config.UseMetalArgumentBuffers = true;
-            config.FastMathEnabled = true;
+            config.FastMathEnabled = MVKConfigFastMath.Always;
 
             config.SemaphoreSupportStyle = MVKVkSemaphoreSupportStyle.MVK_CONFIG_VK_SEMAPHORE_SUPPORT_STYLE_SINGLE_QUEUE;
-            config.SynchronousQueueSubmits = false;
-            config.MaxActiveMetalCommandBuffersPerQueue = MaxActiveMetalCommandBuffersPerQueue;
+
+            if (OperatingSystem.IsIOS())
+            {
+                config.SynchronousQueueSubmits = true;
+                config.PrefillMetalCommandBuffers = MVKPrefillMetalCommandBuffersStyle.ImmediateEncoding;
+                config.MaxActiveMetalCommandBuffersPerQueue = IosMaxActiveMetalCommandBuffersPerQueue;
+                config.UseCommandPooling = true;
+                config.ShaderSourceCompressionAlgorithm = MVKConfigCompressionAlgorithm.Lzfse;
+            }
+            else
+            {
+                config.SynchronousQueueSubmits = false;
+                config.MaxActiveMetalCommandBuffersPerQueue = DefaultMaxActiveMetalCommandBuffersPerQueue;
+            }
 
             config.ResumeLostDevice = true;
 
-            vkSetMoltenVKConfigurationMVK(nint.Zero, config, configSize);
+            vkSetMoltenVKConfigurationMVK(nint.Zero, config, ref configSize);
         }
 
         private static string[] Resolver(string path)

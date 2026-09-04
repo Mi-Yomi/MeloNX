@@ -132,6 +132,12 @@ namespace Ryujinx.Graphics.Vulkan
                 }
             }
 
+            public void Retire()
+            {
+                _done = true;
+                DestroyIfDone();
+            }
+
             protected virtual void Dispose(bool disposing)
             {
                 if (disposing)
@@ -208,6 +214,28 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             return currentPool;
+        }
+
+        /// <summary>
+        /// Stops reusing the current pools. Pools with live descriptor sets are destroyed when
+        /// their final <see cref="DescriptorSetCollection"/> is released.
+        /// </summary>
+        public int RetireCurrentPools()
+        {
+            int retired = 0;
+
+            for (int index = 0; index < _currentPools.Length; index++)
+            {
+                DescriptorPoolHolder pool = _currentPools[index];
+                if (pool != null)
+                {
+                    pool.Retire();
+                    _currentPools[index] = null;
+                    retired++;
+                }
+            }
+
+            return retired;
         }
 
         protected virtual void Dispose(bool disposing)

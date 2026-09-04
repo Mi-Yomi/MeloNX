@@ -16,8 +16,11 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
     {
         None = 0,
         Enter = 1,
-        EnterExit = 2,
-        Duration = 3,
+        EnterThreadId = 2,
+        EnterExit = 3,
+        EnterExitThreadId = 4,
+        Duration = 5,
+        DurationThreadId = 6,
     }
 
     enum MVKConfigAutoGPUCaptureScope
@@ -25,15 +28,54 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
         None = 0,
         Device = 1,
         Frame = 2,
+        OnDemand = 3,
+    }
+
+    enum MVKPrefillMetalCommandBuffersStyle
+    {
+        NoPrefill = 0,
+        DeferredEncoding = 1,
+        ImmediateEncoding = 2,
+        ImmediateEncodingNoAutorelease = 3,
+    }
+
+    enum MVKConfigFastMath
+    {
+        Never = 0,
+        Always = 1,
+        OnDemand = 2,
+    }
+
+    enum MVKConfigCompressionAlgorithm
+    {
+        None = 0,
+        Lzfse = 1,
+        Zlib = 2,
+        Lz4 = 3,
+        Lzma = 4,
+    }
+
+    enum MVKConfigActivityPerformanceLoggingStyle
+    {
+        FrameCount = 0,
+        Immediate = 1,
+        DeviceLifetime = 2,
+        DeviceLifetimeAccumulate = 3,
+    }
+
+    enum MVKConfigUseMTLHeap
+    {
+        Never = 0,
+        WhereSafe = 1,
+        Always = 2,
     }
 
     [Flags]
-    enum MVKConfigAdvertiseExtensions
+    enum MVKConfigAdvertiseExtensions : uint
     {
         All = 0x00000001,
-        MoltenVK = 0x00000002,
-        WSI = 0x00000004,
-        Portability = 0x00000008,
+        WSI = 0x00000002,
+        Portability = 0x00000004,
     }
 
     enum MVKVkSemaphoreSupportStyle
@@ -69,11 +111,11 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
         public Bool32 DebugMode;
         public Bool32 ShaderConversionFlipVertexY;
         public Bool32 SynchronousQueueSubmits;
-        public Bool32 PrefillMetalCommandBuffers;
+        public MVKPrefillMetalCommandBuffersStyle PrefillMetalCommandBuffers;
         public uint MaxActiveMetalCommandBuffersPerQueue;
         public Bool32 SupportLargeQueryPools;
         public Bool32 PresentWithCommandBuffer;
-        public Bool32 SwapchainMagFilterUseNearest;
+        public Bool32 SwapchainMinMagFilterUseNearest;
         public ulong MetalCompileTimeout;
         public Bool32 PerformanceTracking;
         public uint PerformanceLoggingFrameCount;
@@ -83,7 +125,7 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
         public Bool32 FullImageViewSwizzle;
         public uint DefaultGPUCaptureScopeQueueFamilyIndex;
         public uint DefaultGPUCaptureScopeQueueIndex;
-        public Bool32 FastMathEnabled;
+        public MVKConfigFastMath FastMathEnabled;
         public MVKConfigLogLevel LogLevel;
         public MVKConfigTraceVulkanCalls TraceVulkanCalls;
         public Bool32 ForceLowPowerGPU;
@@ -94,11 +136,12 @@ namespace Ryujinx.Graphics.Vulkan.MoltenVK
         public Bool32 Texture1DAs2D;
         public Bool32 PreallocateDescriptors;
         public Bool32 UseCommandPooling;
-        public Bool32 UseMTLHeap;
-        public Bool32 LogActivityPerformanceInline;
+        public MVKConfigUseMTLHeap UseMTLHeap;
+        public MVKConfigActivityPerformanceLoggingStyle ActivityPerformanceLoggingStyle;
         public uint ApiVersionToAdvertise;
         public MVKConfigAdvertiseExtensions AdvertiseExtensions;
         public Bool32 ResumeLostDevice;
         public Bool32 UseMetalArgumentBuffers;
+        public MVKConfigCompressionAlgorithm ShaderSourceCompressionAlgorithm;
     }
 }

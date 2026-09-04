@@ -12,10 +12,12 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private let queueKey = DispatchSpecificKey<Bool>()
     private let segmentLimit = 512 * 1024
     private let sessionsToKeep = 5
-    private let lowAvailableMemory: UInt64 = 1024 * 1024 * 1024
-    private let criticalAvailableMemory: UInt64 = 512 * 1024 * 1024
-    private let lowTrimRepeatInterval: TimeInterval = 30
-    private let criticalTrimRepeatInterval: TimeInterval = 10
+    // GTA V can add 200-285 MiB between two-second samples. Start reclaim while enough
+    // headroom remains for a transient Metal allocation and repeat before the next burst.
+    private let lowAvailableMemory: UInt64 = 1536 * 1024 * 1024
+    private let criticalAvailableMemory: UInt64 = 1024 * 1024 * 1024
+    private let lowTrimRepeatInterval: TimeInterval = 20
+    private let criticalTrimRepeatInterval: TimeInterval = 6
     private var timer: DispatchSourceTimer?
     private var observers: [NSObjectProtocol] = []
     private var file: FileHandle?

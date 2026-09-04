@@ -1068,6 +1068,46 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
+        /// <summary>
+        /// Removes all reproducible pipeline variants owned by this program. Shader modules and
+        /// layouts stay alive, so a later draw can compile the required variant again.
+        /// </summary>
+        public int TrimPipelineVariants()
+        {
+            HashTableSlim<PipelineUid, Auto<DisposablePipeline>> graphicsPipelines;
+            HashTableSlim<SpecData, Auto<DisposablePipeline>> computePipelines;
+
+            lock (_pipelineCacheLock)
+            {
+                graphicsPipelines = _graphicsPipelineCache;
+                computePipelines = _computePipelineCache;
+                _graphicsPipelineCache = null;
+                _computePipelineCache = null;
+            }
+
+            int count = 0;
+
+            if (graphicsPipelines != null)
+            {
+                foreach (Auto<DisposablePipeline> pipeline in graphicsPipelines.Values)
+                {
+                    pipeline?.Dispose();
+                    count++;
+                }
+            }
+
+            if (computePipelines != null)
+            {
+                foreach (Auto<DisposablePipeline> pipeline in computePipelines.Values)
+                {
+                    pipeline?.Dispose();
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
         public bool TryWaitForBackgroundGraphicsPipeline(
             ref PipelineUid key,
             int timeoutMs,

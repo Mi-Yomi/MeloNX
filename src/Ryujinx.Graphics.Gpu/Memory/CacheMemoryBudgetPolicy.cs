@@ -26,11 +26,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private const ulong GiB = 1024 * MiB;
 
         private const ulong DefaultBufferCapacity = 2 * GiB;
+        private const ulong IosUnifiedBufferCapacity = 128 * MiB;
         private const ulong MinUnifiedBufferCapacity = 256 * MiB;
         private const ulong MaxUnifiedBufferCapacity = 768 * MiB;
 
         private const ulong DefaultTextureCapacity = 1 * GiB;
         private const ulong MinTextureCapacity = 512 * MiB;
+        private const ulong IosUnifiedTextureCapacity = 128 * MiB;
         private const ulong MinUnifiedTextureCapacity = 256 * MiB;
         private const ulong MaxUnifiedTextureCapacity = 768 * MiB;
         private const ulong TextureCapacity6GiB = 4 * GiB;
@@ -43,12 +45,21 @@ namespace Ryujinx.Graphics.Gpu.Memory
             ulong cpuMemorySize,
             ulong maximumGpuMemory,
             SystemMemoryType memoryType,
-            bool isApplePlatform)
+            bool isApplePlatform,
+            bool isIosPlatform)
         {
             bool isAppleUnifiedMemory = isApplePlatform && memoryType == SystemMemoryType.UnifiedMemory;
 
             if (isAppleUnifiedMemory)
             {
+                if (isIosPlatform)
+                {
+                    return new CacheMemoryBudget(
+                        IosUnifiedBufferCapacity,
+                        IosUnifiedTextureCapacity,
+                        true);
+                }
+
                 return new CacheMemoryBudget(
                     Math.Clamp(cpuMemorySize / UnifiedMemoryDivisor, MinUnifiedBufferCapacity, MaxUnifiedBufferCapacity),
                     Math.Clamp(cpuMemorySize / UnifiedMemoryDivisor, MinUnifiedTextureCapacity, MaxUnifiedTextureCapacity),

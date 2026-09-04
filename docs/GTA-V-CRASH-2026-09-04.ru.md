@@ -413,6 +413,113 @@ NativeAOT и Swift на macOS, проверяет экспорт ABI, точны
 второй итерации на iPhone: 126/126 тестов не подтверждают прохождение похорон,
 снижение реального footprint или отсутствие Jetsam.
 
+## Третий запуск: предел подтверждён повторно
+
+Сборка `0e5c4e6a2bd045746d47f3a32d44297aa4178b54` проверена ещё одним полным
+прохождением пролога. Пользователь снова наблюдал вылет после сигареты Майкла и
+исчезновения надписи GTA V. Проверены следующие файлы; их содержимое использовалось
+только как диагностические данные:
+
+| Файл | Размер | SHA-256 |
+| --- | ---: | --- |
+| `MeloNX-Log-2026-09-04 05_18_36 +0000.log` | 57 391 байт | `C14B8FD229A40676D52680308B4165C6283641C386514E73875AE83CDAA0BA49` |
+| `memory (4).jsonl` | 89 454 байта | `E77473E4A8489A8DE203CB2A90F72D50E382F3A2100772A53031BF27E2C4824D` |
+| `session (3).json` | 763 байта | `2494911F88BBCFB6BF50911E21EA9479FDD0D8B879CA9EBCAD838B998580ABFD` |
+
+Все 365 строк JSONL валидны. Последний sample на 716-й секунде содержит
+6006,932 MiB footprint и 137,068 MiB доступного запаса; их сумма снова равна ровно
+6144 MiB. После него нет `session_end`. В основном логе нет записей уровня Error или
+Fatal, `OutOfMemory`, device loss или невалидного swapchain 0×0. Это третий
+согласованный обрыв у одного и того же process ceiling. Точное системное название
+причины по-прежнему требует `JetsamEvent`, но прикладная причина для исправления уже
+достаточно определена: перед переходом сцены MeloNX не оставляет резерв для нового
+пакета Metal allocations.
+
+Вторая итерация дала измеримый эффект. В одинаковой точке 636 секунд footprint
+снизился с 6138,166 до 5593,853 MiB, то есть примерно на 544,3 MiB; приложение
+проработало ещё 80 секунд. Однако затем наблюдались скачки примерно на 238,6 MiB,
+195,6 MiB и 200,5 MiB за один двухсекундный интервал. Поэтому порог в 512 MiB и
+логическая очистка только двух GPU-кэшей не создают устойчивого резерва.
+
+Все 16 принятых pressure-запросов были выполнены. Buffer cache неоднократно
+сбрасывался, но AutoDelete texture cache оставался около 252–255 MiB: за проход
+удалялись единичные записи, примерно 130–149 оставались referenced и 482–507 —
+GPU-modified. Это прямо подтверждает, что прежняя защита работала, но очищала не того
+владельца основного остатка. В сессии также загружено 564 shader programs. Pipeline
+variants, MoltenVK MSL source cache, command pools, descriptor high-water, derived
+buffers и полноразмерные `_pendingData` прежней телеметрией не учитывались.
+
+## Третья итерация: native survival path
+
+Исправление v3 переносит pressure-барьер до владельцев реальной памяти. После
+логического buffer/texture trim `ThreadedRenderer` сначала догоняет очередь GAL и
+выполняет обработчик на backend owner thread. Vulkan submit завершается через
+`vkDeviceWaitIdle`; завершённые `Auto` dependencies снимаются, а
+`vkTrimCommandPool` возвращает неиспользуемую command memory MoltenVK системе.
+Официальная спецификация Vulkan оставляет выделенные command buffers валидными при
+таком trim. Доступ к `vkDeviceWaitIdle` сериализован с основной и background queue,
+а foreign-thread scaled blit целиком проходит через тот же gate, чтобы служебный
+pipeline и descriptor cache не менялись во время очистки. Если
+background action уже выполняется, запрос не блокирует GPU-поток и не теряется:
+severity остаётся pending, а backend повторяет попытку в следующем `PreFrame`.
+
+При critical pressure не чаще одного раза в 30 секунд дополнительно удаляются только
+воспроизводимые объекты:
+
+- pipeline variants всех живых shader programs; текущие ссылки всех основных,
+  служебных и effect pipeline предварительно отсоединяются, а следующий
+  draw/dispatch пересоздаёт нужный вариант;
+- автоматические descriptor sets и выделенные только для них завершённые pools;
+  manual sets с внешними индексами хранятся в отдельных pools и сохраняются;
+- derived index/vertex buffers;
+- command pools и повторно используемые readback buffers фоновых потоков; чужой
+  command pool очищается самим потоком при следующем обращении, чтобы сохранить
+  Vulkan host synchronization;
+- освобождённые managed поколения и свободные страницы malloc zones.
+
+Полноразмерные `_pendingData` намеренно не очищаются этим проходом: их перенос в
+backing buffer требует общей синхронизации с параллельным readback, а попытка сделать
+это локально создаёт риск записи в уже отправленный command buffer или чтения старых
+данных. Их возможный вклад теперь остаётся виден как ограничение, но v3 не меняет
+семантику buffer mirrors ради недоказанной экономии памяти.
+
+Новая строка `Renderer memory trim` записывает число уничтоженных pipeline variants,
+сброшенных pipeline owners, descriptor sets/pools, снятых submissions, число
+просмотренных buffers, managed heap до и после, результат
+`malloc_zone_pressure_relief`, а также `heapUsage/heapBudget` через включённый
+`VK_EXT_memory_budget`. Это отделяет Metal usage от остального process footprint в
+следующем логе.
+
+Проверенный устройством bundled MoltenVK 1.4.0 намеренно сохранён. Обновление до 1.4.2
+исключено из hotfix: открытая [upstream-проблема #2793](https://github.com/KhronosGroup/MoltenVK/issues/2793)
+сообщает о тихой потере SSBO stores при Metal argument buffers в 1.4.1/1.4.2.
+Воспроизведение описано на macOS M1, поэтому перенос риска на iOS A18 является
+выводом, а не подтверждённым устройством фактом. Отключение argument buffers тоже не
+подходит без отдельной проверки лимитов descriptor sets, описанных в
+[#1870](https://github.com/KhronosGroup/MoltenVK/issues/1870). Packaging фиксирует уже испытанный binary по
+SHA-256 `5735CA4AEE60ED7E0475B80B8ECDCFC952E4E0B7D49018F11781E51E5106BFA5` и проверяет
+его полное совпадение до создания IPA. Для iOS включён поддерживаемый 1.4.0 профиль с
+приоритетом памяти: synchronous queue submit, не более восьми активных Metal command
+buffers, immediate prefill с autorelease pool на команду и LZFSE-компрессия сохранённого MSL.
+MoltenVK описывает этот prefill как вариант с наименьшим footprint и ожидаемо меньшей
+скоростью. Все command buffers помечены `VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT`:
+после immediate Metal encoding MoltenVK сразу возвращает Vulkan-команды во внутренний
+pool, а `vkTrimCommandPool` затем может освободить его high-water memory.
+
+Постоянные iOS unified-memory бюджеты buffer и AutoDelete texture cache снижены до
+128/128 MiB; масштабируемые лимиты Apple Silicon Mac сохранены. Low pressure начинается
+при запасе 1,5 GiB, critical — при 1 GiB; интервалы повторения составляют 20 и 6 секунд.
+Оба режима сохраняют GPU-modified textures: даже один принудительный readback может
+временно держать одновременно исходную texture и сопоставимый staging allocation и
+сам вызвать Jetsam. Их освобождение оставлено обычному корректному пути синхронизации.
+
+Локальная проверка v3 после финального исправления времени жизни прошла: 127/127
+целевых тестов `Ryujinx.Tests` и 8/8 `DualMappedJitAllocatorTests`, всего 135/135.
+Managed-сборка `Ryujinx.Library` для `ios-arm64` завершилась без ошибок; 18
+предупреждений относятся к уже существующим nullable/platform-анализаторам. Она
+проверяет C#-часть, но NativeAOT, Swift, Xcode и итоговую IPA проверяет только macOS
+workflow, а фактический запас памяти — повторный запуск на iPhone.
+
 ## Следующая проверка на устройстве
 
 Повторная проверка должна использовать тот же NSP, RomFS mod, сохранение, firmware,

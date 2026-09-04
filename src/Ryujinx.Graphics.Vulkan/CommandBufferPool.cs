@@ -85,8 +85,10 @@ namespace Ryujinx.Graphics.Vulkan
 
             api.CreateCommandPool(device, in commandPoolCreateInfo, null, out _pool).ThrowOnError();
 
-            // We need at least 2 command buffers to get texture data in some cases.
-            _totalCommandBuffers = isLight ? 2 : MaxCommandBuffers;
+            // We need at least 2 command buffers to get texture data in some cases. iOS has a
+            // strict process-memory ceiling, so keep fewer completed submissions and their
+            // dependencies resident than the desktop backends do.
+            _totalCommandBuffers = isLight ? 2 : OperatingSystem.IsIOS() ? 8 : MaxCommandBuffers;
             _totalCommandBuffersMask = _totalCommandBuffers - 1;
 
             _commandBuffers = new ReservedCommandBuffer[_totalCommandBuffers];
@@ -251,6 +253,10 @@ namespace Ryujinx.Graphics.Vulkan
                         CommandBufferBeginInfo commandBufferBeginInfo = new()
                         {
                             SType = StructureType.CommandBufferBeginInfo,
+                            // Every command buffer rented here is submitted exactly once before it is
+                            // begun again. MoltenVK uses this bit to discard the Vulkan command list
+                            // after immediate Metal encoding instead of retaining both representations.
+                            Flags = CommandBufferUsageFlags.OneTimeSubmitBit,
                         };
 
                         _api.BeginCommandBuffer(entry.CommandBuffer, in commandBufferBeginInfo).ThrowOnError();
@@ -354,6 +360,27 @@ namespace Ryujinx.Graphics.Vulkan
             else
             {
                 entry.Fence = null;
+            }
+        }
+
+        /// <summary>
+        /// Releases completed command-buffer dependencies and asks the backend to return unused
+        /// command-pool storage to the system. This must run on the pool owner thread.
+        /// </summary>
+        /// <returns>The number of queued submissions retired by this call</returns>
+        public int Trim()
+        {
+            Debug.Assert(OwnedByCurrentThread);
+
+            lock (_commandBuffers)
+            {
+                int queuedBefore = _queuedCount;
+
+                // Completed submissions release their dependencies; pending command buffers stay valid.
+                FreeConsumed(wait: false);
+                _api.TrimCommandPool(_device, _pool, 0);
+
+                return queuedBefore - _queuedCount;
             }
         }
 

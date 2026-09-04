@@ -61,21 +61,67 @@ namespace Ryujinx.Tests.Graphics
                 4 * GiB,
                 0,
                 SystemMemoryType.BackendManaged,
-                isApplePlatform: true);
+                isApplePlatform: true,
+                isIosPlatform: true);
             CacheMemoryBudget afterRendererInitialization = CacheMemoryBudgetPolicy.Calculate(
                 4 * GiB,
                 4 * GiB,
                 SystemMemoryType.UnifiedMemory,
-                isApplePlatform: true);
+                isApplePlatform: true,
+                isIosPlatform: true);
 
             Assert.Multiple(() =>
             {
                 Assert.That(beforeRendererInitialization.BufferCapacity, Is.EqualTo(2 * GiB));
                 Assert.That(beforeRendererInitialization.TextureCapacity, Is.EqualTo(1 * GiB));
                 Assert.That(beforeRendererInitialization.IsAppleUnifiedMemory, Is.False);
-                Assert.That(afterRendererInitialization.BufferCapacity, Is.EqualTo(256 * MiB));
-                Assert.That(afterRendererInitialization.TextureCapacity, Is.EqualTo(256 * MiB));
+                Assert.That(afterRendererInitialization.BufferCapacity, Is.EqualTo(128 * MiB));
+                Assert.That(afterRendererInitialization.TextureCapacity, Is.EqualTo(128 * MiB));
                 Assert.That(afterRendererInitialization.IsAppleUnifiedMemory, Is.True);
+            });
+        }
+
+        [TestCase(4UL)]
+        [TestCase(8UL)]
+        [TestCase(16UL)]
+        public void AppleUnifiedBudgetsKeepFixedIosPressureLimit(ulong physicalMemoryGiB)
+        {
+            const ulong MiB = 1024 * 1024;
+            const ulong GiB = 1024 * MiB;
+
+            CacheMemoryBudget budget = CacheMemoryBudgetPolicy.Calculate(
+                physicalMemoryGiB * GiB,
+                physicalMemoryGiB * GiB,
+                SystemMemoryType.UnifiedMemory,
+                isApplePlatform: true,
+                isIosPlatform: true);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(budget.BufferCapacity, Is.EqualTo(128 * MiB));
+                Assert.That(budget.TextureCapacity, Is.EqualTo(128 * MiB));
+                Assert.That(budget.IsAppleUnifiedMemory, Is.True);
+            });
+        }
+
+        [Test]
+        public void AppleSiliconMacKeepsScaledUnifiedBudgets()
+        {
+            const ulong MiB = 1024 * 1024;
+            const ulong GiB = 1024 * MiB;
+
+            CacheMemoryBudget budget = CacheMemoryBudgetPolicy.Calculate(
+                8 * GiB,
+                8 * GiB,
+                SystemMemoryType.UnifiedMemory,
+                isApplePlatform: true,
+                isIosPlatform: false);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(budget.BufferCapacity, Is.EqualTo(512 * MiB));
+                Assert.That(budget.TextureCapacity, Is.EqualTo(512 * MiB));
+                Assert.That(budget.IsAppleUnifiedMemory, Is.True);
             });
         }
 

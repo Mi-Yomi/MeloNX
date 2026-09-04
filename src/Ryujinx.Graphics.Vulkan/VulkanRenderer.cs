@@ -23,6 +23,11 @@ namespace Ryujinx.Graphics.Vulkan
 {
     public sealed class VulkanRenderer : IRenderer
     {
+        private const long AggressiveMemoryTrimIntervalMilliseconds = 30_000;
+
+        [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "malloc_zone_pressure_relief")]
+        private static extern nuint MallocZonePressureRelief(nint zone, nuint goal);
+
         private VulkanInstance _instance;
         private SurfaceKHR _surface;
         private VulkanPhysicalDevice _physicalDevice;
@@ -30,6 +35,11 @@ namespace Ryujinx.Graphics.Vulkan
         private WindowBase _window;
 
         private bool _initialized;
+        private long _lastAggressiveMemoryTrimMilliseconds;
+        private readonly object _backgroundContextGate = new();
+        private int _pendingMemoryTrimSeverity;
+        private int _memoryTrimDeferralLogged;
+        private readonly HashSet<PipelineBase> _pipelineOwners = new();
         private readonly HashSet<TextureStorage> _presentationStorages = new();
 
         public uint ProgramCount { get; set; } = 0;
@@ -705,6 +715,35 @@ namespace Ryujinx.Graphics.Vulkan
             BufferManager.StagingBuffer.FreeCompleted();
         }
 
+        internal void RegisterPipelineOwner(PipelineBase pipeline)
+        {
+            lock (_pipelineOwners)
+            {
+                _pipelineOwners.Add(pipeline);
+            }
+        }
+
+        internal void UnregisterPipelineOwner(PipelineBase pipeline)
+        {
+            lock (_pipelineOwners)
+            {
+                _pipelineOwners.Remove(pipeline);
+            }
+        }
+
+        private int ForgetCurrentPipelines()
+        {
+            lock (_pipelineOwners)
+            {
+                foreach (PipelineBase pipeline in _pipelineOwners)
+                {
+                    pipeline.ForgetCurrentPipeline();
+                }
+
+                return _pipelineOwners.Count;
+            }
+        }
+
         public PinnedSpan<byte> GetBufferData(BufferHandle buffer, int offset, int size)
         {
             return BufferManager.GetData(buffer, offset, size);
@@ -1034,6 +1073,7 @@ namespace Ryujinx.Graphics.Vulkan
         public void PreFrame()
         {
             SyncManager.Cleanup();
+            TryRunPendingMemoryTrim();
         }
 
         public ICounterEvent ReportCounter(CounterType type, EventHandler<ulong> resultHandler, float divisor, bool hostReserved)
@@ -1068,7 +1108,207 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void BackgroundContextAction(Action action, bool alwaysBackground = false)
         {
-            action();
+            // Background flushes can record commands and touch shared pipeline/descriptor caches.
+            // Keep their entire lifetime mutually exclusive with a pressure trim.
+            lock (_backgroundContextGate)
+            {
+                action();
+            }
+        }
+
+        private unsafe (ulong Usage, ulong Budget) GetDeviceMemoryBudget()
+        {
+            if (!_physicalDevice.IsDeviceExtensionPresent("VK_EXT_memory_budget"))
+            {
+                return (0, 0);
+            }
+
+            PhysicalDeviceMemoryBudgetPropertiesEXT memoryBudget = new()
+            {
+                SType = StructureType.PhysicalDeviceMemoryBudgetPropertiesExt,
+            };
+            PhysicalDeviceMemoryProperties2 memoryProperties = new()
+            {
+                SType = StructureType.PhysicalDeviceMemoryProperties2,
+                PNext = &memoryBudget,
+            };
+
+            Api.GetPhysicalDeviceMemoryProperties2(_physicalDevice.PhysicalDevice, &memoryProperties);
+
+            ulong usage = 0;
+            ulong budget = 0;
+            for (int index = 0; index < memoryProperties.MemoryProperties.MemoryHeapCount; index++)
+            {
+                usage += memoryBudget.HeapUsage[index];
+                budget += memoryBudget.HeapBudget[index];
+            }
+
+            return (usage, budget);
+        }
+
+        private void WaitForDeviceIdleSynchronized()
+        {
+            // vkDeviceWaitIdle requires external synchronization against host access to every
+            // queue on the device. Readback workers can submit to BackgroundQueue concurrently
+            // with the render thread, so hold both queue locks in one stable order.
+            lock (QueueLock)
+            {
+                if (BackgroundQueueLock != null)
+                {
+                    lock (BackgroundQueueLock)
+                    {
+                        Api.DeviceWaitIdle(_device).ThrowOnError();
+                    }
+                }
+                else
+                {
+                    Api.DeviceWaitIdle(_device).ThrowOnError();
+                }
+            }
+        }
+
+        public void TrimMemory(bool aggressive)
+        {
+            int requestedSeverity = aggressive ? 2 : 1;
+            int currentSeverity = Volatile.Read(ref _pendingMemoryTrimSeverity);
+
+            while (currentSeverity < requestedSeverity)
+            {
+                int observedSeverity = Interlocked.CompareExchange(
+                    ref _pendingMemoryTrimSeverity,
+                    requestedSeverity,
+                    currentSeverity);
+
+                if (observedSeverity == currentSeverity)
+                {
+                    break;
+                }
+
+                currentSeverity = observedSeverity;
+            }
+
+            TryRunPendingMemoryTrim();
+        }
+
+        private void TryRunPendingMemoryTrim()
+        {
+            if (Volatile.Read(ref _pendingMemoryTrimSeverity) == 0 || !_initialized || _pipeline == null)
+            {
+                return;
+            }
+
+            // A background flush can synchronously interrupt the renderer to submit work. Never
+            // block this thread on its gate, or the worker and renderer can wait on each other.
+            // Keep the request pending and retry it from the next backend PreFrame safe point.
+            if (!Monitor.TryEnter(_backgroundContextGate))
+            {
+                if (Interlocked.Exchange(ref _memoryTrimDeferralLogged, 1) == 0)
+                {
+                    Logger.Warning?.Print(LogClass.Gpu, "Renderer memory trim deferred: background action is active.");
+                }
+
+                return;
+            }
+
+            try
+            {
+                int severity = Interlocked.Exchange(ref _pendingMemoryTrimSeverity, 0);
+                if (severity != 0)
+                {
+                    Interlocked.Exchange(ref _memoryTrimDeferralLogged, 0);
+                    TrimMemoryLocked(severity >= 2);
+                }
+            }
+            finally
+            {
+                Monitor.Exit(_backgroundContextGate);
+            }
+        }
+
+        private void TrimMemoryLocked(bool aggressive)
+        {
+            if (!_initialized || _pipeline == null)
+            {
+                return;
+            }
+
+            var deviceMemoryBefore = GetDeviceMemoryBudget();
+            long now = Environment.TickCount64;
+            bool runAggressiveTrim = aggressive &&
+                (_lastAggressiveMemoryTrimMilliseconds == 0 ||
+                 now - _lastAggressiveMemoryTrimMilliseconds >= AggressiveMemoryTrimIntervalMilliseconds);
+
+            int buffersScanned = 0;
+            int pipelineOwnersReset = 0;
+
+            if (runAggressiveTrim)
+            {
+                _lastAggressiveMemoryTrimMilliseconds = now;
+
+                // Derived index and vertex buffers are reproducible from their source buffers.
+                // Drop them before the submission so completed work can release the allocations.
+                buffersScanned = BufferManager.TrimPressureCaches();
+
+                // Flush without restoring raw references to any main/helper/effect pipeline into
+                // fresh command buffers. The variants can then be retired after device idle.
+                pipelineOwnersReset = ForgetCurrentPipelines();
+            }
+
+            FlushAllCommands();
+            WaitForDeviceIdleSynchronized();
+
+            int retiredSubmissions = CommandBufferPool.Trim();
+            var backgroundTrim = BackgroundResources.Trim();
+            int pipelineVariants = 0;
+            int descriptorLayouts = 0;
+            int descriptorSets = 0;
+            int descriptorPools = 0;
+            long managedBefore = GC.GetTotalMemory(forceFullCollection: false);
+
+            if (runAggressiveTrim)
+            {
+                foreach (ShaderCollection shader in Shaders)
+                {
+                    pipelineVariants += shader.TrimPipelineVariants();
+                }
+
+                var descriptorResult = PipelineLayoutCache.TrimReusableDescriptorSets();
+                descriptorLayouts = descriptorResult.Layouts;
+                descriptorSets = descriptorResult.DescriptorSets;
+                descriptorPools = descriptorResult.Pools;
+
+                GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
+            }
+
+            nuint mallocRelieved = 0;
+            if (OperatingSystem.IsIOS())
+            {
+                try
+                {
+                    mallocRelieved = MallocZonePressureRelief(nint.Zero, 0);
+                }
+                catch (DllNotFoundException)
+                {
+                }
+                catch (EntryPointNotFoundException)
+                {
+                }
+            }
+
+            long managedAfter = GC.GetTotalMemory(forceFullCollection: false);
+            var deviceMemoryAfter = GetDeviceMemoryBudget();
+
+            Logger.Warning?.Print(
+                LogClass.Gpu,
+                $"Renderer memory trim: aggressive={runAggressiveTrim}, retired_submissions={retiredSubmissions}, " +
+                $"background_resources={backgroundTrim.Resources}, background_retired_submissions={backgroundTrim.RetiredSubmissions}, " +
+                $"background_flush_buffer_bytes={backgroundTrim.FlushBufferBytes}, " +
+                $"pipeline_owners_reset={pipelineOwnersReset}, pipeline_variants={pipelineVariants}, " +
+                $"descriptor_layouts={descriptorLayouts}, " +
+                $"descriptor_sets={descriptorSets}, descriptor_pools={descriptorPools}, buffers_scanned={buffersScanned}, " +
+                $"managed_before={managedBefore}, managed_after={managedAfter}, " +
+                $"malloc_relieved_bytes={(ulong)mallocRelieved}, device_usage_before={deviceMemoryBefore.Usage}, " +
+                $"device_usage_after={deviceMemoryAfter.Usage}, device_budget={deviceMemoryAfter.Budget}.");
         }
 
         public void CreateSync(ulong id, bool strict)

@@ -27,9 +27,28 @@ namespace Ryujinx.Graphics.Vulkan
 
             // Restore per-command buffer state.
 
-            if (Pipeline != null)
+            Auto<DisposablePipeline> pipeline = Pipeline;
+
+            if (pipeline != null)
             {
-                Gd.Api.CmdBindPipeline(CommandBuffer, Pbp, Pipeline.Get(CurrentCommandBuffer).Value);
+                // A pressure trim can retire the cache owner between helper invocations. Keep
+                // the pipeline alive while attaching it to this command buffer, or forget the
+                // stale raw reference and let the next draw/dispatch recreate it.
+                if (pipeline.TryIncrementReferenceCount())
+                {
+                    try
+                    {
+                        Gd.Api.CmdBindPipeline(CommandBuffer, Pbp, pipeline.Get(CurrentCommandBuffer).Value);
+                    }
+                    finally
+                    {
+                        pipeline.DecrementReferenceCount();
+                    }
+                }
+                else
+                {
+                    ForgetCurrentPipelineIfCurrent(pipeline);
+                }
             }
 
             SignalCommandBufferChange();

@@ -398,6 +398,11 @@ namespace Ryujinx.Graphics.Gpu
                     textureRetainedMostRecentBytes += result.TextureRetainedMostRecentBytes;
                 }
 
+                // This is deliberately after logical cache eviction. ThreadedRenderer turns it
+                // into a synchronous backend barrier, so queued disposals and completed Vulkan
+                // dependencies are physically released before the game can enqueue more work.
+                Renderer.TrimMemory(request.Severity == MemoryPressureSeverity.Critical);
+
                 stopwatch.Stop();
                 Logger.Warning?.Print(
                     LogClass.Gpu,

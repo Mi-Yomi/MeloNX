@@ -302,18 +302,22 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void Clear()
         {
-            if (_ranges != null)
+            Dictionary<ulong, List<Entry>> ranges = _ranges;
+
+            if (ranges != null)
             {
-                foreach (List<Entry> entries in _ranges.Values)
+                // Detach first. Destroying an entry invalidates dependencies, which can
+                // re-enter this cache and remove another entry. Iterating the live dictionary
+                // would then throw or skip resources.
+                _ranges = null;
+
+                foreach (List<Entry> entries in ranges.Values)
                 {
                     foreach (Entry entry in entries)
                     {
                         DestroyEntry(entry);
                     }
                 }
-
-                _ranges.Clear();
-                _ranges = null;
             }
         }
 

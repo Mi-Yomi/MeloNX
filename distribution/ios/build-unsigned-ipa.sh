@@ -42,6 +42,8 @@ WORK_ROOT="$(mktemp -d "$OUTPUT_ROOT/work.XXXXXX")"
 PROJECT="$REPOSITORY_ROOT/src/MeloNX/MeloNX.xcodeproj"
 PACKAGE_LOCK="$PROJECT/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
 ENTITLEMENTS="$REPOSITORY_ROOT/src/MeloNX/MeloNX/MeloNX.entitlements"
+SOURCE_MOLTENVK="$REPOSITORY_ROOT/src/MeloNX/MeloNX/Dependencies/libMoltenVK.dylib"
+EXPECTED_MOLTENVK_SHA256="5735ca4aee60ed7e0475b80b8ecdcfc952e4e0b7d49018f11781e51e5106bfa5"
 export MELO_NX_NATIVE_BINLOG="$OUTPUT_ROOT/logs/native-publish.binlog"
 
 {
@@ -89,12 +91,25 @@ BUILD_STAGE=package
 APP="$WORK_ROOT/products/MeloNX.app"
 test -d "$APP"
 test -s "$APP/Frameworks/Ryujinx.Library.dylib"
+MOLTENVK="$APP/Frameworks/libMoltenVK.dylib"
+test -s "$MOLTENVK"
+MOLTENVK_SHA256="$(shasum -a 256 "$MOLTENVK" | awk '{ print $1 }')"
+test "$MOLTENVK_SHA256" = "$EXPECTED_MOLTENVK_SHA256"
+cmp "$SOURCE_MOLTENVK" "$MOLTENVK"
 EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
 case "$EXECUTABLE" in
   ''|*/*|.|..) echo 'Invalid CFBundleExecutable in built app.' >&2; exit 1 ;;
 esac
 xcrun lipo "$APP/$EXECUTABLE" -verify_arch arm64
 xcrun lipo "$APP/Frameworks/Ryujinx.Library.dylib" -verify_arch arm64
+xcrun lipo "$MOLTENVK" -verify_arch arm64
+MOLTENVK_ID="$(otool -D "$MOLTENVK" | sed -n '2p')"
+test "$MOLTENVK_ID" = '@rpath/libMoltenVK.dylib'
+otool -L "$APP/$EXECUTABLE" | grep -Fq '@rpath/libMoltenVK.dylib'
+nm -g "$MOLTENVK" > "$OUTPUT_ROOT/logs/moltenvk-symbols.log"
+grep -Eq '(^|[[:space:]_])vkGetMoltenVKConfigurationMVK$' "$OUTPUT_ROOT/logs/moltenvk-symbols.log"
+grep -Eq '(^|[[:space:]_])vkSetMoltenVKConfigurationMVK$' "$OUTPUT_ROOT/logs/moltenvk-symbols.log"
+printf 'moltenvk_sha256=%s\n' "$MOLTENVK_SHA256" >> "$BUILD_INFO"
 test "$(/usr/libexec/PlistBuddy -c 'Print :MeloNXSourceCommit' "$APP/Info.plist")" = "$SOURCE_SHA"
 nm -g "$APP/Frameworks/Ryujinx.Library.dylib" > "$OUTPUT_ROOT/logs/native-symbols.log"
 grep -Eq '(^|[[:space:]_])report_memory_pressure$' "$OUTPUT_ROOT/logs/native-symbols.log"

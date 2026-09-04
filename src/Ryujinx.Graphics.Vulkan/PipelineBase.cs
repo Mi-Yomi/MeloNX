@@ -128,6 +128,7 @@ namespace Ryujinx.Graphics.Vulkan
             _storedBlend = new PipelineColorBlendAttachmentState[Constants.MaxRenderTargets];
 
             _newState.Initialize();
+            gd.RegisterPipelineOwner(this);
         }
 
         public void Initialize()
@@ -1419,6 +1420,31 @@ namespace Ryujinx.Graphics.Vulkan
             _currentPipelineHandle = 0;
         }
 
+        /// <summary>
+        /// Stops retaining the currently selected reproducible pipeline before a pressure flush.
+        /// The next draw or dispatch rebuilds or retrieves the required variant.
+        /// </summary>
+        public void ForgetCurrentPipeline()
+        {
+            Pipeline = null;
+            _currentPipelineHandle = 0;
+            _graphicsStateDirty = true;
+            _computeStateDirty = true;
+        }
+
+        /// <summary>
+        /// Forgets a stale pipeline only if no other invocation replaced it in the meantime.
+        /// </summary>
+        protected void ForgetCurrentPipelineIfCurrent(Auto<DisposablePipeline> expected)
+        {
+            if (ReferenceEquals(Interlocked.CompareExchange(ref Pipeline, null, expected), expected))
+            {
+                _currentPipelineHandle = 0;
+                _graphicsStateDirty = true;
+                _computeStateDirty = true;
+            }
+        }
+
         private void CreateFramebuffer(Span<ITexture> colors, ITexture depthStencil, bool filterWriteMasked)
         {
             if (filterWriteMasked)
@@ -1977,6 +2003,7 @@ namespace Ryujinx.Graphics.Vulkan
         {
             if (disposing)
             {
+                Gd.UnregisterPipelineOwner(this);
                 _nullRenderPass?.Dispose();
                 _newState.Dispose();
                 _descriptorSetUpdater.Dispose();

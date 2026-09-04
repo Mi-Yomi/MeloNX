@@ -34,6 +34,7 @@ namespace Ryujinx.Graphics.Vulkan
             "VK_EXT_descriptor_indexing", // Enabling this works around an issue with disposed buffer bindings on RADV.
             "VK_EXT_fragment_shader_interlock",
             "VK_EXT_index_type_uint8",
+            "VK_EXT_memory_budget",
             "VK_EXT_primitive_topology_list_restart",
             "VK_EXT_robustness2",
             "VK_EXT_shader_stencil_export",

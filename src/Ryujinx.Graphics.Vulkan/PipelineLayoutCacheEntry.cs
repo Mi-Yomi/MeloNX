@@ -22,7 +22,8 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly int[] _consumedDescriptorsPerSet;
         private readonly DescriptorPoolSize[][] _poolSizes;
 
-        private readonly DescriptorSetManager _descriptorSetManager;
+        private readonly DescriptorSetManager _automaticDescriptorSetManager;
+        private readonly DescriptorSetManager _manualDescriptorSetManager;
 
         private readonly List<Auto<DescriptorSetCollection>>[][] _dsCache;
         private List<Auto<DescriptorSetCollection>>[] _currentDsCache;
@@ -129,7 +130,11 @@ namespace Ryujinx.Graphics.Vulkan
                 _pdTemplates = new();
             }
 
-            _descriptorSetManager = new DescriptorSetManager(_device, setDescriptors.Count);
+            // Automatic sets can be discarded during a pressure trim, while manual sets keep
+            // stable cache indexes. Separate pools let automatic retirement release memory even
+            // when a long-lived manual set remains allocated.
+            _automaticDescriptorSetManager = new DescriptorSetManager(_device, setDescriptors.Count);
+            _manualDescriptorSetManager = new DescriptorSetManager(_device, setDescriptors.Count);
         }
 
         public void UpdateCommandBufferIndex(int commandBufferIndex)
@@ -152,7 +157,7 @@ namespace Ryujinx.Graphics.Vulkan
             int index = _dsCacheCursor[setIndex]++;
             if (index == list.Count)
             {
-                Auto<DescriptorSetCollection> dsc = _descriptorSetManager.AllocateDescriptorSet(
+                Auto<DescriptorSetCollection> dsc = _automaticDescriptorSetManager.AllocateDescriptorSet(
                     _gd.Api,
                     DescriptorSetLayouts[setIndex],
                     _poolSizes[setIndex],
@@ -195,7 +200,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             // Otherwise create a new descriptor set, and add to our pending queue for command buffer consumption tracking.
-            Auto<DescriptorSetCollection> dsc = _descriptorSetManager.AllocateDescriptorSet(
+            Auto<DescriptorSetCollection> dsc = _manualDescriptorSetManager.AllocateDescriptorSet(
                 _gd.Api,
                 DescriptorSetLayouts[setIndex],
                 _poolSizes[setIndex],
@@ -319,6 +324,35 @@ namespace Ryujinx.Graphics.Vulkan
             return template;
         }
 
+        /// <summary>
+        /// Drops only automatically allocated, reproducible descriptor sets. Manual descriptor
+        /// sets keep stable cache indexes used by resource arrays and are deliberately retained.
+        /// </summary>
+        public (int DescriptorSets, int Pools) TrimReusableDescriptorSets()
+        {
+            int descriptorSets = 0;
+
+            for (int i = 0; i < _dsCache.Length; i++)
+            {
+                for (int j = 0; j < _dsCache[i].Length; j++)
+                {
+                    List<Auto<DescriptorSetCollection>> cache = _dsCache[i][j];
+                    descriptorSets += cache.Count;
+
+                    foreach (Auto<DescriptorSetCollection> descriptorSet in cache)
+                    {
+                        descriptorSet.Dispose();
+                    }
+
+                    cache.Clear();
+                }
+            }
+
+            Array.Clear(_dsCacheCursor);
+
+            return (descriptorSets, _automaticDescriptorSetManager.RetireCurrentPools());
+        }
+
         protected virtual unsafe void Dispose(bool disposing)
         {
             if (disposing)
@@ -371,7 +405,8 @@ namespace Ryujinx.Graphics.Vulkan
                     pds.Fence.Put();
                 }
 
-                _descriptorSetManager.Dispose();
+                _automaticDescriptorSetManager.Dispose();
+                _manualDescriptorSetManager.Dispose();
             }
         }
 

@@ -337,11 +337,16 @@ namespace Ryujinx.Graphics.Vulkan
             }
             else
             {
-                CommandBufferPool cbp = _gd.BackgroundResources.Get().GetPool();
+                // A fallback scaled copy can use helper pipelines and descriptor caches. Keep
+                // the complete foreign-thread operation mutually exclusive with pressure trim.
+                _gd.BackgroundContextAction(() =>
+                {
+                    CommandBufferPool cbp = _gd.BackgroundResources.Get().GetPool();
 
-                using CommandBufferScoped cbs = cbp.Rent();
+                    using CommandBufferScoped cbs = cbp.Rent();
 
-                CopyToImpl(cbs, dst, srcRegion, dstRegion, linearFilter);
+                    CopyToImpl(cbs, dst, srcRegion, dstRegion, linearFilter);
+                }, alwaysBackground: true);
             }
         }
 

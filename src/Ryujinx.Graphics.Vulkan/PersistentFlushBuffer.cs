@@ -91,9 +91,23 @@ namespace Ryujinx.Graphics.Vulkan
             return flushStorage.GetDataStorage(0, size);
         }
 
+        /// <summary>
+        /// Releases the reusable readback allocation. The caller must ensure that a previously
+        /// returned span is no longer in use; by contract that is true before the next readback.
+        /// </summary>
+        /// <returns>The capacity in bytes of the released buffer</returns>
+        public long Trim()
+        {
+            BufferHolder flushStorage = _flushStorage;
+            _flushStorage = null;
+            flushStorage?.Dispose();
+
+            return flushStorage?.Size ?? 0;
+        }
+
         public void Dispose()
         {
-            _flushStorage.Dispose();
+            Trim();
         }
     }
 }

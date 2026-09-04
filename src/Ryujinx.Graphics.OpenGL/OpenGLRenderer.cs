@@ -280,6 +280,11 @@ namespace Ryujinx.Graphics.OpenGL
             }
         }
 
+        public void TrimMemory(bool aggressive)
+        {
+            // OpenGL has no equivalent to Vulkan command-pool trimming. The iOS backend is Vulkan.
+        }
+
         public void InitializeBackgroundContext(IOpenGLContext baseContext)
         {
             _window.InitializeBackgroundContext(baseContext);

@@ -113,12 +113,14 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 return;
             }
 
-            bool isApplePlatform = OperatingSystem.IsIOS() || OperatingSystem.IsMacOS();
+            bool isIosPlatform = OperatingSystem.IsIOS();
+            bool isApplePlatform = isIosPlatform || OperatingSystem.IsMacOS();
             CacheMemoryBudget budget = CacheMemoryBudgetPolicy.Calculate(
                 _cpuMemorySize,
                 _context.Capabilities.MaximumGpuMemory,
                 _context.Capabilities.MemoryType,
-                isApplePlatform);
+                isApplePlatform,
+                isIosPlatform);
 
             BufferCache.ConfigureMemoryBudget(budget.BufferCapacity, budget.IsAppleUnifiedMemory);
             TextureCache.ConfigureMemoryBudget(budget.TextureCapacity, budget.IsAppleUnifiedMemory);

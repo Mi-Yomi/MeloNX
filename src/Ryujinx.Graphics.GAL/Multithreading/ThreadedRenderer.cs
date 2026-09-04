@@ -266,6 +266,13 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             }
         }
 
+        public void TrimMemory(bool aggressive)
+        {
+            // Pressure is reported by the GPU emulation thread. Queueing an invoked action here
+            // first drains every earlier GAL command, then runs the trim on the backend owner thread.
+            BackgroundContextAction(() => _baseRenderer.TrimMemory(aggressive));
+        }
+
         public unsafe BufferHandle CreateBuffer(int size, BufferAccess access)
         {
             BufferHandle handle = Buffers.CreateBufferHandle();

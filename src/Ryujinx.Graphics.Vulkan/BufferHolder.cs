@@ -904,6 +904,15 @@ namespace Ryujinx.Graphics.Vulkan
             _cachedConvertedBuffers.Remove(offset, size, key);
         }
 
+        /// <summary>
+        /// Releases derived-buffer caches that can otherwise stay at their high-water mark.
+        /// This runs on the renderer owner thread, where the cache is normally accessed.
+        /// </summary>
+        public void TrimPressureCaches()
+        {
+            _cachedConvertedBuffers.Clear();
+        }
+
         public void Dispose()
         {
             _gd.PipelineInternal?.FlushCommandsIfWeightExceeding(_buffer, (ulong)Size);

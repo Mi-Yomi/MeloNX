@@ -656,6 +656,19 @@ namespace Ryujinx.Graphics.Vulkan
             return _buffers.TryGetValue((int)Unsafe.As<BufferHandle, ulong>(ref handle), out holder);
         }
 
+        public int TrimPressureCaches()
+        {
+            int buffers = 0;
+
+            foreach (BufferHolder buffer in _buffers)
+            {
+                buffer.TrimPressureCaches();
+                buffers++;
+            }
+
+            return buffers;
+        }
+
         protected virtual void Dispose(bool disposing)
         {
             if (disposing)

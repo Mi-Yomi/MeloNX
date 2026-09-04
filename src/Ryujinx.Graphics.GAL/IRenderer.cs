@@ -34,6 +34,12 @@ namespace Ryujinx.Graphics.GAL
 
         void BackgroundContextAction(Action action, bool alwaysBackground = false);
 
+        /// <summary>
+        /// Releases backend allocations that are safe to discard while the host is under memory pressure.
+        /// </summary>
+        /// <param name="aggressive">Whether expensive, rebuildable caches should also be discarded</param>
+        void TrimMemory(bool aggressive);
+
         BufferHandle CreateBuffer(int size, BufferAccess access = BufferAccess.Default);
         BufferHandle CreateBuffer(nint pointer, int size);
         BufferHandle CreateBufferSparse(ReadOnlySpan<BufferRange> storageBuffers);
