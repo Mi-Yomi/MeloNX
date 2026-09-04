@@ -8,6 +8,7 @@ using Ryujinx.Graphics.Texture;
 using Ryujinx.Memory.Range;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 
@@ -49,6 +50,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         private readonly AutoDeleteCache _cache;
 
         internal ulong CachedBytes => _cache.CachedBytes;
+        internal ulong Capacity => _cache.Capacity;
 
         /// <summary>
         /// Constructs a new instance of the texture manager.
@@ -79,6 +81,18 @@ namespace Ryujinx.Graphics.Gpu.Image
         internal void ConfigureMemoryBudget(ulong capacity, bool isAppleUnifiedMemory)
         {
             _cache.ConfigureMemoryBudget(capacity, isAppleUnifiedMemory);
+        }
+
+        /// <summary>
+        /// Releases least-recently-used auto-delete textures down to a temporary capacity.
+        /// GPU-modified entries are retained to avoid emergency readback; clean entries preserve
+        /// deferred-copy synchronization before their cache reference is released.
+        /// </summary>
+        /// <param name="capacity">Temporary maximum number of resident texture bytes</param>
+        internal (int Evicted, int SkippedReferenced, int SkippedModified, ulong RetainedMostRecentBytes) TrimForMemoryPressure(ulong capacity)
+        {
+            Debug.Assert(_context.IsGpuThread());
+            return _cache.TrimForMemoryPressure(capacity);
         }
 
         /// <summary>

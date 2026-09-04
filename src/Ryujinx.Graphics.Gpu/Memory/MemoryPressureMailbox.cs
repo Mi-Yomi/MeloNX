@@ -27,6 +27,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             return severity == MemoryPressureSeverity.Critical ? 0 : configuredCapacity / 2;
         }
+
+        public static ulong CalculateTextureTarget(ulong configuredCapacity, MemoryPressureSeverity severity)
+        {
+            return severity == MemoryPressureSeverity.Critical ? 0 : configuredCapacity / 2;
+        }
     }
 
     /// <summary>

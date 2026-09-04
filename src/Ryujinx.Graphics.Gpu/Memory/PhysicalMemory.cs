@@ -125,18 +125,43 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
-        /// Releases clean buffer-cache entries in response to host process memory pressure.
-        /// This runs on the GPU thread and deliberately leaves dirty and in-flight resources alone.
+        /// Releases clean buffer-cache entries and least-recently-used auto-delete textures in response
+        /// to host process memory pressure. This runs on the GPU thread so normal texture synchronization
+        /// and renderer reference lifetimes remain valid.
         /// </summary>
-        internal (ulong BufferBefore, ulong BufferAfter, ulong BufferTarget, ulong TextureTracked) TrimForMemoryPressure(
+        internal (
+            ulong BufferBefore,
+            ulong BufferAfter,
+            ulong BufferTarget,
+            ulong TextureBefore,
+            ulong TextureAfter,
+            ulong TextureTarget,
+            int TextureEvicted,
+            int TextureSkippedReferenced,
+            int TextureSkippedModified,
+            ulong TextureRetainedMostRecentBytes) TrimForMemoryPressure(
             MemoryPressureSeverity severity)
         {
             ulong bufferBefore = BufferCache.CachedBytes;
-            ulong target = MemoryPressureTrimPolicy.CalculateBufferTarget(BufferCache.Capacity, severity);
+            ulong bufferTarget = MemoryPressureTrimPolicy.CalculateBufferTarget(BufferCache.Capacity, severity);
+            ulong textureBefore = TextureCache.CachedBytes;
+            ulong textureTarget = MemoryPressureTrimPolicy.CalculateTextureTarget(TextureCache.Capacity, severity);
 
-            BufferCache.TrimToCapacity(target);
+            // Buffers are handled first so texture synchronization has as much headroom as possible.
+            BufferCache.TrimToCapacity(bufferTarget);
+            var textureTrim = TextureCache.TrimForMemoryPressure(textureTarget);
 
-            return (bufferBefore, BufferCache.CachedBytes, target, TextureCache.CachedBytes);
+            return (
+                bufferBefore,
+                BufferCache.CachedBytes,
+                bufferTarget,
+                textureBefore,
+                TextureCache.CachedBytes,
+                textureTarget,
+                textureTrim.Evicted,
+                textureTrim.SkippedReferenced,
+                textureTrim.SkippedModified,
+                textureTrim.RetainedMostRecentBytes);
         }
 
         /// <summary>

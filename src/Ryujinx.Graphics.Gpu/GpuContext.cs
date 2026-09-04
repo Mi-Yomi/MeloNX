@@ -375,7 +375,13 @@ namespace Ryujinx.Graphics.Gpu
                 ulong bufferBefore = 0;
                 ulong bufferAfter = 0;
                 ulong bufferTarget = 0;
-                ulong textureTracked = 0;
+                ulong textureBefore = 0;
+                ulong textureAfter = 0;
+                ulong textureTarget = 0;
+                int textureEvicted = 0;
+                int textureSkippedReferenced = 0;
+                int textureSkippedModified = 0;
+                ulong textureRetainedMostRecentBytes = 0;
 
                 foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
                 {
@@ -383,7 +389,13 @@ namespace Ryujinx.Graphics.Gpu
                     bufferBefore += result.BufferBefore;
                     bufferAfter += result.BufferAfter;
                     bufferTarget += result.BufferTarget;
-                    textureTracked += result.TextureTracked;
+                    textureBefore += result.TextureBefore;
+                    textureAfter += result.TextureAfter;
+                    textureTarget += result.TextureTarget;
+                    textureEvicted += result.TextureEvicted;
+                    textureSkippedReferenced += result.TextureSkippedReferenced;
+                    textureSkippedModified += result.TextureSkippedModified;
+                    textureRetainedMostRecentBytes += result.TextureRetainedMostRecentBytes;
                 }
 
                 stopwatch.Stop();
@@ -392,9 +404,14 @@ namespace Ryujinx.Graphics.Gpu
                     $"Memory pressure cache trim: severity={request.Severity}, sources={request.Sources}, " +
                     $"available={request.AvailableMemoryBytes / (1024 * 1024)} MiB, sequence={SequenceNumber}, " +
                     $"buffer_before={bufferBefore / (1024 * 1024)} MiB, buffer_after={bufferAfter / (1024 * 1024)} MiB, " +
-                    $"buffer_target={bufferTarget / (1024 * 1024)} MiB, texture_tracked={textureTracked / (1024 * 1024)} MiB, " +
+                    $"buffer_target={bufferTarget / (1024 * 1024)} MiB, " +
+                    $"texture_tracked={textureBefore / (1024 * 1024)} MiB, " +
+                    $"texture_before={textureBefore / (1024 * 1024)} MiB, texture_after={textureAfter / (1024 * 1024)} MiB, " +
+                    $"texture_target={textureTarget / (1024 * 1024)} MiB, texture_evicted={textureEvicted}, " +
+                    $"texture_skipped_referenced={textureSkippedReferenced}, texture_skipped_modified={textureSkippedModified}, " +
+                    $"texture_retained_mru={textureRetainedMostRecentBytes / (1024 * 1024)} MiB, " +
                     $"duration_ms={stopwatch.Elapsed.TotalMilliseconds:F1}. " +
-                    "Reported byte counts are logical cache accounting; dirty and in-flight resources are retained.");
+                    "Reported byte counts are logical cache accounting; referenced and in-flight resources can remain retained.");
             }
 
             foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
@@ -487,7 +504,7 @@ namespace Ryujinx.Graphics.Gpu
                         SyncActions.RemoveAt(i--);
                     }
                 }
-                
+
                 for (int i = 0; i < SyncpointActions.Count; i++)
                 {
                     if (SyncpointActions[i].SyncAction(syncPoint))

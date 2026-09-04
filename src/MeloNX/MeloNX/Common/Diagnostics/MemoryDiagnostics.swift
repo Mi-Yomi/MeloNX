@@ -12,9 +12,10 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private let queueKey = DispatchSpecificKey<Bool>()
     private let segmentLimit = 512 * 1024
     private let sessionsToKeep = 5
-    private let lowAvailableMemory: UInt64 = 768 * 1024 * 1024
-    private let criticalAvailableMemory: UInt64 = 256 * 1024 * 1024
-    private let recoveredAvailableMemory: UInt64 = 1024 * 1024 * 1024
+    private let lowAvailableMemory: UInt64 = 1024 * 1024 * 1024
+    private let criticalAvailableMemory: UInt64 = 512 * 1024 * 1024
+    private let lowTrimRepeatInterval: TimeInterval = 30
+    private let criticalTrimRepeatInterval: TimeInterval = 10
     private var timer: DispatchSourceTimer?
     private var observers: [NSObjectProtocol] = []
     private var file: FileHandle?
@@ -23,9 +24,8 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private var sampledPeak: UInt64 = 0
     private var startedAtUptime: TimeInterval = 0
     private var lowSampleStreak = 0
-    private var recoverySampleStreak = 0
-    private var sampledPressureLevel: Int32 = 0
-    private var lastUIKitTrimUptime: TimeInterval = -Double.infinity
+    private var lastAcceptedTrimUptime: TimeInterval = -Double.infinity
+    private var lastAcceptedCriticalTrimUptime: TimeInterval = -Double.infinity
 
     private init() {
         queue.setSpecific(key: queueKey, value: true)
@@ -65,9 +65,8 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 startedAtUptime = ProcessInfo.processInfo.systemUptime
                 sampledPeak = 0
                 lowSampleStreak = 0
-                recoverySampleStreak = 0
-                sampledPressureLevel = 0
-                lastUIKitTrimUptime = -Double.infinity
+                lastAcceptedTrimUptime = -Double.infinity
+                lastAcceptedCriticalTrimUptime = -Double.infinity
                 try openSegment()
 
                 var header: [String: Any] = [
@@ -82,7 +81,9 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                     "increased_memory_limit_entitlement": metadata.increasedMemoryLimit,
                     "extended_virtual_addressing_entitlement": metadata.extendedVirtualAddressing,
                     "memory_pressure_low_available_bytes": lowAvailableMemory,
-                    "memory_pressure_critical_available_bytes": criticalAvailableMemory
+                    "memory_pressure_critical_available_bytes": criticalAvailableMemory,
+                    "memory_pressure_low_repeat_seconds": lowTrimRepeatInterval,
+                    "memory_pressure_critical_repeat_seconds": criticalTrimRepeatInterval
                 ]
                 if let sourceCommit = metadata.sourceCommit {
                     header["source_commit"] = sourceCommit
@@ -210,33 +211,26 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private func evaluateMemoryPressure(event: String, availableMemory: UInt64) -> (level: String, source: String, result: Int32)? {
         let now = ProcessInfo.processInfo.systemUptime
 
-        if event == "memory_warning", now - lastUIKitTrimUptime >= 10 {
+        if event == "memory_warning", now - lastAcceptedCriticalTrimUptime >= criticalTrimRepeatInterval {
             let result = Ryujinx.reportMemoryPressure(availableBytes: availableMemory, severity: 2, source: 2)
             if result > 0 {
-                lastUIKitTrimUptime = now
+                lastAcceptedTrimUptime = now
+                lastAcceptedCriticalTrimUptime = now
             }
             return ("critical", "uikit_warning", result)
         }
 
         guard event == "sample" else { return nil }
 
-        if availableMemory >= recoveredAvailableMemory {
-            recoverySampleStreak += 1
-            lowSampleStreak = 0
-            if recoverySampleStreak >= 3 {
-                sampledPressureLevel = 0
-            }
-            return nil
-        }
-
-        recoverySampleStreak = 0
-
         if availableMemory <= criticalAvailableMemory {
             lowSampleStreak = 0
-            guard sampledPressureLevel < 2 else { return nil }
+            guard now - lastAcceptedCriticalTrimUptime >= criticalTrimRepeatInterval else {
+                return nil
+            }
             let result = Ryujinx.reportMemoryPressure(availableBytes: availableMemory, severity: 2, source: 1)
             if result > 0 {
-                sampledPressureLevel = 2
+                lastAcceptedTrimUptime = now
+                lastAcceptedCriticalTrimUptime = now
             }
             return ("critical", "available_memory", result)
         }
@@ -247,11 +241,14 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         }
 
         lowSampleStreak += 1
-        guard lowSampleStreak >= 2, sampledPressureLevel < 1 else { return nil }
+        guard lowSampleStreak >= 2,
+              now - lastAcceptedTrimUptime >= lowTrimRepeatInterval else {
+            return nil
+        }
 
         let result = Ryujinx.reportMemoryPressure(availableBytes: availableMemory, severity: 1, source: 1)
         if result > 0 {
-            sampledPressureLevel = 1
+            lastAcceptedTrimUptime = now
         }
         return ("low", "available_memory", result)
     }

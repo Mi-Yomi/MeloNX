@@ -78,5 +78,13 @@ namespace Ryujinx.Tests.Graphics
         {
             Assert.That(MemoryPressureTrimPolicy.CalculateBufferTarget(capacity, (MemoryPressureSeverity)severity), Is.EqualTo(expected));
         }
+
+        [TestCase(256UL, (int)MemoryPressureSeverity.Low, 128UL)]
+        [TestCase(257UL, (int)MemoryPressureSeverity.Low, 128UL)]
+        [TestCase(256UL, (int)MemoryPressureSeverity.Critical, 0UL)]
+        public void CalculatesTemporaryTextureTarget(ulong capacity, int severity, ulong expected)
+        {
+            Assert.That(MemoryPressureTrimPolicy.CalculateTextureTarget(capacity, (MemoryPressureSeverity)severity), Is.EqualTo(expected));
+        }
     }
 }

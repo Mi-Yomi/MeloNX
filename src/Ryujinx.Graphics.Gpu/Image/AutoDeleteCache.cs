@@ -4,6 +4,14 @@ using System.Collections.Generic;
 
 namespace Ryujinx.Graphics.Gpu.Image
 {
+    static class TexturePressureTrimPolicy
+    {
+        public static bool CanEvict(bool hasOneReference, bool cpuModified, bool gpuModified)
+        {
+            return hasOneReference && (cpuModified || !gpuModified);
+        }
+    }
+
     /// <summary>
     /// An entry on the short duration texture cache.
     /// </summary>
@@ -56,6 +64,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         private ulong _totalSize;
 
         internal ulong CachedBytes => _totalSize;
+        internal ulong Capacity => _maxCacheMemoryUsage;
 
         private HashSet<ShortTextureCacheEntry> _shortCacheBuilder;
         private HashSet<ShortTextureCacheEntry> _shortCache;
@@ -152,25 +161,33 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         private void RemoveLeastUsedTexture()
         {
-            Texture oldestTexture = _textures.First.Value;
+            RemoveCachedTexture(_textures.First.Value, synchronizeModifiedData: true);
+        }
 
-            _totalSize -= oldestTexture.CacheSize;
-            oldestTexture.CacheSize = 0;
+        /// <summary>
+        /// Removes a texture and releases the reference owned by this cache.
+        /// </summary>
+        /// <param name="texture">Texture currently linked into the cache</param>
+        /// <param name="synchronizeModifiedData">Whether normal eviction writeback should run</param>
+        private void RemoveCachedTexture(Texture texture, bool synchronizeModifiedData)
+        {
+            _totalSize -= texture.CacheSize;
+            texture.CacheSize = 0;
 
-            if (!oldestTexture.CheckModified(false))
+            if (synchronizeModifiedData && !texture.CheckModified(false))
             {
                 // The texture must be flushed if it falls out of the auto delete cache.
                 // Flushes out of the auto delete cache do not trigger write tracking,
                 // as it is expected that other overlapping textures exist that have more up-to-date contents.
 
-                oldestTexture.Group.SynchronizeDependents(oldestTexture);
-                oldestTexture.FlushModified(false);
+                texture.Group.SynchronizeDependents(texture);
+                texture.FlushModified(false);
             }
 
-            _textures.RemoveFirst();
+            _textures.Remove(texture.CacheNode);
 
-            oldestTexture.DecrementReferenceCount();
-            oldestTexture.CacheNode = null;
+            texture.DecrementReferenceCount();
+            texture.CacheNode = null;
         }
 
         /// <summary>
@@ -185,6 +202,63 @@ namespace Ryujinx.Graphics.Gpu.Image
             {
                 RemoveLeastUsedTexture();
             }
+        }
+
+        /// <summary>
+        /// Removes safe least-recently-used textures until the requested temporary capacity is met.
+        /// GPU-modified textures are skipped because their readback can allocate more memory at exactly
+        /// the point where the host is under pressure. Referenced textures and the MRU entry are retained.
+        /// </summary>
+        /// <param name="capacity">Temporary maximum number of resident texture bytes</param>
+        public (int Evicted, int SkippedReferenced, int SkippedModified, ulong RetainedMostRecentBytes) TrimForMemoryPressure(ulong capacity)
+        {
+            int evicted = 0;
+            int skippedReferenced = 0;
+            int skippedModified = 0;
+            LinkedListNode<Texture> node = _textures.First;
+            LinkedListNode<Texture> mostRecent = _textures.Last;
+
+            while (_totalSize > capacity && node != null && node != mostRecent)
+            {
+                LinkedListNode<Texture> next = node.Next;
+                Texture texture = node.Value;
+                bool hasOneReference = texture.HasOneReference();
+                bool cpuModified = false;
+                bool gpuModified = false;
+
+                if (hasOneReference)
+                {
+                    cpuModified = texture.CheckModified(false);
+                    gpuModified = !cpuModified && texture.Group.HasGpuModifiedData(texture);
+                }
+
+                if (TexturePressureTrimPolicy.CanEvict(hasOneReference, cpuModified, gpuModified))
+                {
+                    if (!cpuModified)
+                    {
+                        texture.Group.SynchronizeDependents(texture);
+                    }
+
+                    RemoveCachedTexture(texture, synchronizeModifiedData: false);
+                    evicted++;
+                }
+                else if (!hasOneReference)
+                {
+                    skippedReferenced++;
+                }
+                else
+                {
+                    skippedModified++;
+                }
+
+                node = next;
+            }
+
+            ulong retainedMostRecentBytes = _totalSize > capacity && mostRecent != null
+                ? mostRecent.Value.CacheSize
+                : 0;
+
+            return (evicted, skippedReferenced, skippedModified, retainedMostRecentBytes);
         }
 
         /// <summary>
