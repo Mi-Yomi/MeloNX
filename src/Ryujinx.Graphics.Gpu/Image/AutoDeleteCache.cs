@@ -12,6 +12,26 @@ namespace Ryujinx.Graphics.Gpu.Image
         }
     }
 
+    static class NormalTextureEvictionPolicy
+    {
+        public const int CandidateScanLimit = 4;
+
+        public static bool RequiresReadback(bool cpuModified, bool gpuModified)
+        {
+            return !cpuModified && gpuModified;
+        }
+
+        public static bool CanSelectAlternative(
+            bool oldestAlreadyDeferred,
+            bool hasOneReference,
+            bool cpuModified,
+            bool gpuModified)
+        {
+            return !oldestAlreadyDeferred &&
+                   TexturePressureTrimPolicy.CanEvict(hasOneReference, cpuModified, gpuModified);
+        }
+    }
+
     /// <summary>
     /// An entry on the short duration texture cache.
     /// </summary>
@@ -62,11 +82,22 @@ namespace Ryujinx.Graphics.Gpu.Image
 
         private readonly LinkedList<Texture> _textures;
         private ulong _totalSize;
+        private Texture _lastReadbackDeferredTexture;
+        private ulong _normalEvictions;
+        private ulong _normalEvictedBytes;
+        private ulong _normalReadbackEvictions;
+        private ulong _normalCleanBypasses;
 
         internal ulong CachedBytes => _totalSize;
         internal ulong Capacity => _maxCacheMemoryUsage;
 
-        internal (int Entries, ulong LargestEntryBytes) GetStatistics()
+        internal (
+            int Entries,
+            ulong LargestEntryBytes,
+            ulong NormalEvictions,
+            ulong NormalEvictedBytes,
+            ulong NormalReadbackEvictions,
+            ulong NormalCleanBypasses) GetStatistics()
         {
             ulong largestEntryBytes = 0;
 
@@ -75,7 +106,13 @@ namespace Ryujinx.Graphics.Gpu.Image
                 largestEntryBytes = ulong.Max(largestEntryBytes, texture.CacheSize);
             }
 
-            return (_textures.Count, largestEntryBytes);
+            return (
+                _textures.Count,
+                largestEntryBytes,
+                _normalEvictions,
+                _normalEvictedBytes,
+                _normalReadbackEvictions,
+                _normalCleanBypasses);
         }
 
         private HashSet<ShortTextureCacheEntry> _shortCacheBuilder;
@@ -173,7 +210,73 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         private void RemoveLeastUsedTexture()
         {
-            RemoveCachedTexture(_textures.First.Value, synchronizeModifiedData: true);
+            Texture oldest = _textures.First.Value;
+            Texture candidate = oldest;
+            bool oldestCpuModified = oldest.CheckModified(false);
+            bool oldestGpuModified = !oldestCpuModified && oldest.Group.HasGpuModifiedData(oldest);
+            bool oldestRequiresReadback = NormalTextureEvictionPolicy.RequiresReadback(
+                oldestCpuModified,
+                oldestGpuModified);
+            bool oldestAlreadyDeferred = oldest == _lastReadbackDeferredTexture;
+
+            // A GPU-dirty LRU can require a synchronous readback. Before paying that cost, inspect
+            // a few nearby entries for storage that can actually be released without readback.
+            // Never inspect the MRU, and never defer the same dirty LRU twice: unbounded clean-first
+            // eviction would make streaming workloads continually recreate their newest textures.
+            if (oldestRequiresReadback && !oldestAlreadyDeferred)
+            {
+                LinkedListNode<Texture> node = _textures.First.Next;
+                LinkedListNode<Texture> mostRecent = _textures.Last;
+                int scanned = 0;
+
+                while (node != null && node != mostRecent && scanned < NormalTextureEvictionPolicy.CandidateScanLimit)
+                {
+                    Texture alternative = node.Value;
+                    bool alternativeHasOneReference = alternative.HasOneReference();
+                    bool alternativeCpuModified = false;
+                    bool alternativeGpuModified = false;
+
+                    if (alternativeHasOneReference)
+                    {
+                        alternativeCpuModified = alternative.CheckModified(false);
+                        alternativeGpuModified = !alternativeCpuModified &&
+                            alternative.Group.HasGpuModifiedData(alternative);
+                    }
+
+                    if (NormalTextureEvictionPolicy.CanSelectAlternative(
+                        oldestAlreadyDeferred,
+                        alternativeHasOneReference,
+                        alternativeCpuModified,
+                        alternativeGpuModified))
+                    {
+                        candidate = alternative;
+                        break;
+                    }
+
+                    node = node.Next;
+                    scanned++;
+                }
+            }
+
+            if (candidate == oldest)
+            {
+                _lastReadbackDeferredTexture = null;
+
+                if (oldestRequiresReadback)
+                {
+                    _normalReadbackEvictions++;
+                }
+            }
+            else
+            {
+                _lastReadbackDeferredTexture = oldest;
+                _normalCleanBypasses++;
+            }
+
+            _normalEvictions++;
+            _normalEvictedBytes += candidate.CacheSize;
+
+            RemoveCachedTexture(candidate, synchronizeModifiedData: true);
         }
 
         /// <summary>
@@ -183,6 +286,11 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="synchronizeModifiedData">Whether normal eviction writeback should run</param>
         private void RemoveCachedTexture(Texture texture, bool synchronizeModifiedData)
         {
+            if (texture == _lastReadbackDeferredTexture)
+            {
+                _lastReadbackDeferredTexture = null;
+            }
+
             _totalSize -= texture.CacheSize;
             texture.CacheSize = 0;
 
@@ -284,6 +392,11 @@ namespace Ryujinx.Graphics.Gpu.Image
             if (texture.CacheNode == null)
             {
                 return false;
+            }
+
+            if (texture == _lastReadbackDeferredTexture)
+            {
+                _lastReadbackDeferredTexture = null;
             }
 
             // Remove our reference to this texture.

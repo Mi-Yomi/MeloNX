@@ -6,6 +6,7 @@ using Ryujinx.Graphics.Gpu.Image;
 using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Texture;
 using Ryujinx.Memory.Range;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -123,6 +124,38 @@ namespace Ryujinx.Tests.Graphics
             return (texture, hostTexture);
         }
 
+        private static void SetGpuModified(Texture texture, bool modified)
+        {
+            FieldInfo handlesField = typeof(TextureGroup)
+                .GetField("_handles", BindingFlags.Instance | BindingFlags.NonPublic);
+            TextureGroupHandle[] handles = (TextureGroupHandle[])handlesField.GetValue(texture.Group);
+
+            // TextureBuffer groups intentionally have no tracking handles. Supply one isolated
+            // handle so the test can model GPU-dirty state without a real PhysicalMemory tracker.
+            if (handles.Length == 0)
+            {
+                handles =
+                [
+                    new TextureGroupHandle(
+                        texture.Group,
+                        offset: 0,
+                        size: texture.Size,
+                        views: null,
+                        firstLayer: 0,
+                        firstLevel: 0,
+                        baseSlice: 0,
+                        sliceCount: 1,
+                        handles: Array.Empty<Ryujinx.Memory.Tracking.RegionHandle>())
+                ];
+                handlesField.SetValue(texture.Group, handles);
+            }
+
+            foreach (TextureGroupHandle handle in handles)
+            {
+                handle.Modified = modified;
+            }
+        }
+
         [Test]
         public void OversizedMostRecentTextureRetainsItsCacheReferenceUntilExplicitRemoval()
         {
@@ -235,6 +268,78 @@ namespace Ryujinx.Tests.Graphics
             CollectionAssert.AreEqual(new[] { newest }, cache);
 
             cache.Remove(newest, flush: false);
+        }
+
+        [Test]
+        public void NormalCapacityEvictionBypassesGpuDirtyOldestForOneCleanRelease()
+        {
+            AutoDeleteCache cache = new();
+            (Texture oldest, TestHostTexture oldestHost) = CreatePressureEvictableTexture(64);
+            (Texture cleanAlternative, TestHostTexture cleanHost) = CreatePressureEvictableTexture(64);
+            Texture newest = CreatePressureTrimmableTexture(64);
+            ulong textureSize = oldest.GetEstimatedHostSize();
+
+            SetGpuModified(oldest, true);
+            cache.ConfigureMemoryBudget(textureSize * 2, isAppleUnifiedMemory: true);
+
+            cache.Add(oldest);
+            cache.Add(cleanAlternative);
+            cache.Add(newest);
+
+            var statistics = cache.GetStatistics();
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(oldest.CacheNode, Is.Not.Null);
+                Assert.That(oldestHost.ReleaseCount, Is.Zero);
+                Assert.That(cleanAlternative.CacheNode, Is.Null);
+                Assert.That(cleanHost.ReleaseCount, Is.EqualTo(1));
+                Assert.That(newest.CacheNode, Is.Not.Null);
+                Assert.That(statistics.NormalEvictions, Is.EqualTo(1));
+                Assert.That(statistics.NormalReadbackEvictions, Is.Zero);
+                Assert.That(statistics.NormalCleanBypasses, Is.EqualTo(1));
+                Assert.That(statistics.NormalEvictedBytes, Is.EqualTo(textureSize));
+            });
+            CollectionAssert.AreEqual(new[] { oldest, newest }, cache);
+
+            cache.Remove(oldest, flush: false);
+            cache.Remove(newest, flush: false);
+        }
+
+        [TestCase(false, true, false, false, true)]
+        [TestCase(false, true, true, true, true)]
+        [TestCase(false, true, false, true, false)]
+        [TestCase(false, false, false, false, false)]
+        [TestCase(true, true, false, false, false)]
+        public void NormalEvictionAlternativeIsSafeAndCanOnlyDeferOldestOnce(
+            bool oldestAlreadyDeferred,
+            bool hasOneReference,
+            bool cpuModified,
+            bool gpuModified,
+            bool expected)
+        {
+            Assert.That(
+                NormalTextureEvictionPolicy.CanSelectAlternative(
+                    oldestAlreadyDeferred,
+                    hasOneReference,
+                    cpuModified,
+                    gpuModified),
+                Is.EqualTo(expected));
+        }
+
+        [TestCase(false, false, false)]
+        [TestCase(false, true, true)]
+        [TestCase(true, false, false)]
+        [TestCase(true, true, false)]
+        public void NormalEvictionOnlyClassifiesGpuOnlyDirtyDataAsReadback(
+            bool cpuModified,
+            bool gpuModified,
+            bool expected)
+        {
+            Assert.That(
+                NormalTextureEvictionPolicy.RequiresReadback(cpuModified, gpuModified),
+                Is.EqualTo(expected));
+            Assert.That(NormalTextureEvictionPolicy.CandidateScanLimit, Is.EqualTo(4));
         }
 
         [TestCase(true, true, true, true)]

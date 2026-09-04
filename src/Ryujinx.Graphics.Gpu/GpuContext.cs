@@ -190,6 +190,10 @@ namespace Ryujinx.Graphics.Gpu
             ulong bufferConfiguredCapacity = 0;
             ulong bufferEffectiveCapacity = 0;
             ulong textureCachedBytes = 0;
+            ulong textureNormalEvictions = 0;
+            ulong textureNormalEvictedBytes = 0;
+            ulong textureNormalReadbackEvictions = 0;
+            ulong textureNormalCleanBypasses = 0;
 
             foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
             {
@@ -197,6 +201,11 @@ namespace Ryujinx.Graphics.Gpu
                 bufferConfiguredCapacity += physicalMemory.BufferCache.Capacity;
                 bufferEffectiveCapacity += physicalMemory.BufferCache.EffectiveCapacity;
                 textureCachedBytes += physicalMemory.TextureCache.CachedBytes;
+                var textureStatistics = physicalMemory.TextureCache.GetCacheStatistics();
+                textureNormalEvictions += textureStatistics.NormalEvictions;
+                textureNormalEvictedBytes += textureStatistics.NormalEvictedBytes;
+                textureNormalReadbackEvictions += textureStatistics.NormalReadbackEvictions;
+                textureNormalCleanBypasses += textureStatistics.NormalCleanBypasses;
             }
 
             string renderer = Renderer is ThreadedRenderer threaded
@@ -209,6 +218,10 @@ namespace Ryujinx.Graphics.Gpu
                    $"buffer_configured_capacity_mib={bufferConfiguredCapacity / (1024 * 1024)}, " +
                    $"buffer_effective_capacity_mib={bufferEffectiveCapacity / (1024 * 1024)}, " +
                    $"texture_cached_mib={textureCachedBytes / (1024 * 1024)}, " +
+                   $"texture_normal_evictions={textureNormalEvictions}, " +
+                   $"texture_normal_evicted_mib={textureNormalEvictedBytes / (1024 * 1024)}, " +
+                   $"texture_normal_readback_evictions={textureNormalReadbackEvictions}, " +
+                   $"texture_normal_clean_bypasses={textureNormalCleanBypasses}, " +
                    $"presentation=[{Window.GetDiagnosticSnapshot()}], {renderer}.";
         }
 
@@ -415,6 +428,10 @@ namespace Ryujinx.Graphics.Gpu
                 ulong textureTarget = 0;
                 int textureEntries = 0;
                 ulong textureLargestEntryBytes = 0;
+                ulong textureNormalEvictions = 0;
+                ulong textureNormalEvictedBytes = 0;
+                ulong textureNormalReadbackEvictions = 0;
+                ulong textureNormalCleanBypasses = 0;
                 int textureEvicted = 0;
                 int textureSkippedReferenced = 0;
                 int textureSkippedModified = 0;
@@ -434,6 +451,10 @@ namespace Ryujinx.Graphics.Gpu
                     textureTarget += result.TextureTarget;
                     textureEntries += result.TextureEntries;
                     textureLargestEntryBytes = Math.Max(textureLargestEntryBytes, result.TextureLargestEntryBytes);
+                    textureNormalEvictions += result.TextureNormalEvictions;
+                    textureNormalEvictedBytes += result.TextureNormalEvictedBytes;
+                    textureNormalReadbackEvictions += result.TextureNormalReadbackEvictions;
+                    textureNormalCleanBypasses += result.TextureNormalCleanBypasses;
                     textureEvicted += result.TextureEvicted;
                     textureSkippedReferenced += result.TextureSkippedReferenced;
                     textureSkippedModified += result.TextureSkippedModified;
@@ -460,6 +481,10 @@ namespace Ryujinx.Graphics.Gpu
                     $"texture_tracked={textureBefore / (1024 * 1024)} MiB, " +
                     $"texture_before={textureBefore / (1024 * 1024)} MiB, texture_after={textureAfter / (1024 * 1024)} MiB, " +
                     $"texture_entries={textureEntries}, texture_largest_entry={textureLargestEntryBytes / (1024 * 1024)} MiB, " +
+                    $"texture_normal_evictions={textureNormalEvictions}, " +
+                    $"texture_normal_evicted={textureNormalEvictedBytes / (1024 * 1024)} MiB, " +
+                    $"texture_normal_readback_evictions={textureNormalReadbackEvictions}, " +
+                    $"texture_normal_clean_bypasses={textureNormalCleanBypasses}, " +
                     $"texture_target={textureTarget / (1024 * 1024)} MiB, texture_evicted={textureEvicted}, " +
                     $"texture_pressure_eviction_enabled={texturePressureEvictionEnabled}, " +
                     $"texture_skipped_referenced={textureSkippedReferenced}, texture_skipped_modified={textureSkippedModified}, " +
