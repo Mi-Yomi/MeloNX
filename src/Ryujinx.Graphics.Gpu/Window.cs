@@ -1,4 +1,5 @@
 using Ryujinx.Graphics.GAL;
+using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.Gpu.Image;
 using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Texture;
@@ -94,6 +95,15 @@ namespace Ryujinx.Graphics.Gpu
         private int _framesAvailable;
         private long _lastUnboundedPresentTicks;
         private volatile bool _unboundedPresentMode;
+        private int _unboundedPresentTargetFps;
+        private long _framesEnqueued;
+        private long _framesPresented;
+        private long _framesDropped;
+        private int _maxQueuedFrames;
+        private long _lastPresentStatsTicks;
+        private long _lastStatsEnqueued;
+        private long _lastStatsPresented;
+        private long _lastStatsDropped;
 
         public bool IsFrameAvailable => _framesAvailable != 0;
 
@@ -193,6 +203,9 @@ namespace Ryujinx.Graphics.Gpu
                 releaseCallback,
                 userObj));
 
+            long enqueued = Interlocked.Increment(ref _framesEnqueued);
+            UpdateMaxQueuedFrames(enqueued - Interlocked.Read(ref _framesPresented) - Interlocked.Read(ref _framesDropped));
+
             return true;
         }
 
@@ -247,6 +260,7 @@ namespace Ryujinx.Graphics.Gpu
                 }
 
                 _context.Renderer.Window.Present(texture.HostTexture, crop, swapBuffersCallback);
+                Interlocked.Increment(ref _framesPresented);
 
                 pt.ReleaseCallback(pt.UserObj);
             }
@@ -264,6 +278,7 @@ namespace Ryujinx.Graphics.Gpu
         public bool PresentLoop(Action swapBuffersCallback)
         {
             bool presented = false;
+            long statsTicks = _unboundedPresentTimer.ElapsedTicks;
 
             if (!_unboundedPresentMode)
             {
@@ -273,10 +288,11 @@ namespace Ryujinx.Graphics.Gpu
                     presented = true;
                 }
 
+                LogPresentStatsIfNeeded(statsTicks);
                 return presented;
             }
 
-            long ticks = _unboundedPresentTimer.ElapsedTicks;
+            long ticks = statsTicks;
             long lastPresentTicks = Interlocked.Read(ref _lastUnboundedPresentTicks);
             bool shouldPresent = lastPresentTicks == 0 || ticks - lastPresentTicks >= Interlocked.Read(ref _unboundedPresentTicksPerFrame);
 
@@ -295,6 +311,7 @@ namespace Ryujinx.Graphics.Gpu
                 }
             }
 
+            LogPresentStatsIfNeeded(statsTicks);
             return presented;
         }
 
@@ -308,6 +325,9 @@ namespace Ryujinx.Graphics.Gpu
             {
                 _unboundedPresentMode = enabled;
                 Interlocked.Exchange(ref _lastUnboundedPresentTicks, 0);
+                Logger.Info?.Print(
+                    LogClass.Gpu,
+                    $"Guest presentation pacing changed: unbounded={enabled}, target_fps={_unboundedPresentTargetFps}.");
             }
         }
 
@@ -319,8 +339,10 @@ namespace Ryujinx.Graphics.Gpu
         {
             targetFps = Math.Max(1, targetFps);
 
+            _unboundedPresentTargetFps = targetFps;
             Interlocked.Exchange(ref _unboundedPresentTicksPerFrame, Math.Max(1, Stopwatch.Frequency / targetFps));
             Interlocked.Exchange(ref _lastUnboundedPresentTicks, 0);
+            Logger.Info?.Print(LogClass.Gpu, $"Unbounded host presentation target set: fps={targetFps}.");
         }
 
         private void DropFrame()
@@ -328,7 +350,57 @@ namespace Ryujinx.Graphics.Gpu
             if (_frameQueue.TryDequeue(out PresentationTexture pt))
             {
                 pt.ReleaseCallback(pt.UserObj);
+                Interlocked.Increment(ref _framesDropped);
             }
+        }
+
+        private void UpdateMaxQueuedFrames(long queued)
+        {
+            int candidate = (int)Math.Clamp(queued, 0, int.MaxValue);
+            int current;
+
+            while (candidate > (current = Volatile.Read(ref _maxQueuedFrames)) &&
+                   Interlocked.CompareExchange(ref _maxQueuedFrames, candidate, current) != current)
+            {
+            }
+        }
+
+        private void LogPresentStatsIfNeeded(long ticks)
+        {
+            long lastTicks = Interlocked.Read(ref _lastPresentStatsTicks);
+            if (ticks - lastTicks < Stopwatch.Frequency * 10 ||
+                Interlocked.CompareExchange(ref _lastPresentStatsTicks, ticks, lastTicks) != lastTicks)
+            {
+                return;
+            }
+
+            long enqueued = Interlocked.Read(ref _framesEnqueued);
+            long presented = Interlocked.Read(ref _framesPresented);
+            long dropped = Interlocked.Read(ref _framesDropped);
+            int maxQueued = Interlocked.Exchange(ref _maxQueuedFrames, (int)Math.Clamp(enqueued - presented - dropped, 0, int.MaxValue));
+
+            Logger.Info?.Print(
+                LogClass.Gpu,
+                $"Presentation telemetry: unbounded={_unboundedPresentMode}, target_fps={_unboundedPresentTargetFps}, " +
+                $"interval_enqueued={enqueued - _lastStatsEnqueued}, interval_presented={presented - _lastStatsPresented}, " +
+                $"interval_dropped={dropped - _lastStatsDropped}, max_queued={maxQueued}, " +
+                $"total_enqueued={enqueued}, total_presented={presented}, total_dropped={dropped}, " +
+                $"frames_available={Volatile.Read(ref _framesAvailable)}.");
+
+            _lastStatsEnqueued = enqueued;
+            _lastStatsPresented = presented;
+            _lastStatsDropped = dropped;
+        }
+
+        public string GetDiagnosticSnapshot()
+        {
+            long enqueued = Interlocked.Read(ref _framesEnqueued);
+            long presented = Interlocked.Read(ref _framesPresented);
+            long dropped = Interlocked.Read(ref _framesDropped);
+
+            return $"unbounded={_unboundedPresentMode}, target_fps={_unboundedPresentTargetFps}, " +
+                   $"enqueued={enqueued}, presented={presented}, dropped={dropped}, " +
+                   $"queued={Math.Max(0, enqueued - presented - dropped)}, frames_available={Volatile.Read(ref _framesAvailable)}";
         }
 
         /// <summary>

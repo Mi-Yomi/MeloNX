@@ -240,7 +240,6 @@ class RyujinxController: ObservableObject {
         settings.resolveMultiplayerLanInterface(preferredInterfaceId: preferredNetworkInterfaceId)
         
         settings.inputPath = game.fileURL.path
-        settings.backendThreading = .on
         
         isRunning = .started(game: game)
         _isPaused = false
@@ -250,7 +249,7 @@ class RyujinxController: ObservableObject {
         let nativeSettingsManager = NativeSettingsManager.shared
         
         let coreLogURL = (nativeSettingsManager.writeStdout.value as Bool) ? nil : redirectStdIOToFile()
-        MemoryDiagnostics.shared.startSession(coreLogURL: coreLogURL)
+        MemoryDiagnostics.shared.startSession(coreLogURL: coreLogURL, settings: settings)
         
         Thread.detachNewThread {
             let response = Ryujinx.mainRyu(settings)

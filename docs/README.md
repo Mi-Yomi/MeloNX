@@ -35,6 +35,7 @@ Project Docs
 - [Аудит Eden и MeloNX для iPhone 16 Pro Max](EDEN-AUDIT.ru.md)
 - [GTA V: аудит домашнего обновления и вылета после пролога](GTA-V-CRASH-2026-09-04.ru.md)
 - [GTA V: аудит v4, последнего вылета и актуального Eden](GTA-V-V4-EDEN-AUDIT-2026-09-04.ru.md)
+- [GTA V: настройки и диагностическая v5](GTA-V-V5-DIAGNOSTICS-2026-09-04.ru.md)
 - [План эксперимента GTA V](GTAV-EXPERIMENT.ru.md)
 - [Исследование GTA V](GTA-V-RESEARCH.ru.md)
 

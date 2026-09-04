@@ -8,6 +8,7 @@
 import Foundation
 
 @dynamicMemberLookup
+@MainActor
 class CallbackManager {
     private static var registrations: [String: UnsafeMutableRawPointer] = [:]
     

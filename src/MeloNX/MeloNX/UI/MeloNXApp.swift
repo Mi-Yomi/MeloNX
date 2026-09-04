@@ -83,6 +83,7 @@ struct MeloNXApp: App {
         initEnvironmentVariables()
         JitCacheSettings.applyAtLaunch()
         Ryujinx.initialize()
+        MemoryDiagnostics.shared.installManagedCrashCallback()
         ThemeManager.shared.applyUIKitAppearance()
     }
     

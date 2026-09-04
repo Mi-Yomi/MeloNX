@@ -38,6 +38,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using ConfigGamepadInputId = Ryujinx.Common.Configuration.Hid.Controller.GamepadInputId;
 using ConfigStickInputId = Ryujinx.Common.Configuration.Hid.Controller.StickInputId;
@@ -68,6 +69,31 @@ using Ryujinx.HLE.Utilities;
 
 namespace Ryujinx.Library 
 {
+    [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower)]
+    [JsonSerializable(typeof(ManagedCrashPayload))]
+    internal partial class ManagedCrashJsonContext : JsonSerializerContext
+    {
+    }
+
+    internal sealed class ManagedCrashPayload
+    {
+        public int SchemaVersion { get; init; }
+        public string Origin { get; init; } = string.Empty;
+        public bool IsTerminating { get; init; }
+        public string TimeUtc { get; init; } = string.Empty;
+        public string ExceptionType { get; init; } = string.Empty;
+        public string ExceptionMessage { get; init; } = string.Empty;
+        public string ExceptionStack { get; init; } = string.Empty;
+        public int Hresult { get; init; }
+        public int ManagedThreadId { get; init; }
+        public string ManagedThreadName { get; init; } = string.Empty;
+        public long ManagedHeapBytes { get; init; }
+        public int GcGen0Collections { get; init; }
+        public int GcGen1Collections { get; init; }
+        public int GcGen2Collections { get; init; }
+        public string GpuSnapshot { get; init; } = string.Empty;
+    }
+
     class Library
     {
         private static VirtualFileSystem _virtualFileSystem;
@@ -87,6 +113,8 @@ namespace Ryujinx.Library
         private static readonly Lock metalLayerLock = new();
         private static readonly Lock inputConfigurationLock = new();
         private static KeyboardConfigNative? _keyboardConfig = null;
+        private static int _fatalHandlerInstalled;
+        private static int _fatalHandlerRunning;
 
         [UnmanagedCallersOnly(EntryPoint = "main_ryujinx_sdl")]
         public static unsafe int MainExternal(OptionsNative* nativeOptions)
@@ -99,7 +127,7 @@ namespace Ryujinx.Library
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.ToString());
+                ReportManagedFailure(e, "main_native_boundary", false);
                 return -1;
             }
 
@@ -110,6 +138,7 @@ namespace Ryujinx.Library
         [UnmanagedCallersOnly(EntryPoint = "initialize")]
         public static unsafe void Initialize()
         {
+            InstallFatalHandler();
             AppDataManager.Initialize(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments));
 
             Silk.NET.Core.Loader.SearchPathContainer.Platform = Silk.NET.Core.Loader.UnderlyingPlatform.MacOS;
@@ -162,6 +191,145 @@ namespace Ryujinx.Library
                 invoked.WaitOne();
             };
 
+        }
+
+        private static void InstallFatalHandler()
+        {
+            if (Interlocked.Exchange(ref _fatalHandlerInstalled, 1) == 0)
+            {
+                AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+                    ReportManagedFailure(eventArgs.ExceptionObject, "appdomain_unhandled", eventArgs.IsTerminating);
+            }
+        }
+
+        private static void ReportManagedFailure(object exceptionObject, string origin, bool isTerminating)
+        {
+            // This callback writes a pre-opened fixed marker with direct POSIX I/O. Invoke it
+            // before interlocked state, stack formatting, GPU snapshots or JSON serialization.
+            TryInvokeManagedCrashEntryCallback();
+
+            if (Interlocked.Exchange(ref _fatalHandlerRunning, 1) != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                Exception exception = exceptionObject as Exception;
+                string exceptionType = exception?.GetType().FullName ?? exceptionObject?.GetType().FullName ?? "unknown";
+                // Keep the synchronous managed-to-Swift payload safely below 64 KiB even when
+                // exception text contains multi-byte UTF-8 characters.
+                string message = LimitDiagnosticText(exception?.Message ?? exceptionObject?.ToString() ?? "unknown", 1024);
+                string stack = LimitDiagnosticText(exception?.StackTrace ?? "stack_unavailable", 10000);
+                string gpuSnapshot = "unavailable";
+
+                try
+                {
+                    gpuSnapshot = Volatile.Read(ref _activeMemoryPressureContext)?.GetCrashDiagnosticSnapshot() ?? "no_active_gpu_context";
+                }
+                catch (Exception snapshotException)
+                {
+                    gpuSnapshot = $"snapshot_failed:{snapshotException.GetType().Name}";
+                }
+
+                ManagedCrashPayload payload = new()
+                {
+                    SchemaVersion = 1,
+                    Origin = origin,
+                    IsTerminating = isTerminating,
+                    TimeUtc = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture),
+                    ExceptionType = exceptionType,
+                    ExceptionMessage = message,
+                    ExceptionStack = stack,
+                    Hresult = exception?.HResult ?? 0,
+                    ManagedThreadId = Environment.CurrentManagedThreadId,
+                    ManagedThreadName = Thread.CurrentThread.Name ?? string.Empty,
+                    ManagedHeapBytes = GC.GetTotalMemory(false),
+                    GcGen0Collections = GC.CollectionCount(0),
+                    GcGen1Collections = GC.CollectionCount(1),
+                    GcGen2Collections = GC.CollectionCount(2),
+                    GpuSnapshot = gpuSnapshot,
+                };
+
+                byte[] callbackPayload = JsonSerializer.SerializeToUtf8Bytes(
+                    payload,
+                    ManagedCrashJsonContext.Default.ManagedCrashPayload);
+
+                TryInvokeManagedCrashCallback(callbackPayload);
+
+                try
+                {
+                    Logger.Log log = Logger.Error ?? Logger.Notice;
+                    log.Print(
+                        LogClass.Application,
+                        $"Managed failure: origin={origin}, terminating={isTerminating}, type={exceptionType}, " +
+                        $"thread={Environment.CurrentManagedThreadId}/{Thread.CurrentThread.Name ?? "unnamed"}, " +
+                        $"message={message}, gpu=[{gpuSnapshot}]. Exception: {stack}");
+                    Logger.Flush();
+                }
+                catch
+                {
+                    // Console output below is the final fallback.
+                }
+
+                try
+                {
+                    Console.Error.WriteLine($"Managed failure ({origin}): {stack}");
+                    Console.Out.Flush();
+                    Console.Error.Flush();
+                }
+                catch
+                {
+                    // Never throw from an unmanaged or AppDomain exception boundary.
+                }
+            }
+            catch
+            {
+                try
+                {
+                    Console.Error.WriteLine("Managed failure reporting itself failed.");
+                    Console.Error.Flush();
+                }
+                catch
+                {
+                }
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _fatalHandlerRunning, 0);
+            }
+        }
+
+        private static unsafe void TryInvokeManagedCrashCallback(byte[] payload)
+        {
+            try
+            {
+                fixed (byte* payloadPointer = payload)
+                {
+                    CallbackRegistry.Invoke("managed_crash", payloadPointer, payload.Length);
+                }
+            }
+            catch
+            {
+                // Last-chance diagnostics must continue even if the native callback is unavailable.
+            }
+        }
+
+        private static void TryInvokeManagedCrashEntryCallback()
+        {
+            try
+            {
+                CallbackRegistry.Invoke("managed_crash_entry");
+            }
+            catch
+            {
+                // The enriched path and console logging may still be available.
+            }
+        }
+
+        private static string LimitDiagnosticText(string value, int maxLength)
+        {
+            return value.Length <= maxLength ? value : value[..maxLength] + "...[truncated]";
         }
 
         [UnmanagedCallersOnly(EntryPoint = "set_native_window")]
@@ -837,23 +1005,18 @@ namespace Ryujinx.Library
 
             Logger.Info?.Print(
                 LogClass.Application,
-                $"Runtime graphics settings: resolution_scale={option.ResScale}, texture_recompression={option.EnableTextureRecompression}, " +
-                $"docked={!option.DisableDockedMode}, backend_threading={option.BackendThreading}, " +
-                $"vsync={(option.DisableVSync ? "Unbounded" : option.VSyncMode)}, error_logging={OperatingSystem.IsIOS() || option.LoggingEnableError}.");
-
-
-            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
-            {
-                var ex = e.ExceptionObject as Exception;
-                var trace = new System.Diagnostics.StackTrace(ex, true);
-                var frame = trace.GetFrame(0);
-                var file = frame?.GetFileName();
-                var line = frame?.GetFileLineNumber();
-
-                Logger.Info?.Print(LogClass.Application,
-                    $"Unhandled exception: {ex}\nFile: {file}\nLine: {line}");
-
-            };
+                $"Runtime graphics settings: resolution_scale={option.ResScale}, scaling_filter={option.ScalingFilter}, " +
+                $"scaling_filter_level={option.ScalingFilterLevel}, anti_aliasing={option.AntiAliasing}, " +
+                $"texture_recompression={option.EnableTextureRecompression}, anisotropy={option.MaxAnisotropy}, " +
+                $"docked={!option.DisableDockedMode}, backend_threading_requested={option.BackendThreading}, " +
+                $"vsync_requested={(option.DisableVSync ? "Unbounded" : option.VSyncMode)}, " +
+                $"custom_vsync_interval={option.CustomVSyncInterval}, shader_cache={!option.DisableShaderCache}, " +
+                $"async_shader_compilation={option.EnableAsyncShaderCompilation}, ptc={!option.DisablePTC}, " +
+                $"memory_manager={option.MemoryManagerMode}, expand_ram_requested={option.ExpandRAM}, " +
+                $"graphics_debug={option.LoggingGraphicsDebugLevel}, debug_logging={option.LoggingEnableDebug}, " +
+                $"trace_logging={option.LoggingEnableTrace}, file_logging={!option.DisableFileLog}, " +
+                $"error_logging={OperatingSystem.IsIOS() || option.LoggingEnableError}, " +
+                "pressure_texture_eviction=false.");
 
             if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
             {
@@ -923,7 +1086,13 @@ namespace Ryujinx.Library
         
         private static Switch InitializeEmulationContext(WindowBase window, IRenderer renderer, Options options)
         {
+            string baseRendererName = renderer.GetType().Name;
             renderer = renderer.TryMakeThreaded(options.BackendThreading);
+
+            Logger.Info?.Print(
+                LogClass.Application,
+                $"Renderer threading resolved: requested={options.BackendThreading}, " +
+                $"effective={(renderer is ThreadedRenderer ? "On" : "Off")}, backend={baseRendererName}.");
 
             bool appleHV;
             if (!OperatingSystem.IsIOSVersionAtLeast(16, 4) && options.UseHypervisor)
@@ -1082,6 +1251,7 @@ namespace Ryujinx.Library
             _window.AntiAliasing = options.AntiAliasing;
             _window.ScalingFilter = options.ScalingFilter;
             _window.ScalingFilterLevel = options.ScalingFilterLevel;
+            _window.VSyncMode = options.DisableVSync ? VSyncMode.Unbounded : options.VSyncMode;
             renderer.Window?.SetColorSpacePassthrough(true);
 
             _emulationContext = InitializeEmulationContext(window, renderer, options);

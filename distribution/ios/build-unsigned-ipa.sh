@@ -103,6 +103,61 @@ esac
 xcrun lipo "$APP/$EXECUTABLE" -verify_arch arm64
 xcrun lipo "$APP/Frameworks/Ryujinx.Library.dylib" -verify_arch arm64
 xcrun lipo "$MOLTENVK" -verify_arch arm64
+
+# Preserve matching symbols outside the IPA. They are required to turn an iOS .ips report
+# or NativeAOT offset into an actionable source location, and must match SOURCE_SHA exactly.
+BUILD_STAGE=validate-and-package-symbols
+SYMBOL_ROOT="$WORK_ROOT/symbols"
+mkdir -p "$SYMBOL_ROOT"
+SYMBOL_MANIFEST="$SYMBOL_ROOT/symbol-uuids.txt"
+
+arm64_uuid() {
+  xcrun dwarfdump --uuid "$1" | awk '$1 == "UUID:" && $3 == "(arm64)" { print toupper($2); exit }'
+}
+
+APP_BINARY_UUID="$(arm64_uuid "$APP/$EXECUTABLE")"
+NATIVE_BINARY_UUID="$(arm64_uuid "$APP/Frameworks/Ryujinx.Library.dylib")"
+MOLTENVK_BINARY_UUID="$(arm64_uuid "$MOLTENVK")"
+test -n "$APP_BINARY_UUID"
+test -n "$NATIVE_BINARY_UUID"
+test -n "$MOLTENVK_BINARY_UUID"
+
+{
+  printf 'source_commit=%s\n' "$SOURCE_SHA"
+  printf 'app_binary_arm64_uuid=%s\n' "$APP_BINARY_UUID"
+  printf 'native_binary_arm64_uuid=%s\n' "$NATIVE_BINARY_UUID"
+  printf 'moltenvk_binary_arm64_uuid=%s\n' "$MOLTENVK_BINARY_UUID"
+} > "$SYMBOL_MANIFEST"
+
+APP_DSYM="$WORK_ROOT/products/MeloNX.app.dSYM"
+if [[ ! -d "$APP_DSYM" ]]; then
+  echo 'MeloNX.app.dSYM was not generated; refusing an unsymbolicatable diagnostic build.' >&2
+  exit 1
+fi
+APP_DSYM_UUID="$(arm64_uuid "$APP_DSYM")"
+if [[ -z "$APP_DSYM_UUID" || "$APP_DSYM_UUID" != "$APP_BINARY_UUID" ]]; then
+  echo "MeloNX dSYM UUID mismatch: binary=$APP_BINARY_UUID dsym=${APP_DSYM_UUID:-missing}." >&2
+  exit 1
+fi
+ditto "$APP_DSYM" "$SYMBOL_ROOT/MeloNX.app.dSYM"
+printf 'app_dsym_arm64_uuid=%s\n' "$APP_DSYM_UUID" >> "$SYMBOL_MANIFEST"
+
+NATIVE_SYMBOL_BASE="$REPOSITORY_ROOT/src/Ryujinx.Library/bin/Release/net10.0/ios-arm64/native"
+NATIVE_DSYM="$NATIVE_SYMBOL_BASE/Ryujinx.Library.dylib.dSYM"
+if [[ ! -d "$NATIVE_DSYM" ]]; then
+  echo 'Ryujinx.Library.dylib.dSYM was not generated; refusing an unsymbolicatable diagnostic build.' >&2
+  exit 1
+fi
+NATIVE_DSYM_UUID="$(arm64_uuid "$NATIVE_DSYM")"
+if [[ -z "$NATIVE_DSYM_UUID" || "$NATIVE_DSYM_UUID" != "$NATIVE_BINARY_UUID" ]]; then
+  echo "Ryujinx.Library dSYM UUID mismatch: binary=$NATIVE_BINARY_UUID dsym=${NATIVE_DSYM_UUID:-missing}." >&2
+  exit 1
+fi
+ditto "$NATIVE_DSYM" "$SYMBOL_ROOT/Ryujinx.Library.dylib.dSYM"
+printf 'native_dsym_arm64_uuid=%s\n' "$NATIVE_DSYM_UUID" >> "$SYMBOL_MANIFEST"
+
+tar -C "$SYMBOL_ROOT" -czf "$OUTPUT_ROOT/MeloNX-symbols-$SHORT_SHA.tar.gz" .
+
 MOLTENVK_ID="$(otool -D "$MOLTENVK" | sed -n '2p')"
 test "$MOLTENVK_ID" = '@rpath/libMoltenVK.dylib'
 otool -L "$APP/$EXECUTABLE" | grep -Fq '@rpath/libMoltenVK.dylib'
@@ -128,7 +183,11 @@ ditto -c -k --keepParent "$WORK_ROOT/package/Payload" "$IPA_PATH"
 unzip -t "$IPA_PATH" > "$OUTPUT_ROOT/logs/ipa-archive-check.log"
 (
   cd "$OUTPUT_ROOT"
-  shasum -a 256 "MeloNX-$SHORT_SHA-unprovisioned.ipa" "MeloNX-source-$SHORT_SHA.tar.gz" > SHA256SUMS.txt
+  checksum_files=("MeloNX-$SHORT_SHA-unprovisioned.ipa" "MeloNX-source-$SHORT_SHA.tar.gz")
+  if [[ -f "MeloNX-symbols-$SHORT_SHA.tar.gz" ]]; then
+    checksum_files+=("MeloNX-symbols-$SHORT_SHA.tar.gz")
+  fi
+  shasum -a 256 "${checksum_files[@]}" > SHA256SUMS.txt
 )
 BUILD_STAGE=complete
 printf 'ipa=%s\n' "$IPA_PATH" >> "$BUILD_INFO"

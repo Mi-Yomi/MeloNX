@@ -127,9 +127,9 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
-        /// Releases clean buffer-cache entries and least-recently-used auto-delete textures in response
-        /// to host process memory pressure. This runs on the GPU thread so normal texture synchronization
-        /// and renderer reference lifetimes remain valid.
+        /// Releases clean buffer-cache entries in response to host process memory pressure. Pressure-only
+        /// texture eviction is disabled until all texture readback generations can be proven safe; normal
+        /// texture cache capacity maintenance remains active.
         /// </summary>
         internal (
             ulong BufferBefore,
@@ -141,7 +141,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
             int TextureEvicted,
             int TextureSkippedReferenced,
             int TextureSkippedModified,
-            ulong TextureRetainedMostRecentBytes) TrimForMemoryPressure(
+            ulong TextureRetainedByDisabledEvictionBytes,
+            bool TexturePressureEvictionEnabled) TrimForMemoryPressure(
             MemoryPressureSeverity severity)
         {
             ulong bufferBefore = BufferCache.CachedBytes;
@@ -149,9 +150,10 @@ namespace Ryujinx.Graphics.Gpu.Memory
             ulong textureBefore = TextureCache.CachedBytes;
             ulong textureTarget = MemoryPressureTrimPolicy.CalculateTextureTarget(TextureCache.Capacity, severity);
 
-            // Buffers are handled first so texture synchronization has as much headroom as possible.
+            // Buffers are safe to reclaim here. v4 telemetry showed that pressure-only texture eviction
+            // released effectively 0 MiB while exposing a stale texture sync/readback action. Keep normal
+            // cache maintenance, but do not force texture destruction in this pressure callback.
             BufferCache.TrimToCapacity(bufferTarget);
-            var textureTrim = TextureCache.TrimForMemoryPressure(textureTarget);
 
             return (
                 bufferBefore,
@@ -160,10 +162,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 textureBefore,
                 TextureCache.CachedBytes,
                 textureTarget,
-                textureTrim.Evicted,
-                textureTrim.SkippedReferenced,
-                textureTrim.SkippedModified,
-                textureTrim.RetainedMostRecentBytes);
+                0,
+                0,
+                0,
+                textureBefore,
+                false);
         }
 
         /// <summary>

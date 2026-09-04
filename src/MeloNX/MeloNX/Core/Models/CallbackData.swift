@@ -7,14 +7,16 @@
 
 import Foundation
 
-final class CallbackBox {
+/// Immutable callback storage invoked directly by a C function pointer. Invocation is not bound
+/// to the main actor; individual handlers must marshal UI work to MainActor themselves.
+nonisolated final class CallbackBox: @unchecked Sendable {
     let body: (CallbackData) -> Void
     init(_ body: @escaping (CallbackData) -> Void) { self.body = body }
 }
 
 
 extension CallbackData {
-    var data: Data? {
+    nonisolated var data: Data? {
         guard let ptr, len > 0 else { return nil }
         return Data(bytes: ptr, count: Int(len))
     }

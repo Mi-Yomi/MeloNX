@@ -1,5 +1,6 @@
 using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
+using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL.Multithreading.Commands;
 using Ryujinx.Graphics.GAL.Multithreading.Commands.Buffer;
 using Ryujinx.Graphics.GAL.Multithreading.Commands.Renderer;
@@ -25,6 +26,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         private const int SpanPoolBytes = 8 * 1024 * 1024;
         private const int MaxRefsPerCommand = 2;
         private const int QueueCount = 10000;
+        private const int RecentCommandCount = 32;
 
         private readonly int _elementSize;
         private readonly IRenderer _baseRenderer;
@@ -54,6 +56,9 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
         private int _refProducerPtr;
         private int _refConsumerPtr;
+        private readonly CommandType[] _recentCommands = new CommandType[RecentCommandCount];
+        private int _recentCommandIndex;
+        private int _recentCommandCount;
 
         public uint ProgramCount { get; set; } = 0;
 
@@ -141,9 +146,35 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
                     Span<byte> command = new(_commandQueue, commandPtr * _elementSize, _elementSize);
 
-                    // Run the command.
+                    // Run the command. Keep a small allocation-free history so a fatal backend
+                    // exception identifies both the failing operation and the commands leading to it.
 
-                    CommandHelper.RunCommand(command, this, _baseRenderer);
+                    CommandType commandType = (CommandType)command[^1];
+                    RecordCommand(commandType);
+
+                    try
+                    {
+                        CommandHelper.RunCommand(command, this, _baseRenderer);
+                    }
+                    catch (Exception exception)
+                    {
+                        try
+                        {
+                            Logger.Log log = Logger.Error ?? Logger.Notice;
+                            log.Print(
+                                LogClass.Gpu,
+                                $"Threaded renderer command failed: command={commandType}, {GetDiagnosticSnapshot()}, " +
+                                $"recent_commands=[{GetRecentCommands()}]. Exception: {exception}");
+                            Logger.Flush();
+                        }
+                        catch
+                        {
+                            // Diagnostics must never replace the original backend exception,
+                            // especially when the failure itself is allocation related.
+                        }
+
+                        throw;
+                    }
 
                     if (Interlocked.CompareExchange(ref _invokePtr, -1, commandPtr) == commandPtr)
                     {
@@ -155,6 +186,40 @@ namespace Ryujinx.Graphics.GAL.Multithreading
                     Interlocked.Decrement(ref _commandCount);
                 }
             }
+        }
+
+        private void RecordCommand(CommandType commandType)
+        {
+            _recentCommands[_recentCommandIndex] = commandType;
+            _recentCommandIndex = (_recentCommandIndex + 1) % _recentCommands.Length;
+            _recentCommandCount = Math.Min(_recentCommandCount + 1, _recentCommands.Length);
+        }
+
+        private string GetRecentCommands()
+        {
+            int count = _recentCommandCount;
+            string[] commands = new string[count];
+            int start = (_recentCommandIndex - count + _recentCommands.Length) % _recentCommands.Length;
+
+            for (int i = 0; i < count; i++)
+            {
+                commands[i] = _recentCommands[(start + i) % _recentCommands.Length].ToString();
+            }
+
+            return string.Join(",", commands);
+        }
+
+        /// <summary>
+        /// Returns compact queue and buffer-map state for crash and memory-pressure diagnostics.
+        /// </summary>
+        public string GetDiagnosticSnapshot()
+        {
+            var buffers = Buffers.GetDiagnostics();
+
+            return $"queue_pending={Volatile.Read(ref _commandCount)}, consumer={Volatile.Read(ref _consumerPtr)}, " +
+                   $"producer={Volatile.Read(ref _producerPtr)}, ref_consumer={Volatile.Read(ref _refConsumerPtr)}, " +
+                   $"ref_producer={Volatile.Read(ref _refProducerPtr)}, buffers_issued={buffers.Issued}, " +
+                   $"buffers_mapped={buffers.Mapped}, buffers_in_flight={buffers.InFlight}, buffer_map_misses={buffers.Misses}";
         }
 
         internal SpanRef<T> CopySpan<T>(ReadOnlySpan<T> data) where T : unmanaged

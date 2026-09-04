@@ -3,6 +3,7 @@ using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.Device;
 using Ryujinx.Graphics.GAL;
+using Ryujinx.Graphics.GAL.Multithreading;
 using Ryujinx.Graphics.Gpu.Engine.GPFifo;
 using Ryujinx.Graphics.Gpu.Memory;
 using Ryujinx.Graphics.Gpu.Shader;
@@ -82,7 +83,7 @@ namespace Ryujinx.Graphics.Gpu
         /// <summary>
         /// Queue with deferred actions that must run on the render thread.
         /// </summary>
-        internal Queue<Action> DeferredActions { get; }
+        internal ConcurrentQueue<Action> DeferredActions { get; }
 
         /// <summary>
         /// Registry with physical memories that can be used with this GPU context, keyed by owner process ID.
@@ -141,7 +142,7 @@ namespace Ryujinx.Graphics.Gpu
             SyncpointActions = [];
             BufferMigrations = [];
 
-            DeferredActions = new Queue<Action>();
+            DeferredActions = new ConcurrentQueue<Action>();
 
             _memoryPressureMailbox = new MemoryPressureMailbox();
 
@@ -177,6 +178,32 @@ namespace Ryujinx.Graphics.Gpu
         public void StopAcceptingMemoryPressureReports()
         {
             _memoryPressureMailbox.StopAccepting();
+        }
+
+        /// <summary>
+        /// Returns a compact snapshot that is safe to include in a last-chance crash report.
+        /// Counts are observational and may change while the string is being assembled.
+        /// </summary>
+        public string GetCrashDiagnosticSnapshot()
+        {
+            ulong bufferCachedBytes = 0;
+            ulong textureCachedBytes = 0;
+
+            foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
+            {
+                bufferCachedBytes += physicalMemory.BufferCache.CachedBytes;
+                textureCachedBytes += physicalMemory.TextureCache.CachedBytes;
+            }
+
+            string renderer = Renderer is ThreadedRenderer threaded
+                ? threaded.GetDiagnosticSnapshot()
+                : $"renderer={Renderer?.GetType().Name ?? "null"}";
+
+            return $"sequence={SequenceNumber}, sync={SyncNumber}, physical_memories={PhysicalMemoryRegistry.Count}, " +
+                   $"deferred_actions={DeferredActions.Count}, " +
+                   $"buffer_cached_mib={bufferCachedBytes / (1024 * 1024)}, " +
+                   $"texture_cached_mib={textureCachedBytes / (1024 * 1024)}, " +
+                   $"presentation=[{Window.GetDiagnosticSnapshot()}], {renderer}.";
         }
 
         /// <summary>
@@ -381,7 +408,8 @@ namespace Ryujinx.Graphics.Gpu
                 int textureEvicted = 0;
                 int textureSkippedReferenced = 0;
                 int textureSkippedModified = 0;
-                ulong textureRetainedMostRecentBytes = 0;
+                ulong textureRetainedByDisabledEvictionBytes = 0;
+                bool texturePressureEvictionEnabled = false;
 
                 foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
                 {
@@ -395,7 +423,8 @@ namespace Ryujinx.Graphics.Gpu
                     textureEvicted += result.TextureEvicted;
                     textureSkippedReferenced += result.TextureSkippedReferenced;
                     textureSkippedModified += result.TextureSkippedModified;
-                    textureRetainedMostRecentBytes += result.TextureRetainedMostRecentBytes;
+                    textureRetainedByDisabledEvictionBytes += result.TextureRetainedByDisabledEvictionBytes;
+                    texturePressureEvictionEnabled |= result.TexturePressureEvictionEnabled;
                 }
 
                 // This is deliberately after logical cache eviction. ThreadedRenderer turns it
@@ -413,8 +442,10 @@ namespace Ryujinx.Graphics.Gpu
                     $"texture_tracked={textureBefore / (1024 * 1024)} MiB, " +
                     $"texture_before={textureBefore / (1024 * 1024)} MiB, texture_after={textureAfter / (1024 * 1024)} MiB, " +
                     $"texture_target={textureTarget / (1024 * 1024)} MiB, texture_evicted={textureEvicted}, " +
+                    $"texture_pressure_eviction_enabled={texturePressureEvictionEnabled}, " +
                     $"texture_skipped_referenced={textureSkippedReferenced}, texture_skipped_modified={textureSkippedModified}, " +
-                    $"texture_retained_mru={textureRetainedMostRecentBytes / (1024 * 1024)} MiB, " +
+                    $"texture_retained_pressure_eviction_disabled={textureRetainedByDisabledEvictionBytes / (1024 * 1024)} MiB, " +
+                    $"deferred_actions={DeferredActions.Count}, " +
                     $"duration_ms={stopwatch.Elapsed.TotalMilliseconds:F1}. " +
                     "Reported byte counts are logical cache accounting; referenced and in-flight resources can remain retained.");
             }

@@ -580,6 +580,24 @@ struct SettingsView: View {
                     )
                 }
             }
+
+            Section {
+                Picker("Backend Threading", selection: config.backendThreading) {
+                    ForEach(BackendThreading.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                HStack {
+                    Text("GPU Execution")
+                    Spacer()
+                    InfoButton(
+                        title: "Backend Threading",
+                        message: "Off is the conservative diagnostic mode. Auto currently enables threading for Vulkan; On forces it. The selection is applied when the next game starts."
+                    )
+                }
+            }
             
             // Display Toggles
             Section("Display") {
@@ -597,7 +615,7 @@ struct SettingsView: View {
                 
                 NativeToggleRow("Shader Cache", icon: "memorychip",
                                 isOn: config.disableShaderCache.reversed,
-                                info: "Shader Cache saves shaders to a file and preloads them on game launch. Leave OFF if unsure.")
+                                info: "Shader Cache saves and preloads translated shaders. Keep it ON for large games such as GTA V unless a diagnostic test specifically asks otherwise.")
                 
                 Picker("VSync Mode", selection: vSyncModeBinding) {
                     ForEach(VSyncMode.allCases) { mode in

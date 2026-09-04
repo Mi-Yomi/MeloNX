@@ -28,9 +28,40 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private var lowSampleStreak = 0
     private var lastAcceptedTrimUptime: TimeInterval = -Double.infinity
     private var lastAcceptedCriticalTrimUptime: TimeInterval = -Double.infinity
+    private var managedCrashMarkerLock = os_unfair_lock_s()
+    private var managedCrashMarkerFD: Int32 = -1
+    private let managedCrashEntryRecord = Array("{\"schema_version\":1,\"event\":\"managed_crash_entry\"}\n".utf8)
+    @MainActor private var managedCrashCallbackInstalled = false
+
+    private static let managedCrashEntryCallback: DataCallbackFn = { _, userData in
+        guard let userData else { return }
+        Unmanaged<MemoryDiagnostics>
+            .fromOpaque(userData)
+            .takeUnretainedValue()
+            .writeManagedCrashEntryMarker()
+    }
 
     private init() {
         queue.setSpecific(key: queueKey, value: true)
+    }
+
+    @MainActor
+    func installManagedCrashCallback() {
+        guard !managedCrashCallbackInstalled else { return }
+        managedCrashCallbackInstalled = true
+
+        // This callback intentionally lives for the process lifetime. Replacing it would release
+        // CallbackBox while a managed fatal callback could still be using its native userData.
+        let userData = Unmanaged.passUnretained(self).toOpaque()
+        "managed_crash_entry".withCString {
+            RegisterCallback($0, Self.managedCrashEntryCallback, userData)
+        }
+
+        CallbackManager.register(name: "managed_crash") { data in
+            // CallbackRegistry pins managed bytes only for the duration of this call.
+            // CallbackData.data copies them before returning across the ABI boundary.
+            Self.shared.recordManagedCrashPayload(data.data)
+        }
     }
 
     private var logsDirectory: URL {
@@ -43,8 +74,34 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     }
 
     @MainActor
-    func startSession(coreLogURL: URL?) {
+    func startSession(coreLogURL: URL?, settings: Options) {
         let jit = JitCacheSettings.launchSelection
+        let launchSettings = LaunchSettingsMetadata(
+            resolutionScale: settings.resScale,
+            scalingFilter: settings.scalingFilter.displayName,
+            scalingFilterRaw: Int(settings.scalingFilter.rawValue),
+            scalingFilterLevel: settings.scalingFilterLevel,
+            antiAliasing: settings.antiAliasing.displayName,
+            antiAliasingRaw: Int(settings.antiAliasing.rawValue),
+            backendThreading: settings.backendThreading.displayName,
+            backendThreadingRaw: Int(settings.backendThreading.rawValue),
+            vSync: settings.disableVSync ? "Unbounded" : settings.vSyncMode.displayName,
+            vSyncRaw: settings.disableVSync ? Int(VSyncMode.unbounded.rawValue) : Int(settings.vSyncMode.rawValue),
+            customVSyncInterval: settings.customVSyncInterval,
+            shaderCache: !settings.disableShaderCache,
+            asyncShaderCompilation: settings.enableAsyncShaderCompilation,
+            textureRecompression: settings.enableTextureRecompression,
+            dockedMode: !settings.disableDockedMode,
+            maxAnisotropy: settings.maxAnisotropy,
+            memoryManager: settings.memoryManagerMode.displayName,
+            memoryManagerRaw: Int(settings.memoryManagerMode.rawValue),
+            expandRAMRequested: settings.expandRAM,
+            graphicsDebug: settings.loggingGraphicsDebugLevel.displayName,
+            debugLogging: settings.loggingEnableDebug,
+            traceLogging: settings.loggingEnableTrace,
+            fileLoggingOption: !settings.disableFileLog,
+            coreLogCaptured: coreLogURL != nil
+        )
         // modelName describes the hardware model, never the user-assigned device name.
         let metadata = SessionMetadata(
             model: UIDevice.modelName,
@@ -54,7 +111,8 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             selectedJit: JitCacheChoice(rawValue: UserDefaults.standard.integer(forKey: JitCacheSettings.defaultsKey)) ?? .automatic,
             increasedMemoryLimit: checkAppEntitlement("com.apple.developer.kernel.increased-memory-limit"),
             extendedVirtualAddressing: checkAppEntitlement("com.apple.developer.kernel.extended-virtual-addressing"),
-            sourceCommit: Self.sourceCommit()
+            sourceCommit: Self.sourceCommit(),
+            launchSettings: launchSettings
         )
 
         // Synchronous startup ensures the first record exists before game loading starts.
@@ -69,10 +127,11 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 lowSampleStreak = 0
                 lastAcceptedTrimUptime = -Double.infinity
                 lastAcceptedCriticalTrimUptime = -Double.infinity
+                try openManagedCrashMarker(in: directory)
                 try openSegment()
 
                 var header: [String: Any] = [
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "event": "session_start",
                     "time_utc": Self.timestamp(),
                     "device_model": metadata.model,
@@ -85,7 +144,34 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                     "memory_pressure_low_available_bytes": lowAvailableMemory,
                     "memory_pressure_critical_available_bytes": criticalAvailableMemory,
                     "memory_pressure_low_repeat_seconds": lowTrimRepeatInterval,
-                    "memory_pressure_critical_repeat_seconds": criticalTrimRepeatInterval
+                    "memory_pressure_critical_repeat_seconds": criticalTrimRepeatInterval,
+                    "resolution_scale": metadata.launchSettings.resolutionScale,
+                    "scaling_filter": metadata.launchSettings.scalingFilter,
+                    "scaling_filter_raw": metadata.launchSettings.scalingFilterRaw,
+                    "scaling_filter_level": metadata.launchSettings.scalingFilterLevel,
+                    "anti_aliasing": metadata.launchSettings.antiAliasing,
+                    "anti_aliasing_raw": metadata.launchSettings.antiAliasingRaw,
+                    "backend_threading_requested": metadata.launchSettings.backendThreading,
+                    "backend_threading_raw": metadata.launchSettings.backendThreadingRaw,
+                    "vsync_requested": metadata.launchSettings.vSync,
+                    "vsync_raw": metadata.launchSettings.vSyncRaw,
+                    "custom_vsync_interval": metadata.launchSettings.customVSyncInterval,
+                    "shader_cache_enabled": metadata.launchSettings.shaderCache,
+                    "async_shader_compilation": metadata.launchSettings.asyncShaderCompilation,
+                    "texture_recompression": metadata.launchSettings.textureRecompression,
+                    "docked_mode": metadata.launchSettings.dockedMode,
+                    "max_anisotropy": metadata.launchSettings.maxAnisotropy,
+                    "memory_manager": metadata.launchSettings.memoryManager,
+                    "memory_manager_raw": metadata.launchSettings.memoryManagerRaw,
+                    "expand_ram_requested": metadata.launchSettings.expandRAMRequested,
+                    "effective_guest_memory_gib": 4,
+                    "graphics_debug": metadata.launchSettings.graphicsDebug,
+                    "debug_logging": metadata.launchSettings.debugLogging,
+                    "trace_logging": metadata.launchSettings.traceLogging,
+                    "file_logging_option": metadata.launchSettings.fileLoggingOption,
+                    "core_log_captured": metadata.launchSettings.coreLogCaptured,
+                    "managed_crash_entry_file": "managed-crash-entry.jsonl",
+                    "pressure_texture_eviction_enabled": false
                 ]
                 if let sourceCommit = metadata.sourceCommit {
                     header["source_commit"] = sourceCommit
@@ -125,6 +211,100 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         queue.sync { finishSession(exitCode: exitCode) }
     }
 
+    /// Last-chance path used from an arbitrary managed thread. All storage is prepared when the
+    /// session starts; this path deliberately avoids Data, JSONSerialization and Foundation I/O.
+    private func writeManagedCrashEntryMarker() {
+        os_unfair_lock_lock(&managedCrashMarkerLock)
+        defer { os_unfair_lock_unlock(&managedCrashMarkerLock) }
+
+        let descriptor = managedCrashMarkerFD
+        guard descriptor >= 0 else { return }
+
+        managedCrashEntryRecord.withUnsafeBytes { buffer in
+            guard let baseAddress = buffer.baseAddress else { return }
+
+            var offset = 0
+            while offset < buffer.count {
+                let result = Darwin.write(
+                    descriptor,
+                    baseAddress.advanced(by: offset),
+                    buffer.count - offset
+                )
+
+                if result > 0 {
+                    offset += result
+                } else if result < 0 && errno == EINTR {
+                    continue
+                } else {
+                    break
+                }
+            }
+        }
+
+        while Darwin.fsync(descriptor) != 0 && errno == EINTR {}
+    }
+
+    private func recordManagedCrashPayload(_ payload: Data?) {
+        if DispatchQueue.getSpecific(key: queueKey) == true {
+            writeManagedCrashRecord(payload)
+        } else {
+            // The managed process can terminate immediately after its AppDomain callback returns.
+            // Synchronously persist and fsync this marker before crossing back into NativeAOT.
+            queue.sync { writeManagedCrashRecord(payload) }
+        }
+    }
+
+    private func writeManagedCrashRecord(_ payload: Data?) {
+        guard file != nil else { return }
+
+        var record: [String: Any] = [:]
+        if let payload,
+           let decoded = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] {
+            record = decoded
+        } else {
+            record["managed_payload_decode_error"] = true
+        }
+
+        if let schema = record.removeValue(forKey: "schema_version") {
+            record["managed_crash_schema_version"] = schema
+        }
+        if let managedTime = record["time_utc"] {
+            record["managed_time_utc"] = managedTime
+        }
+
+        let availableMemory = UInt64(os_proc_available_memory())
+        record["event"] = "managed_crash"
+        record["time_utc"] = Self.timestamp()
+        record["elapsed_seconds"] = (ProcessInfo.processInfo.systemUptime - startedAtUptime).rounded()
+        record["os_proc_available_memory_bytes"] = availableMemory
+        record["managed_payload_bytes"] = payload?.count ?? 0
+
+        var info = task_vm_info_data_t()
+        let capacity = MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<integer_t>.stride
+        var count = mach_msg_type_number_t(capacity)
+        let result = withUnsafeMutablePointer(to: &info) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: capacity) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+
+        if result == KERN_SUCCESS {
+            sampledPeak = max(sampledPeak, info.phys_footprint)
+            record["phys_footprint_bytes"] = info.phys_footprint
+            record["session_sampled_peak_bytes"] = sampledPeak
+            record["process_phys_footprint_peak_bytes"] = max(0, info.ledger_phys_footprint_peak)
+        } else {
+            record["task_info_error"] = result
+        }
+
+        do {
+            try writeRecord(record)
+        } catch {
+            // Avoid Foundation error formatting in the fatal path; make one final sync attempt.
+            try? file?.synchronize()
+        }
+    }
+
     /// Copy a stable snapshot on the same queue that serializes sample writes.
     func exportLatestSession() async throws -> [URL] {
         try await withCheckedThrowingContinuation { continuation in
@@ -148,6 +328,34 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         let increasedMemoryLimit: Bool
         let extendedVirtualAddressing: Bool
         let sourceCommit: String?
+        let launchSettings: LaunchSettingsMetadata
+    }
+
+    private struct LaunchSettingsMetadata: Sendable {
+        let resolutionScale: Float
+        let scalingFilter: String
+        let scalingFilterRaw: Int
+        let scalingFilterLevel: Int32
+        let antiAliasing: String
+        let antiAliasingRaw: Int
+        let backendThreading: String
+        let backendThreadingRaw: Int
+        let vSync: String
+        let vSyncRaw: Int
+        let customVSyncInterval: Int32
+        let shaderCache: Bool
+        let asyncShaderCompilation: Bool
+        let textureRecompression: Bool
+        let dockedMode: Bool
+        let maxAnisotropy: Float
+        let memoryManager: String
+        let memoryManagerRaw: Int
+        let expandRAMRequested: Bool
+        let graphicsDebug: String
+        let debugLogging: Bool
+        let traceLogging: Bool
+        let fileLoggingOption: Bool
+        let coreLogCaptured: Bool
     }
 
     private func installObservers() {
@@ -278,6 +486,38 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         bytesWritten = 0
     }
 
+    private func openManagedCrashMarker(in directory: URL) throws {
+        let url = directory.appendingPathComponent("managed-crash-entry.jsonl")
+        let descriptor = Darwin.open(
+            url.path,
+            O_WRONLY | O_CREAT | O_TRUNC | O_APPEND,
+            0o600
+        )
+        guard descriptor >= 0 else { throw CocoaError(.fileWriteUnknown) }
+        replaceManagedCrashMarkerFD(with: descriptor)
+    }
+
+    private func replaceManagedCrashMarkerFD(with descriptor: Int32) {
+        os_unfair_lock_lock(&managedCrashMarkerLock)
+        let previousDescriptor = managedCrashMarkerFD
+        managedCrashMarkerFD = descriptor
+        os_unfair_lock_unlock(&managedCrashMarkerLock)
+
+        // Every callback holds the same lock through write+fsync, so no callback can still be
+        // using the previous descriptor after the swap completes.
+        if previousDescriptor >= 0 {
+            _ = Darwin.close(previousDescriptor)
+        }
+    }
+
+    private func synchronizeManagedCrashMarker() {
+        os_unfair_lock_lock(&managedCrashMarkerLock)
+        if managedCrashMarkerFD >= 0 {
+            while Darwin.fsync(managedCrashMarkerFD) != 0 && errno == EINTR {}
+        }
+        os_unfair_lock_unlock(&managedCrashMarkerLock)
+    }
+
     private func rotateSegment() throws {
         guard let sessionDirectory else { return }
         try file?.close()
@@ -303,6 +543,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         observers.removeAll()
         try? file?.close()
         file = nil
+        replaceManagedCrashMarkerFD(with: -1)
         sessionDirectory = nil
     }
 
@@ -344,6 +585,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
 
     private func makeExportSnapshot() throws -> [URL] {
         try file?.synchronize()
+        synchronizeManagedCrashMarker()
         guard let latest = sessionDirectory ?? sessionDirectories().first else {
             throw ExportError.noSessions
         }
@@ -355,7 +597,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         try fileManager.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
 
         var exported: [URL] = []
-        for name in ["session.json", "memory-previous.jsonl", "memory.jsonl"] {
+        for name in ["session.json", "managed-crash-entry.jsonl", "memory-previous.jsonl", "memory.jsonl"] {
             let source = latest.appendingPathComponent(name)
             if fileManager.fileExists(atPath: source.path) {
                 let destination = exportDirectory.appendingPathComponent(name)

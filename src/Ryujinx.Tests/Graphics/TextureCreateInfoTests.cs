@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using Ryujinx.Graphics.GAL;
+using Ryujinx.Graphics.Vulkan.Effects;
 
 namespace Ryujinx.Tests.Graphics
 {
@@ -49,6 +50,38 @@ namespace Ryujinx.Tests.Graphics
                 swizzleA: SwizzleComponent.Alpha);
 
             Assert.That(info.GetTotalSize(), Is.EqualTo(2688UL));
+        }
+
+        [Test]
+        public void FsrIntermediaryIdentityUsesOutputDimensions()
+        {
+            TextureCreateInfo source = new(
+                width: 1280,
+                height: 720,
+                depth: 1,
+                levels: 1,
+                samples: 1,
+                blockWidth: 1,
+                blockHeight: 1,
+                bytesPerPixel: 4,
+                format: Format.R8G8B8A8Unorm,
+                depthStencilMode: DepthStencilMode.Depth,
+                target: Target.Texture2D,
+                swizzleR: SwizzleComponent.Red,
+                swizzleG: SwizzleComponent.Green,
+                swizzleB: SwizzleComponent.Blue,
+                swizzleA: SwizzleComponent.Alpha);
+
+            TextureCreateInfo first = FsrScalingFilter.CreateIntermediaryInfo(source, 2346, 1320);
+            TextureCreateInfo nextFrame = FsrScalingFilter.CreateIntermediaryInfo(source, 2346, 1320);
+
+            Assert.Multiple(() =>
+            {
+                Assert.That(first.Width, Is.EqualTo(2346));
+                Assert.That(first.Height, Is.EqualTo(1320));
+                Assert.That(first, Is.Not.EqualTo(source));
+                Assert.That(nextFrame, Is.EqualTo(first), "Identical output must reuse the FSR intermediary.");
+            });
         }
     }
 }

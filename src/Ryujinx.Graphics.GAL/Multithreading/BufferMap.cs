@@ -14,6 +14,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
     class BufferMap
     {
         private ulong _bufferHandle = 0;
+        private long _mapMisses;
 
         private readonly Dictionary<BufferHandle, BufferHandle> _bufferMap = new();
         private readonly HashSet<BufferHandle> _inFlight = [];
@@ -62,15 +63,23 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             // Threaded buffers are returned on creation as the buffer
             // isn't actually created until the queue runs the command.
 
+            TryMapBuffer(handle, out BufferHandle result);
+            return result;
+        }
+
+        internal bool TryMapBuffer(BufferHandle handle, out BufferHandle result)
+        {
             lock (_bufferMap)
             {
-                if (!_bufferMap.TryGetValue(handle, out BufferHandle result))
+                if (_bufferMap.TryGetValue(handle, out result))
                 {
-                    result = BufferHandle.Null;
+                    return true;
                 }
-
-                return result;
             }
+
+            result = BufferHandle.Null;
+            Interlocked.Increment(ref _mapMisses);
+            return false;
         }
 
         internal BufferHandle MapBufferBlocking(BufferHandle handle)
@@ -113,6 +122,31 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         internal BufferRange MapBufferRange(BufferRange range)
         {
             return new BufferRange(MapBuffer(range.Handle), range.Offset, range.Size, range.Write);
+        }
+
+        internal bool TryMapBufferRange(BufferRange range, out BufferRange mappedRange)
+        {
+            bool mapped = TryMapBuffer(range.Handle, out BufferHandle mappedHandle);
+            mappedRange = new BufferRange(mappedHandle, range.Offset, range.Size, range.Write);
+            return mapped;
+        }
+
+        internal (ulong Issued, int Mapped, int InFlight, long Misses) GetDiagnostics()
+        {
+            int mapped;
+            int inFlight;
+
+            lock (_bufferMap)
+            {
+                mapped = _bufferMap.Count;
+            }
+
+            lock (_inFlight)
+            {
+                inFlight = _inFlight.Count;
+            }
+
+            return (Volatile.Read(ref _bufferHandle), mapped, inFlight, Interlocked.Read(ref _mapMisses));
         }
 
         internal Span<BufferRange> MapBufferRanges(Span<BufferRange> ranges)

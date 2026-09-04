@@ -1,9 +1,11 @@
 using Ryujinx.Common.Memory;
+using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using Format = Ryujinx.Graphics.GAL.Format;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
@@ -24,6 +26,7 @@ namespace Ryujinx.Graphics.Vulkan
         private Dictionary<Format, TextureView> _selfManagedViews;
 
         private int _hazardUses;
+        private static long _copyToBufferValidationFailures;
 
         private readonly TextureCreateInfo _info;
 
@@ -663,17 +666,47 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void CopyTo(BufferRange range, int layer, int level, int stride)
         {
+            if (!Valid || Storage == null || Storage.Disposed)
+            {
+                throw ReportInvalidCopyToBuffer("texture_disposed", range, layer, level, stride);
+            }
+
+            if (range.Handle == BufferHandle.Null)
+            {
+                throw ReportInvalidCopyToBuffer("null_buffer_handle", range, layer, level, stride);
+            }
+
+            if ((uint)level >= (uint)Info.Levels || (uint)layer >= (uint)Info.GetDepthOrLayers())
+            {
+                throw ReportInvalidCopyToBuffer("subresource_out_of_range", range, layer, level, stride);
+            }
+
             _gd.PipelineInternal.EndRenderPass();
             CommandBufferScoped cbs = _gd.PipelineInternal.CurrentCommandBuffer;
 
             int outSize = Info.GetMipSize(level);
             int hostSize = GetBufferDataLength(outSize);
 
-            Image image = GetImage().Get(cbs).Value;
+            Auto<DisposableImage> autoImage = GetImage();
+            Image image = autoImage?.Get(cbs).Value ?? default;
+            if (image.Handle == 0)
+            {
+                throw ReportInvalidCopyToBuffer("missing_vulkan_image", range, layer, level, stride);
+            }
+
             int offset = range.Offset;
 
             Auto<DisposableBuffer> autoBuffer = _gd.BufferManager.GetBuffer(cbs.CommandBuffer, range.Handle, true);
+            if (autoBuffer == null)
+            {
+                throw ReportInvalidCopyToBuffer("buffer_manager_miss", range, layer, level, stride);
+            }
+
             VkBuffer buffer = autoBuffer.Get(cbs, range.Offset, outSize).Value;
+            if (buffer.Handle == 0)
+            {
+                throw ReportInvalidCopyToBuffer("missing_vulkan_buffer", range, layer, level, stride);
+            }
 
             if (PrepareOutputBuffer(cbs, hostSize, buffer, out VkBuffer copyToBuffer, out BufferHolder tempCopyHolder))
             {
@@ -728,6 +761,21 @@ namespace Ryujinx.Graphics.Vulkan
                     offset,
                     outSize);
             }
+        }
+
+        private InvalidOperationException ReportInvalidCopyToBuffer(string reason, BufferRange range, int layer, int level, int stride)
+        {
+            long failure = Interlocked.Increment(ref _copyToBufferValidationFailures);
+            string diagnostic =
+                $"Invalid Vulkan texture-to-buffer copy: reason={reason}, failure={failure}, " +
+                $"view=0x{RuntimeHelpers.GetHashCode(this):X8}, valid={Valid}, storage_present={Storage != null}, " +
+                $"storage_disposed={Storage?.Disposed}, format={Info.Format}, target={Info.Target}, " +
+                $"dimensions={Info.Width}x{Info.Height}, levels={Info.Levels}, layers={Info.GetDepthOrLayers()}, " +
+                $"buffer_handle=0x{(int)range.Handle:X8}, offset={range.Offset}, size={range.Size}, " +
+                $"write={range.Write}, layer={layer}, level={level}, stride={stride}.";
+            Logger.Log log = Logger.Error ?? Logger.Notice;
+            log.Print(LogClass.Gpu, diagnostic);
+            return new InvalidOperationException(diagnostic);
         }
 
         private ReadOnlySpan<byte> GetData(CommandBufferPool cbp, PersistentFlushBuffer flushBuffer)

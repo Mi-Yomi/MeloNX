@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Ryujinx.Common.Logging.Targets
 {
@@ -19,6 +20,8 @@ namespace Ryujinx.Common.Logging.Targets
 
     public class AsyncLogTargetWrapper : ILogTarget
     {
+        private const int FlushTimeoutMilliseconds = 1000;
+
         private readonly ILogTarget _target;
 
         private readonly Thread _messageThread;
@@ -29,12 +32,12 @@ namespace Ryujinx.Common.Logging.Targets
 
         private sealed class FlushEventArgs : LogEventArgs
         {
-            public readonly ManualResetEventSlim SignalEvent;
+            public readonly TaskCompletionSource Completion;
 
-            public FlushEventArgs(ManualResetEventSlim signalEvent)
+            public FlushEventArgs()
                 : base(LogLevel.Notice, TimeSpan.Zero, string.Empty, string.Empty)
             {
-                SignalEvent = signalEvent;
+                Completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             }
         }
 
@@ -43,7 +46,9 @@ namespace Ryujinx.Common.Logging.Targets
         public AsyncLogTargetWrapper(ILogTarget target, int queueLimit = -1, AsyncLogTargetOverflowAction overflowAction = AsyncLogTargetOverflowAction.Block)
         {
             _target = target;
-            _messageQueue = new BlockingCollection<LogEventArgs>(queueLimit);
+            _messageQueue = queueLimit == -1
+                ? new BlockingCollection<LogEventArgs>()
+                : new BlockingCollection<LogEventArgs>(queueLimit);
             _overflowTimeout = overflowAction == AsyncLogTargetOverflowAction.Block ? -1 : 0;
 
             _messageThread = new Thread(() =>
@@ -56,7 +61,7 @@ namespace Ryujinx.Common.Logging.Targets
 
                         if (item is FlushEventArgs flush)
                         {
-                            flush.SignalEvent.Set();
+                            flush.Completion.TrySetResult();
                             continue;
                         }
 
@@ -81,30 +86,54 @@ namespace Ryujinx.Common.Logging.Targets
 
         public void Log(object sender, LogEventArgs e)
         {
-            if (!_messageQueue.IsAddingCompleted)
+            try
             {
                 _messageQueue.TryAdd(e, _overflowTimeout);
+            }
+            catch (InvalidOperationException)
+            {
+                // CompleteAdding can race with TryAdd, including while a blocking
+                // producer is waiting for room in the queue. Logs submitted during
+                // shutdown are intentionally ignored.
             }
         }
 
         public void Flush()
         {
-            if (_messageQueue.Count == 0 || _messageQueue.IsAddingCompleted)
+            // A target may request a flush while it is being called by this wrapper.
+            // All earlier items have already been consumed at that point, and waiting
+            // for a marker on this same thread would deadlock.
+            if (Thread.CurrentThread == _messageThread)
             {
                 return;
             }
 
-            using ManualResetEventSlim signal = new ManualResetEventSlim(false);
+            long startedAt = Environment.TickCount64;
+            FlushEventArgs flush = new();
+
             try
             {
-                _messageQueue.Add(new FlushEventArgs(signal));
+                // Use the same finite budget for queueing and waiting. In particular,
+                // a full queue or a failed message thread must not block a crash path.
+                if (!_messageQueue.TryAdd(flush, FlushTimeoutMilliseconds))
+                {
+                    return;
+                }
             }
             catch (InvalidOperationException)
             {
+                // CompleteAdding can race with TryAdd. There is nothing left that a
+                // flush marker can safely do once shutdown has started.
                 return;
             }
 
-            signal.Wait();
+            long elapsed = Environment.TickCount64 - startedAt;
+            int remaining = (int)Math.Max(0, FlushTimeoutMilliseconds - elapsed);
+
+            if (remaining > 0)
+            {
+                flush.Completion.Task.Wait(remaining);
+            }
         }
 
         public void Dispose()

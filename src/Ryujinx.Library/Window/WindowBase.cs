@@ -67,6 +67,7 @@ namespace Ryujinx.Library
         public AntiAliasing AntiAliasing { get; set; }
         public ScalingFilter ScalingFilter { get; set; }
         public int ScalingFilterLevel { get; set; }
+        public VSyncMode VSyncMode { get; set; }
 
         public NativeTouchDriver MouseDriver;
         private readonly InputManager _inputManager;
@@ -187,6 +188,11 @@ namespace Ryujinx.Library
             Renderer?.Window.SetScalingFilterLevel(ScalingFilterLevel);
         }
 
+        private void SetVSyncMode()
+        {
+            Renderer?.Window.ChangeVSyncMode(VSyncMode);
+        }
+
         public void Render()
         {
             InitializeWindowRenderer();
@@ -194,6 +200,8 @@ namespace Ryujinx.Library
             Device.Gpu.Renderer.Initialize(_glLogLevel);
 
             InitializeRenderer();
+
+            SetVSyncMode();
 
             SetAntiAliasing();
 

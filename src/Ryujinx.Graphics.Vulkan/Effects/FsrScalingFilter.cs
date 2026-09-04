@@ -1,4 +1,5 @@
 using Ryujinx.Common;
+using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Shader;
 using Ryujinx.Graphics.Shader.Translation;
@@ -20,6 +21,7 @@ namespace Ryujinx.Graphics.Vulkan.Effects
         private float _sharpeningLevel = 1;
         private Device _device;
         private TextureView _intermediaryTexture;
+        private int _intermediaryGeneration;
 
         public float Level
         {
@@ -89,31 +91,22 @@ namespace Ryujinx.Graphics.Vulkan.Effects
             Extent2D source,
             Extent2D destination)
         {
-            if (_intermediaryTexture == null
-                || _intermediaryTexture.Info.Width != width
-                || _intermediaryTexture.Info.Height != height
-                || !_intermediaryTexture.Info.Equals(view.Info))
-            {
-                TextureCreateInfo originalInfo = view.Info;
+            TextureCreateInfo info = CreateIntermediaryInfo(view.Info, width, height);
 
-                TextureCreateInfo info = new(
-                    width,
-                    height,
-                    originalInfo.Depth,
-                    originalInfo.Levels,
-                    originalInfo.Samples,
-                    originalInfo.BlockWidth,
-                    originalInfo.BlockHeight,
-                    originalInfo.BytesPerPixel,
-                    originalInfo.Format,
-                    originalInfo.DepthStencilMode,
-                    originalInfo.Target,
-                    originalInfo.SwizzleR,
-                    originalInfo.SwizzleG,
-                    originalInfo.SwizzleB,
-                    originalInfo.SwizzleA);
+            if (_intermediaryTexture == null || !_intermediaryTexture.Info.Equals(info))
+            {
+                string previous = _intermediaryTexture == null
+                    ? "none"
+                    : $"{_intermediaryTexture.Info.Width}x{_intermediaryTexture.Info.Height}";
                 _intermediaryTexture?.Dispose();
                 _intermediaryTexture = _renderer.CreateTexture(info) as TextureView;
+
+                _intermediaryGeneration++;
+                Logger.Info?.Print(
+                    LogClass.Gpu,
+                    $"FSR intermediary created: generation={_intermediaryGeneration}, previous={previous}, " +
+                    $"source={view.Info.Width}x{view.Info.Height}, output={width}x{height}, " +
+                    $"estimated_bytes={info.GetTotalSize()}.");
             }
 
             _pipeline.SetCommandBuffer(cbs);
@@ -165,6 +158,26 @@ namespace Ryujinx.Graphics.Vulkan.Effects
             _pipeline.ComputeBarrier();
 
             _pipeline.Finish();
+        }
+
+        internal static TextureCreateInfo CreateIntermediaryInfo(TextureCreateInfo sourceInfo, int width, int height)
+        {
+            return new TextureCreateInfo(
+                width,
+                height,
+                sourceInfo.Depth,
+                sourceInfo.Levels,
+                sourceInfo.Samples,
+                sourceInfo.BlockWidth,
+                sourceInfo.BlockHeight,
+                sourceInfo.BytesPerPixel,
+                sourceInfo.Format,
+                sourceInfo.DepthStencilMode,
+                sourceInfo.Target,
+                sourceInfo.SwizzleR,
+                sourceInfo.SwizzleG,
+                sourceInfo.SwizzleB,
+                sourceInfo.SwizzleA);
         }
     }
 }

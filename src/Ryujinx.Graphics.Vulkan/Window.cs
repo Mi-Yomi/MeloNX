@@ -1,4 +1,5 @@
 using Ryujinx.Common.Configuration;
+using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Vulkan.Effects;
 using Silk.NET.Vulkan;
@@ -42,6 +43,8 @@ namespace Ryujinx.Graphics.Vulkan
         private bool _updateScalingFilter;
         private ScalingFilter _currentScalingFilter;
         private bool _colorSpacePassthroughEnabled;
+        private int _swapchainGeneration;
+        private bool _firstPresentationLogged;
 
         public unsafe Window(VulkanRenderer gd, SurfaceKHR surface, PhysicalDevice physicalDevice, Device device)
         {
@@ -171,6 +174,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             SurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(surfaceFormats, _colorSpacePassthroughEnabled);
+            PresentModeKHR presentMode = ChooseSwapPresentMode(presentModes, _vSyncMode);
 
             _width = (int)extent.Width;
             _height = (int)extent.Height;
@@ -189,7 +193,7 @@ namespace Ryujinx.Graphics.Vulkan
                 ImageArrayLayers = 1,
                 PreTransform = capabilities.CurrentTransform,
                 CompositeAlpha = ChooseCompositeAlpha(capabilities.SupportedCompositeAlpha),
-                PresentMode = ChooseSwapPresentMode(presentModes, _vSyncMode),
+                PresentMode = presentMode,
                 Clipped = true,
             };
 
@@ -220,6 +224,15 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 _gd.SwapchainApi.GetSwapchainImages(_device, _swapchain, &imageCount, pSwapchainImages);
             }
+
+            _swapchainGeneration++;
+            Logger.Info?.Print(
+                LogClass.Gpu,
+                $"Vulkan swapchain created: generation={_swapchainGeneration}, extent={extent.Width}x{extent.Height}, " +
+                $"requested_vsync={_vSyncMode}, chosen_present_mode={presentMode}, images={imageCount}, " +
+                $"format={surfaceFormat.Format}, color_space={surfaceFormat.ColorSpace}, " +
+                $"available_present_modes=[{string.Join(",", presentModes)}], min_images={capabilities.MinImageCount}, " +
+                $"max_images={capabilities.MaxImageCount}.");
 
             _swapchainImageViews = new TextureView[imageCount];
 
@@ -383,6 +396,8 @@ namespace Ryujinx.Graphics.Vulkan
         public unsafe override void Present(ITexture texture, ImageCrop crop, Action swapBuffersCallback)
         {
             TextureView view = (TextureView)texture;
+            int guestWidth = view.Width;
+            int guestHeight = view.Height;
 
             _gd.RegisterPresentationTexture(view);
             _gd.PipelineInternal.AutoFlush.Present();
@@ -517,6 +532,17 @@ namespace Ryujinx.Graphics.Vulkan
 
             int dstPaddingX = (_width - dstWidth) / 2;
             int dstPaddingY = (_height - dstHeight) / 2;
+
+            if (!_firstPresentationLogged)
+            {
+                _firstPresentationLogged = true;
+                Logger.Info?.Print(
+                    LogClass.Gpu,
+                    $"First Vulkan presentation: guest={guestWidth}x{guestHeight}, post_effect={view.Width}x{view.Height}, " +
+                    $"swapchain={_width}x{_height}, destination={dstWidth}x{dstHeight}, " +
+                    $"filter={_currentScalingFilter}, filter_level={_scalingFilterLevel}, " +
+                    $"anti_aliasing={_currentAntiAliasing}, vsync={_vSyncMode}, linear_sampler={_isLinear}.");
+            }
 
             int dstX0 = crop.FlipX ? _width - dstPaddingX : dstPaddingX;
             int dstX1 = crop.FlipX ? dstPaddingX : _width - dstPaddingX;
@@ -674,6 +700,8 @@ namespace Ryujinx.Graphics.Vulkan
 
                         break;
                 }
+
+                Logger.Info?.Print(LogClass.Gpu, $"Vulkan anti-aliasing applied: mode={_currentAntiAliasing}.");
             }
 
             if (_updateScalingFilter)
@@ -706,6 +734,11 @@ namespace Ryujinx.Graphics.Vulkan
 
                         break;
                 }
+
+                Logger.Info?.Print(
+                    LogClass.Gpu,
+                    $"Vulkan scaling filter applied: mode={_currentScalingFilter}, " +
+                    $"level={_scalingFilterLevel}, intermediary={_scalingFilter != null}, linear_sampler={_isLinear}.");
             }
         }
 
@@ -766,9 +799,16 @@ namespace Ryujinx.Graphics.Vulkan
 
         public override void ChangeVSyncMode(VSyncMode vSyncMode)
         {
+            bool changed = _vSyncMode != vSyncMode;
             _vSyncMode = vSyncMode;
-            //present mode may change, so mark the swapchain for recreation
-            _swapchainIsDirty = true;
+            // Present mode may change, so mark the swapchain for recreation only when needed.
+            if (changed)
+            {
+                _swapchainIsDirty = true;
+            }
+            Logger.Info?.Print(
+                LogClass.Gpu,
+                $"Vulkan VSync request applied: requested={vSyncMode}, swapchain_recreation_required={changed}.");
         }
 
         protected virtual void Dispose(bool disposing)

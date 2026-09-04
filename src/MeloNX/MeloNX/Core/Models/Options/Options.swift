@@ -167,7 +167,7 @@ struct Options {
     var disableVSync: Bool = false
     var vSyncMode: VSyncMode = .switchMode
     var customVSyncInterval: Int32 = 120
-    var disableShaderCache: Bool = true
+    var disableShaderCache: Bool = false
     var enableTextureRecompression: Bool = false
     var disableDockedMode: Bool = true
     var systemLanguage: SystemLanguage = .americanEnglish
