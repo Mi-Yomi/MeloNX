@@ -212,8 +212,8 @@ namespace Ryujinx.Graphics.Gpu.Image
         {
             Texture oldest = _textures.First.Value;
             Texture candidate = oldest;
-            bool oldestCpuModified = oldest.CheckModified(false);
-            bool oldestGpuModified = !oldestCpuModified && oldest.Group.HasGpuModifiedData(oldest);
+            bool oldestGpuModified = oldest.Group.HasGpuModifiedData(oldest);
+            bool oldestCpuModified = oldestGpuModified && oldest.CheckModified(false);
             bool oldestRequiresReadback = NormalTextureEvictionPolicy.RequiresReadback(
                 oldestCpuModified,
                 oldestGpuModified);
@@ -238,9 +238,8 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                     if (alternativeHasOneReference)
                     {
-                        alternativeCpuModified = alternative.CheckModified(false);
-                        alternativeGpuModified = !alternativeCpuModified &&
-                            alternative.Group.HasGpuModifiedData(alternative);
+                        alternativeGpuModified = alternative.Group.HasGpuModifiedData(alternative);
+                        alternativeCpuModified = alternativeGpuModified && alternative.CheckModified(false);
                     }
 
                     if (NormalTextureEvictionPolicy.CanSelectAlternative(
