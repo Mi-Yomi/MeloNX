@@ -27,6 +27,8 @@ namespace Ryujinx.Tests.Graphics
                     for (int i = 0; i < count; i++)
                         texture.CopyTo(new BufferRange(target, 0, 16), 0, 0, 4);
                     texture.Release();
+                    texture.Release();
+                    Assert.Throws<ObjectDisposedException>(() => texture.CopyTo(new BufferRange(target, 0, 16), 0, 0, 4));
                     renderer.DeleteBuffer(target);
                 }
                 catch (Exception error) { failure = error; }

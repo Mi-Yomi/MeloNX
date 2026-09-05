@@ -9,6 +9,7 @@ using Ryujinx.Memory.Tracking;
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using System.Reflection;
 
 namespace Ryujinx.Tests.Graphics
 {
@@ -135,6 +136,30 @@ namespace Ryujinx.Tests.Graphics
             Assert.That(group.IsDisposed, Is.True);
 
             texture.Dispose();
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void FlushBufferUnmapThenDisposeDeletesOnceAndRejectsLateCopy(bool imported)
+        {
+            var created = CreateTexture();
+            AuditTestRenderer renderer = new();
+            const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic;
+            typeof(GpuContext).GetField("<Renderer>k__BackingField", fields).SetValue(created.Context, renderer);
+            BufferHandle buffer = renderer.CreateBuffer(16, BufferAccess.Default);
+            TextureGroup group = created.Texture.Group;
+            typeof(TextureGroup).GetField("_flushBuffer", fields).SetValue(group, buffer);
+            typeof(TextureGroup).GetField("_flushBufferImported", fields).SetValue(group, imported);
+            group.Unmapped();
+            group.Dispose();
+            group.Unmapped();
+            group.Dispose();
+            TextureGroupHandle handle = CreateHandle(group);
+            Assert.That(group.TryFlushIntoBuffer(handle), Is.False);
+            Assert.That(renderer.Buffers, Is.Empty);
+            Assert.That(renderer.Events.Count, Is.EqualTo(2));
+            handle.Dispose();
+            created.Texture.Dispose();
         }
 
         [Test]

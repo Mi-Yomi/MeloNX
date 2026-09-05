@@ -1,4 +1,5 @@
 using Ryujinx.Common.Memory;
+using System;
 using Ryujinx.Graphics.GAL.Multithreading.Commands.Texture;
 using Ryujinx.Graphics.GAL.Multithreading.Model;
 
@@ -10,6 +11,8 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
     class ThreadedTexture : ITexture
     {
         private readonly ThreadedRenderer _renderer;
+        private readonly object _copyReleaseGate = new();
+        private bool _releaseRequested;
         private readonly TextureCreateInfo _info;
         public ITexture Base;
 
@@ -106,8 +109,19 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
 
         public unsafe void CopyTo(BufferRange range, int layer, int level, int stride)
         {
-            _renderer.New<TextureCopyToBufferCommand>()->Set(Ref(this), range, layer, level, stride);
-            _renderer.QueueCommand();
+            lock (_copyReleaseGate)
+            {
+                ObjectDisposedException.ThrowIf(_releaseRequested, this);
+                if (_renderer.IsGpuThread())
+                {
+                    _renderer.New<TextureCopyToBufferCommand>()->Set(Ref(this), range, layer, level, stride);
+                    _renderer.QueueCommand();
+                }
+                else
+                {
+                    _renderer.CopyTextureForReadback(this, range, layer, level, stride);
+                }
+            }
         }
 
         /// <inheritdoc/>
@@ -139,8 +153,13 @@ namespace Ryujinx.Graphics.GAL.Multithreading.Resources
 
         public unsafe void Release()
         {
-            _renderer.New<TextureReleaseCommand>()->Set(Ref(this));
-            _renderer.QueueCommand();
+            lock (_copyReleaseGate)
+            {
+                if (_releaseRequested) return;
+                _releaseRequested = true;
+                _renderer.New<TextureReleaseCommand>()->Set(Ref(this));
+                _renderer.QueueCommand();
+            }
         }
     }
 }

@@ -506,6 +506,20 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             });
         }
 
+        internal void CopyTextureForReadback(ThreadedTexture texture, BufferRange range, int layer, int level, int stride)
+        {
+            // ThreadedTexture holds its copy/release gate. Complete native work before allowing
+            // Release to be published, without injecting a second producer into the GAL ring.
+            ThreadedHelpers.SpinUntilNonNull(ref texture.Base);
+            Buffers.MapBufferBlocking(range.Handle);
+            Interrupt(() =>
+            {
+                if (!Buffers.TryMapBufferRange(range, out BufferRange mapped))
+                    throw new InvalidOperationException("Missing texture readback target. " + GetDiagnosticSnapshot());
+                texture.Base.CopyTo(mapped, layer, level, stride);
+            });
+        }
+
         public unsafe Capabilities GetCapabilities()
         {
             ResultBox<Capabilities> box = new();
