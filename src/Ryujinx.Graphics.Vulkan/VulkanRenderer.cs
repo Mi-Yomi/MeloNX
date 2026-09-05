@@ -1073,10 +1073,35 @@ namespace Ryujinx.Graphics.Vulkan
             return false;
         }
 
+        private long _lastNativeOwnerSampleMilliseconds;
+        private long _lastNativeOwnerAllocatedBytes;
+
         public void PreFrame()
         {
             SyncManager.Cleanup();
             TryRunPendingMemoryTrim();
+            long now = Environment.TickCount64;
+            if (OperatingSystem.IsIOS() && now - _lastNativeOwnerSampleMilliseconds >= 10_000)
+            {
+                long elapsed = now - _lastNativeOwnerSampleMilliseconds;
+                _lastNativeOwnerSampleMilliseconds = now;
+                var textures = TextureStorage.GetOwnerStatistics();
+                var imported = HostMemoryAllocator.GetImportStatistics();
+                var allocation = MemoryAllocator.GetStatistics();
+                var device = GetDeviceMemoryBudget();
+                var gc = GC.GetGCMemoryInfo();
+                long allocated = GC.GetTotalAllocatedBytes(false);
+                long rate = _lastNativeOwnerAllocatedBytes == 0 ? 0 : (allocated - _lastNativeOwnerAllocatedBytes) * 1000 / Math.Max(1, elapsed);
+                _lastNativeOwnerAllocatedBytes = allocated;
+                Logger.Info?.Print(LogClass.Gpu,
+                    $"Native memory owners v1: accounting=overlapping_not_additive, texture_storage_owners={textures.Owners}, " +
+                    $"texture_owner_logical_bytes={textures.LogicalBytes}, texture_view_owners={textures.Views}, " +
+                    $"host_import_count={imported.Count}, host_import_mapped_bytes={imported.Bytes}, " +
+                    $"allocator_reserved_bytes={allocation.ReservedBytes}, allocator_used_bytes={allocation.UsedBytes}, allocator_blocks={allocation.Blocks}, " +
+                    $"driver_usage_bytes={device.Usage}, driver_budget_bytes={device.Budget}, " +
+                    $"managed_heap_bytes={gc.HeapSizeBytes}, managed_committed_bytes={gc.TotalCommittedBytes}, " +
+                    $"managed_fragmented_bytes={gc.FragmentedBytes}, managed_allocation_bytes_per_second={rate}");
+            }
         }
 
         public ICounterEvent ReportCounter(CounterType type, EventHandler<ulong> resultHandler, float divisor, bool hostReserved)

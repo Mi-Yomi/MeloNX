@@ -1,5 +1,6 @@
 using Ryujinx.Common.Memory;
 using Ryujinx.Cpu;
+using Ryujinx.Cpu.Jit;
 using Ryujinx.Graphics.Device;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Gpu.Image;
@@ -26,6 +27,10 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private int _referenceCount;
         private ulong _cpuMemorySize;
         private bool _hasCpuMemorySize;
+
+        internal string GetMemoryOwnerSnapshot() => _cpuMemory is MemoryManagerHostTracked tracked
+            ? tracked.GetMemoryOwnerSnapshot()
+            : $"cpu_manager={_cpuMemory.GetType().Name}, guest_backing_virtual_bytes={_cpuMemorySize}";
 
         /// <summary>
         /// In-memory shader cache.

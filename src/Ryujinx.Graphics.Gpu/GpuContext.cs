@@ -411,9 +411,23 @@ namespace Ryujinx.Graphics.Gpu
         /// Advances internal sequence number.
         /// This forces the update of any modified GPU resource.
         /// </summary>
+        private long _lastOwnerSampleMilliseconds;
+
         internal void AdvanceSequence()
         {
             SequenceNumber++;
+
+            if (OperatingSystem.IsIOS() && (SequenceNumber & 1023) == 0)
+            {
+                long now = Environment.TickCount64;
+                if (now - _lastOwnerSampleMilliseconds >= 10_000)
+                {
+                    _lastOwnerSampleMilliseconds = now;
+                    Logger.Info?.Print(LogClass.Gpu, "GPU memory owners v1: accounting=logical_not_additive, " + GetCrashDiagnosticSnapshot());
+                    foreach (var entry in PhysicalMemoryRegistry)
+                        Logger.Info?.Print(LogClass.Gpu, $"Guest memory owners v1: pid={entry.Key}, accounting=virtual_or_logical_not_resident, " + entry.Value.GetMemoryOwnerSnapshot());
+                }
+            }
 
             if (_memoryPressureMailbox.TryConsume(out MemoryPressureRequest request))
             {

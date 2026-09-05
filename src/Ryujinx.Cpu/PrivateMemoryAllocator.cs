@@ -3,6 +3,7 @@ using Ryujinx.Memory;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 
 namespace Ryujinx.Cpu
 {
@@ -215,6 +216,15 @@ namespace Ryujinx.Cpu
             }
         }
 
+        private static long _reservedBytes;
+        private static long _allocatedBytes;
+        private static long _blocksLive;
+        private long _ownedBytes;
+
+        // Logical ownership across allocators of this concrete block type; not resident RAM.
+        internal static (long Reserved, long Allocated, long Blocks) GetProcessStatistics() =>
+            (Interlocked.Read(ref _reservedBytes), Interlocked.Read(ref _allocatedBytes), Interlocked.Read(ref _blocksLive));
+
         private readonly List<T> _blocks;
 
         private readonly ulong _blockAlignment;
@@ -244,6 +254,8 @@ namespace Ryujinx.Cpu
                     ulong offset = block.Allocate(size, alignment, out ulong reusedSize);
                     if (offset != InvalidOffset)
                     {
+                        Interlocked.Add(ref _allocatedBytes, (long)size);
+                        _ownedBytes += (long)size;
                         return new Allocation(block, offset, size, reusedSize);
                     }
                 }
@@ -255,16 +267,22 @@ namespace Ryujinx.Cpu
             T newBlock = createBlock(memory, blockAlignedSize);
 
             InsertBlock(newBlock);
+            Interlocked.Add(ref _reservedBytes, (long)blockAlignedSize);
+            Interlocked.Increment(ref _blocksLive);
 
             ulong newBlockOffset = newBlock.Allocate(size, alignment, out ulong newBlockReusedSize);
             Debug.Assert(newBlockOffset != InvalidOffset);
 
+            Interlocked.Add(ref _allocatedBytes, (long)size);
+            _ownedBytes += (long)size;
             return new Allocation(newBlock, newBlockOffset, size, newBlockReusedSize);
         }
 
         public void Free(T block, ulong offset, ulong size)
         {
             block.Free(offset, size);
+            Interlocked.Add(ref _allocatedBytes, -(long)size);
+            _ownedBytes -= (long)size;
 
             bool isTotallyFree = block.IsTotallyFree();
 
@@ -282,6 +300,8 @@ namespace Ryujinx.Cpu
                 }
 
                 block.Destroy();
+                Interlocked.Add(ref _reservedBytes, -(long)block.Size);
+                Interlocked.Decrement(ref _blocksLive);
             }
         }
 
@@ -305,9 +325,13 @@ namespace Ryujinx.Cpu
             for (int i = 0; i < _blocks.Count; i++)
             {
                 _blocks[i].Destroy();
+                Interlocked.Add(ref _reservedBytes, -(long)_blocks[i].Size);
+                Interlocked.Decrement(ref _blocksLive);
             }
 
             _blocks.Clear();
+            Interlocked.Add(ref _allocatedBytes, -_ownedBytes);
+            _ownedBytes = 0;
         }
     }
 }

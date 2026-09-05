@@ -28,6 +28,11 @@ namespace Ryujinx.Graphics.Vulkan
             }
         }
 
+        private long _importedBytes;
+        private long _importedCount;
+        internal (long Bytes, long Count) GetImportStatistics() =>
+            (Interlocked.Read(ref _importedBytes), Interlocked.Read(ref _importedCount));
+
         private readonly MemoryAllocator _allocator;
         private readonly Vk _api;
         private readonly ExtExternalMemoryHost _hostMemoryApi;
@@ -135,6 +140,8 @@ namespace Ryujinx.Graphics.Vulkan
 
                 _allocationTree.Add(hostAlloc.Start, hostAlloc.End, hostAlloc);
                 _allocations.Add(hostAlloc);
+                Interlocked.Add(ref _importedBytes, (long)pageAlignedSize);
+                Interlocked.Increment(ref _importedCount);
             }
 
             return true;
@@ -176,6 +183,8 @@ namespace Ryujinx.Graphics.Vulkan
                     if (allocation.Allocation.GetUnsafe().Memory.Handle == memory.Handle)
                     {
                         _allocationTree.Remove(allocation.Start, allocation);
+                        Interlocked.Add(ref _importedBytes, -(long)allocation.Size);
+                        Interlocked.Decrement(ref _importedCount);
                         return true;
                     }
 

@@ -139,7 +139,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 try openSegment()
 
                 var header: [String: Any] = [
-                    "schema_version": 4,
+                    "schema_version": 5,
                     "event": "session_start",
                     "time_utc": Self.timestamp(),
                     "device_model": metadata.model,
@@ -173,6 +173,11 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                     "memory_manager": metadata.launchSettings.memoryManager,
                     "memory_manager_raw": metadata.launchSettings.memoryManagerRaw,
                     "expand_ram_requested": metadata.launchSettings.expandRAMRequested,
+                    "expand_ram_ui_requested": metadata.launchSettings.expandRAMRequested,
+                    "memory_owner_log_schema": 1,
+                    "pressure_buffer_preserves_hot_set": true,
+                    "pressure_heavy_available_bytes": 256 * 1024 * 1024,
+                    "pressure_descriptor_available_bytes": 512 * 1024 * 1024,
                     "effective_guest_memory_gib": 4,
                     "graphics_debug": metadata.launchSettings.graphicsDebug,
                     "debug_logging": metadata.launchSettings.debugLogging,
@@ -451,6 +456,8 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             "os_proc_available_memory_bytes": availableMemory
         ]
         record["core_active"] = coreActive
+        record["thermal_state_raw"] = ProcessInfo.processInfo.thermalState.rawValue
+        record["low_power_mode"] = ProcessInfo.processInfo.isLowPowerModeEnabled
         if let returnedAt = coreReturnedAtUptime {
             record["post_stop_elapsed_seconds"] = ProcessInfo.processInfo.systemUptime - returnedAt
         }

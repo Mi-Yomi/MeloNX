@@ -5,6 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Threading;
 using Format = Ryujinx.Graphics.GAL.Format;
 using VkBuffer = Silk.NET.Vulkan.Buffer;
 using VkFormat = Silk.NET.Vulkan.Format;
@@ -13,6 +14,12 @@ namespace Ryujinx.Graphics.Vulkan
 {
     class TextureStorage : IDisposable
     {
+        private static long _ownerCount;
+        private static long _ownerBytes;
+        private static long _viewCount;
+        internal static (long Owners, long LogicalBytes, long Views) GetOwnerStatistics() =>
+            (Interlocked.Read(ref _ownerCount), Interlocked.Read(ref _ownerBytes), Interlocked.Read(ref _viewCount));
+
         private struct TextureSliceInfo
         {
             public int BindCount;
@@ -172,6 +179,8 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             _slices = new TextureSliceInfo[levels * _depthOrLayers];
+            Interlocked.Increment(ref _ownerCount);
+            Interlocked.Add(ref _ownerBytes, (long)_size);
         }
 
         public TextureStorage CreateAliasedColorForDepthStorageUnsafe(Format format)
@@ -592,10 +601,12 @@ namespace Ryujinx.Graphics.Vulkan
         public void IncrementViewsCount()
         {
             _viewsCount++;
+            Interlocked.Increment(ref _viewCount);
         }
 
         public void DecrementViewsCount()
         {
+            Interlocked.Decrement(ref _viewCount);
             if (--_viewsCount == 0)
             {
                 _gd.PipelineInternal?.FlushCommandsIfWeightExceeding(_imageAuto, _size);
@@ -612,6 +623,8 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             Disposed = true;
+            Interlocked.Decrement(ref _ownerCount);
+            Interlocked.Add(ref _ownerBytes, -(long)_size);
             _gd.UnregisterPresentationStorage(this);
 
             if (_aliasedStorages != null)

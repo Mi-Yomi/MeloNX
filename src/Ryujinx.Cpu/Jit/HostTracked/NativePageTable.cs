@@ -4,6 +4,7 @@ using System;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace Ryujinx.Cpu.Jit.HostTracked
 {
@@ -29,6 +30,10 @@ namespace Ryujinx.Cpu.Jit.HostTracked
         private readonly TrackingEventDelegate _trackingEvent;
 
         private bool _disposed;
+        private long _committedBytes;
+        public ulong ReservedBytes => _nativePageTable.Size;
+        public long CommittedBytes => Interlocked.Read(ref _committedBytes);
+        public int ManagedLeafCount => _pageTable.AllocatedLeafCount;
 
         public nint PageTablePointer => _nativePageTable.Pointer;
 
@@ -143,6 +148,7 @@ namespace Ryujinx.Cpu.Jit.HostTracked
                     }
 
                     _nativePageTable.Commit(bit * _hostPageSize, _hostPageSize);
+                    Interlocked.Add(ref _committedBytes, (long)_hostPageSize);
 
                     Span<ulong> pageSpan = MemoryMarshal.Cast<byte, ulong>(_nativePageTable.GetSpan(bit * _hostPageSize, (int)_hostPageSize));
 
