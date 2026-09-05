@@ -1,0 +1,361 @@
+diff --git a/src/Ryujinx.Graphics.GAL/Multithreading/ThreadedRenderer.cs b/src/Ryujinx.Graphics.GAL/Multithreading/ThreadedRenderer.cs
+index c461638..d5fa21b 100644
+--- a/src/Ryujinx.Graphics.GAL/Multithreading/ThreadedRenderer.cs
++++ b/src/Ryujinx.Graphics.GAL/Multithreading/ThreadedRenderer.cs
+@@ -11,4 +11,5 @@ using System;
+ using System.Diagnostics;
+ using System.Runtime.CompilerServices;
++using System.Runtime.ExceptionServices;
+ using System.Runtime.InteropServices;
+ using System.Threading;
+@@ -54,5 +55,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
+         private int _producerPtr;
+         private int _lastProducedPtr;
+-        private int _invokePtr;
++        private int _invokePtr = -1;
++        private ExceptionDispatchInfo _interruptFailure;
++        private long _backgroundBufferCopies;
+ 
+         private int _refProducerPtr;
+@@ -133,8 +136,19 @@ namespace Ryujinx.Graphics.GAL.Multithreading
+                 if (Volatile.Read(ref _interruptAction) != null)
+                 {
+-                    _interruptAction();
+-                    _interruptRun.Set();
+-
+-                    Interlocked.Exchange(ref _interruptAction, null);
++                    // The caller may hold guest range/lifetime locks. This interrupt must never
++                    // drain the emulation producer or call back into guest memory tracking.
++                    try
++                    {
++                        _interruptAction();
++                    }
++                    catch (Exception exception)
++                    {
++                        _interruptFailure = ExceptionDispatchInfo.Capture(exception);
++                    }
++                    finally
++                    {
++                        Interlocked.Exchange(ref _interruptAction, null);
++                        _interruptRun.Set();
++                    }
+                 }
+ 
+@@ -219,4 +233,5 @@ namespace Ryujinx.Graphics.GAL.Multithreading
+ 
+             return $"queue_pending={Volatile.Read(ref _commandCount)}, consumer={Volatile.Read(ref _consumerPtr)}, " +
++                   $"background_buffer_copies={Interlocked.Read(ref _backgroundBufferCopies)}, " +
+                    $"producer={Volatile.Read(ref _producerPtr)}, ref_consumer={Volatile.Read(ref _refConsumerPtr)}, " +
+                    $"ref_producer={Volatile.Read(ref _refProducerPtr)}, buffers_issued={buffers.Issued}, " +
+@@ -459,4 +474,37 @@ namespace Ryujinx.Graphics.GAL.Multithreading
+         }
+ 
++        /// <summary>
++        /// Reconciles a completed virtual-buffer write during external CPU readback. The caller
++        /// has waited for the guest sync and holds both buffers alive. Unlike the normal pipeline
++        /// API, this path does not publish from a second producer into the SPSC GAL ring.
++        /// </summary>
++        public void CopyBufferForReadback(BufferHandle source, BufferHandle destination, int srcOffset, int dstOffset, int size)
++        {
++            if (IsGpuThread())
++            {
++                Pipeline.CopyBuffer(source, destination, srcOffset, dstOffset, size);
++                return;
++            }
++
++            // Wait for queued creations on the calling thread, NEVER inside an interrupt:
++            // the consumer cannot execute a CreateBuffer while it is running the interrupt.
++            Buffers.MapBufferBlocking(source);
++            Buffers.MapBufferBlocking(destination);
++
++            Interrupt(() =>
++            {
++                if (!Buffers.TryMapBuffer(source, out BufferHandle nativeSource) ||
++                    !Buffers.TryMapBuffer(destination, out BufferHandle nativeDestination))
++                {
++                    throw new InvalidOperationException("Readback reconciliation outlived its buffer mapping. " + GetDiagnosticSnapshot());
++                }
++
++                // Runs between backend commands, so pipeline, mirror invalidation, and native
++                // fence ownership all stay on their existing owner. No guest locks are acquired.
++                _baseRenderer.Pipeline.CopyBuffer(nativeSource, nativeDestination, srcOffset, dstOffset, size);
++                Interlocked.Increment(ref _backgroundBufferCopies);
++            });
++        }
++
+         public unsafe Capabilities GetCapabilities()
+         {
+@@ -564,4 +612,5 @@ namespace Ryujinx.Graphics.GAL.Multithreading
+                 lock (_interruptLock)
+                 {
++                    _interruptFailure = null;
+                     while (Interlocked.CompareExchange(ref _interruptAction, action, null) != null)
+                     {
+@@ -571,4 +620,5 @@ namespace Ryujinx.Graphics.GAL.Multithreading
+ 
+                     _interruptRun.WaitOne();
++                    _interruptFailure?.Throw();
+                 }
+             }
+diff --git a/src/Ryujinx.Graphics.Gpu/Memory/Buffer.cs b/src/Ryujinx.Graphics.Gpu/Memory/Buffer.cs
+index 82168a3..e6784c8 100644
+--- a/src/Ryujinx.Graphics.Gpu/Memory/Buffer.cs
++++ b/src/Ryujinx.Graphics.Gpu/Memory/Buffer.cs
+@@ -1,3 +1,4 @@
+ using Ryujinx.Graphics.GAL;
++using Ryujinx.Graphics.GAL.Multithreading;
+ using Ryujinx.Graphics.Gpu.Synchronization;
+ using Ryujinx.Memory.Range;
+@@ -1056,5 +1057,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
+                             int virtualOffset = virtualBuffer.Range.FindOffset(new(mAddress, mSize));
+ 
+-                            _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
++                            if (_context.Renderer is ThreadedRenderer threaded)
++                            {
++                                threaded.CopyBufferForReadback(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
++                            }
++                            else
++                            {
++                                _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
++                            }
++
+                             virtualBuffer.GetData(storage.AsSpan().Slice((int)(mAddress - address), (int)mSize), virtualOffset, (int)mSize);
+                         });
+diff --git a/src/Ryujinx.Graphics.Gpu/Memory/BufferModifiedRangeList.cs b/src/Ryujinx.Graphics.Gpu/Memory/BufferModifiedRangeList.cs
+index aef04ab..423b3f1 100644
+--- a/src/Ryujinx.Graphics.Gpu/Memory/BufferModifiedRangeList.cs
++++ b/src/Ryujinx.Graphics.Gpu/Memory/BufferModifiedRangeList.cs
+@@ -290,5 +290,5 @@ namespace Ryujinx.Graphics.Gpu.Memory
+             Lock.ExitReadLock();
+ 
+-            if (length != 0)
++            try
+             {
+                 for (int i = 0; i < length; i++)
+@@ -297,6 +297,11 @@ namespace Ryujinx.Graphics.Gpu.Memory
+                     rangeAction(overlap.Address, overlap.Size);
+                 }
+-                
+-                ArrayPool<BufferModifiedRange>.Shared.Return(overlaps);
++            }
++            finally
++            {
++                if (overlaps != null)
++                {
++                    ArrayPool<BufferModifiedRange>.Shared.Return(overlaps);
++                }
+             }
+         }
+diff --git a/src/Ryujinx.Tests/Graphics/AuditTestRenderer.cs b/src/Ryujinx.Tests/Graphics/AuditTestRenderer.cs
+index 7fd4600..6d10280 100644
+--- a/src/Ryujinx.Tests/Graphics/AuditTestRenderer.cs
++++ b/src/Ryujinx.Tests/Graphics/AuditTestRenderer.cs
+@@ -46,5 +46,5 @@ namespace Ryujinx.Tests.Graphics
+         public IProgram CreateProgram(ShaderSource[] shaders, ShaderInfo info) => throw new NotSupportedException();
+         public ISampler CreateSampler(SamplerCreateInfo info) => throw new NotSupportedException();
+-        public ITexture CreateTexture(TextureCreateInfo info) => throw new NotSupportedException();
++        public ITexture CreateTexture(TextureCreateInfo info) => new AuditTestTexture(this);
+         public ITextureArray CreateTextureArray(int size, bool isBuffer) => throw new NotSupportedException();
+         public bool PrepareHostMapping(nint address, ulong size) => throw new NotSupportedException();
+diff --git a/src/Ryujinx.Tests/Graphics/ThreadedReadbackTests.cs b/src/Ryujinx.Tests/Graphics/ThreadedReadbackTests.cs
+new file mode 100644
+index 0000000..495affa
+--- /dev/null
++++ b/src/Ryujinx.Tests/Graphics/ThreadedReadbackTests.cs
+@@ -0,0 +1,113 @@
++using NUnit.Framework;
++using Ryujinx.Graphics.GAL;
++using Ryujinx.Graphics.GAL.Multithreading;
++using System;
++using System.Linq;
++using System.Threading;
++using System.Threading.Tasks;
++
++namespace Ryujinx.Tests.Graphics
++{
++    public class ThreadedReadbackTests
++    {
++        [TestCase(0)]
++        [TestCase(24000)]
++        public void ExternalReadbackDoesNotBecomeSecondQueueProducer(int producerCopies)
++        {
++            AuditTestRenderer backend = new();
++            ThreadedRenderer renderer = new(backend);
++            using ManualResetEventSlim ready = new(false), stop = new(false), produced = new(false);
++            BufferHandle source = default, target = default, mainSource = default, mainTarget = default;
++            Exception failure = null;
++            Thread owner = new(() => renderer.RunLoop(() =>
++            {
++                try
++                {
++                    source = renderer.CreateBuffer(65536, BufferAccess.Default);
++                    target = renderer.CreateBuffer(65536, BufferAccess.Default);
++                    mainSource = renderer.CreateBuffer(64, BufferAccess.Default);
++                    mainTarget = renderer.CreateBuffer(64, BufferAccess.Default);
++                    renderer.SetBufferData(source, 0, Enumerable.Repeat((byte)0x7b, 65536).ToArray());
++                    renderer.SetBufferData(target, 0, Enumerable.Repeat((byte)0x22, 65536).ToArray());
++                    using (renderer.GetBufferData(source, 0, 1)) { }
++                    ready.Set();
++                    for (int i = 0; i < producerCopies; i++)
++                    {
++                        renderer.Pipeline.CopyBuffer(mainSource, mainTarget, 0, 0, 4);
++                    }
++                    produced.Set();
++                    stop.Wait();
++                    renderer.DeleteBuffer(source);
++                    renderer.DeleteBuffer(target);
++                    renderer.DeleteBuffer(mainSource);
++                    renderer.DeleteBuffer(mainTarget);
++                }
++                catch (Exception error) { failure = error; ready.Set(); produced.Set(); }
++            })) { IsBackground = true };
++            owner.Start();
++            Assert.That(ready.Wait(TimeSpan.FromSeconds(15)), Is.True);
++            Assert.That(failure, Is.Null);
++            try
++            {
++                Task readbacks = Task.Run(() =>
++                {
++                    for (int i = 0; i < 128; i++)
++                        renderer.CopyBufferForReadback(source, target, 61440, 61440, 4096);
++                });
++                Assert.That(readbacks.Wait(TimeSpan.FromSeconds(15)), Is.True, "Background reconciliation deadlocked");
++                Assert.That(produced.Wait(TimeSpan.FromSeconds(15)), Is.True);
++                using PinnedSpan<byte> output = renderer.GetBufferData(target, 0, 65536);
++                Assert.That(output.Get()[..61440].ToArray(), Is.All.EqualTo((byte)0x22));
++                Assert.That(output.Get()[61440..].ToArray(), Is.All.EqualTo((byte)0x7b));
++            }
++            finally
++            {
++                stop.Set();
++                renderer.Dispose();
++            }
++            Assert.That(owner.Join(TimeSpan.FromSeconds(2)), Is.True);
++            Assert.That(failure, Is.Null);
++            Assert.That(backend.Copies.Count, Is.EqualTo(producerCopies + 128));
++            Assert.That(backend.Events.Select(e => e.Thread).Distinct(), Is.EqualTo(new[] { owner.ManagedThreadId }));
++            Assert.That(backend.Buffers, Is.Empty);
++        }
++
++        [Test]
++        public void FailedReadbackInterruptWakesCallerAndDoesNotPoisonNextInterrupt()
++        {
++            AuditTestRenderer backend = new();
++            ThreadedRenderer renderer = new(backend);
++            using ManualResetEventSlim ready = new(false), stop = new(false);
++            BufferHandle source = default, target = default;
++            Thread owner = new(() => renderer.RunLoop(() =>
++            {
++                source = renderer.CreateBuffer(16, BufferAccess.Default);
++                target = renderer.CreateBuffer(16, BufferAccess.Default);
++                using (renderer.GetBufferData(source, 0, 1)) { }
++                ready.Set();
++                stop.Wait();
++                renderer.DeleteBuffer(source);
++                renderer.DeleteBuffer(target);
++            })) { IsBackground = true };
++            owner.Start();
++            Assert.That(ready.Wait(TimeSpan.FromSeconds(15)), Is.True);
++            try
++            {
++                Task attempt = Task.Run(() =>
++                {
++                    Assert.Throws<ArgumentOutOfRangeException>(() => renderer.CopyBufferForReadback(source, target, 0, 0, 17));
++                    renderer.CopyBufferForReadback(source, target, 0, 0, 16);
++                });
++                Assert.That(attempt.Wait(TimeSpan.FromSeconds(15)), Is.True);
++            }
++            finally
++            {
++                stop.Set();
++                renderer.Dispose();
++            }
++            Assert.That(owner.Join(TimeSpan.FromSeconds(2)), Is.True);
++            Assert.That(backend.Copies.Count, Is.EqualTo(1));
++            Assert.That(backend.Events.Where(e => e.Operation == "copy").All(e => e.Thread == owner.ManagedThreadId), Is.True);
++        }
++    }
++}
+diff --git a/src/Ryujinx.Tests/Graphics/ThreadedTextureLifetimeTests.cs b/src/Ryujinx.Tests/Graphics/ThreadedTextureLifetimeTests.cs
+new file mode 100644
+index 0000000..51cce53
+--- /dev/null
++++ b/src/Ryujinx.Tests/Graphics/ThreadedTextureLifetimeTests.cs
+@@ -0,0 +1,77 @@
++using NUnit.Framework;
++using Ryujinx.Common.Memory;
++using Ryujinx.Graphics.GAL;
++using Ryujinx.Graphics.GAL.Multithreading;
++using System;
++using System.Linq;
++using System.Threading;
++
++namespace Ryujinx.Tests.Graphics
++{
++    public class ThreadedTextureLifetimeTests
++    {
++        [TestCase(1)]
++        [TestCase(24000)]
++        public void CopyQueuedBeforeReleaseAndDeleteSeesLiveTextureAndBuffer(int count)
++        {
++            AuditTestRenderer backend = new();
++            ThreadedRenderer renderer = new(backend);
++            using ManualResetEventSlim producerDone = new(false);
++            Exception failure = null;
++            Thread owner = new(() => renderer.RunLoop(() =>
++            {
++                try
++                {
++                    ITexture texture = renderer.CreateTexture(default);
++                    BufferHandle target = renderer.CreateBuffer(16, BufferAccess.Default);
++                    for (int i = 0; i < count; i++)
++                        texture.CopyTo(new BufferRange(target, 0, 16), 0, 0, 4);
++                    texture.Release();
++                    renderer.DeleteBuffer(target);
++                }
++                catch (Exception error) { failure = error; }
++                finally { producerDone.Set(); }
++            })) { IsBackground = true };
++            owner.Start();
++            Assert.That(producerDone.Wait(TimeSpan.FromSeconds(15)), Is.True);
++            renderer.Dispose();
++            Assert.That(owner.Join(TimeSpan.FromSeconds(2)), Is.True);
++            Assert.That(failure, Is.Null);
++            var events = backend.Events.ToArray();
++            Assert.That(events.Count(e => e.Operation == "texture_copy"), Is.EqualTo(count));
++            Assert.That(events.TakeLast(3).Select(e => e.Operation), Is.EqualTo(new[] { "texture_release", "delete", "dispose" }));
++            Assert.That(events.Select(e => e.Thread).Distinct(), Is.EqualTo(new[] { owner.ManagedThreadId }));
++        }
++    }
++
++    internal sealed class AuditTestTexture : ITexture
++    {
++        private readonly AuditTestRenderer _renderer;
++        private bool _released;
++        public int Width => 1;
++        public int Height => 1;
++        public AuditTestTexture(AuditTestRenderer renderer) => _renderer = renderer;
++        public void CopyTo(BufferRange range, int layer, int level, int stride)
++        {
++            if (_released) throw new InvalidOperationException("Copy after texture release");
++            _renderer.Buffers[range.Handle].AsSpan(range.Offset, range.Size).Fill(0x7b);
++            _renderer.Events.Enqueue(("texture_copy", Environment.CurrentManagedThreadId));
++        }
++        public void Release()
++        {
++            if (_released) throw new InvalidOperationException("Double texture release");
++            _released = true;
++            _renderer.Events.Enqueue(("texture_release", Environment.CurrentManagedThreadId));
++        }
++        public void CopyTo(ITexture destination, int firstLayer, int firstLevel) => throw new NotSupportedException();
++        public void CopyTo(ITexture destination, int srcLayer, int dstLayer, int srcLevel, int dstLevel) => throw new NotSupportedException();
++        public void CopyTo(ITexture destination, Extents2D srcRegion, Extents2D dstRegion, bool linearFilter) => throw new NotSupportedException();
++        public ITexture CreateView(TextureCreateInfo info, int firstLayer, int firstLevel) => throw new NotSupportedException();
++        public PinnedSpan<byte> GetData() => throw new NotSupportedException();
++        public PinnedSpan<byte> GetData(int layer, int level) => throw new NotSupportedException();
++        public void SetData(MemoryOwner<byte> data) => throw new NotSupportedException();
++        public void SetData(MemoryOwner<byte> data, int layer, int level) => throw new NotSupportedException();
++        public void SetData(MemoryOwner<byte> data, int layer, int level, Rectangle<int> region) => throw new NotSupportedException();
++        public void SetStorage(BufferRange buffer) => throw new NotSupportedException();
++    }
++}
