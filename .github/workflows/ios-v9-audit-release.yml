@@ -33,7 +33,15 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           if test -f distribution/ios/v9-audit/prepare.py; then
-            python3 distribution/ios/v9-audit/prepare.py
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('distribution/ios/v9-audit/prepare.py')
+          source = p.read_text()
+          old = "replace(p, '[TestCase(256UL, (int)MemoryPressureSeverity.Critical, 0UL)]', '[TestCase(256UL, (int)MemoryPressureSeverity.Critical, 128UL)]')"
+          new = "replace(p, '[TestCase(256UL, (int)MemoryPressureSeverity.Critical, 0UL)]\\n        public void CalculatesTemporaryBufferTarget', '[TestCase(256UL, (int)MemoryPressureSeverity.Critical, 128UL)]\\n        public void CalculatesTemporaryBufferTarget')"
+          assert source.count(old) == 1
+          exec(compile(source.replace(old, new), str(p), 'exec'))
+          PY
             git rm -r distribution/ios/v9-audit
             git commit -m 'chore: remove applied v9 audit preparation files'
             git push origin HEAD:refs/heads/codex/gta-v9-readback-pressure
