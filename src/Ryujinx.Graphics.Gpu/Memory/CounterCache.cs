@@ -1,4 +1,5 @@
 using Ryujinx.Graphics.GAL;
+using System;
 using System.Collections.Generic;
 
 namespace Ryujinx.Graphics.Gpu.Memory
@@ -60,14 +61,25 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
         private void RemoveRange(ulong gpuVa, ulong size)
         {
-            int index = BinarySearch(gpuVa + size - 1);
+            if (size == 0)
+            {
+                return;
+            }
+
+            // A virtual-memory range does not wrap around to address zero.
+            // Saturate its inclusive end so an overflowing end cannot preserve
+            // stale callbacks at high addresses or invalidate unrelated low ones.
+            ulong lastVa = gpuVa + Math.Min(size - 1, ulong.MaxValue - gpuVa);
+            int index = BinarySearch(lastVa);
 
             if (index < 0)
             {
-                index = ~index;
+                // BinarySearch returns the insertion point. The last possible
+                // member of this range is its predecessor, not its successor.
+                index = ~index - 1;
             }
 
-            if (index >= _items.Count || !InRange(gpuVa, size, _items[index].Address))
+            if (index < 0 || !InRange(gpuVa, size, _items[index].Address))
             {
                 return;
             }
@@ -99,7 +111,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <returns>True if the address falls inside the range, false otherwise</returns>
         private static bool InRange(ulong startVa, ulong size, ulong gpuVa)
         {
-            return gpuVa >= startVa && gpuVa < startVa + size;
+            return gpuVa >= startVa && gpuVa - startVa < size;
         }
 
         /// <summary>
@@ -120,7 +132,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         public bool FindAndFlush(ulong gpuVa)
         {
             int index = BinarySearch(gpuVa);
-            if (index > 0)
+            if (index >= 0)
             {
                 _items[index].Event?.Flush();
 
@@ -140,7 +152,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         public ICounterEvent FindEvent(ulong gpuVa)
         {
             int index = BinarySearch(gpuVa);
-            if (index > 0)
+            if (index >= 0)
             {
                 return _items[index].Event;
             }
@@ -154,7 +166,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// Performs binary search of an address on the list.
         /// </summary>
         /// <param name="address">Address to search</param>
-        /// <returns>Index of the item, or complement of the index of the nearest item with lower value</returns>
+        /// <returns>Index of the item, or complement of the insertion index of the first greater item</returns>
         private int BinarySearch(ulong address)
         {
             int left = 0;

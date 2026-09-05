@@ -55,6 +55,8 @@ namespace Ryujinx.Graphics.Vulkan.Queries
             }
         }
 
+        public string GetDiagnosticSnapshot() => string.Join(", ", Array.ConvertAll(_counterQueues, queue => queue.GetDiagnosticSnapshot()));
+
         public void Flush(CounterType type)
         {
             _counterQueues[(int)type].Flush(true);

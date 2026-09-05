@@ -11,7 +11,8 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         public CounterType Type { get; }
         public bool ClearCounter { get; private set; }
 
-        public bool Disposed { get; private set; }
+        private volatile bool _disposed;
+        public bool Disposed => _disposed;
         public bool Invalid { get; set; }
 
         public ulong DrawIndex { get; }
@@ -60,7 +61,8 @@ namespace Ryujinx.Graphics.Vulkan.Queries
             _divisor = divisor;
         }
 
-        internal bool TryConsume(ref ulong result, bool block, AutoResetEvent wakeSignal = null)
+        internal bool TryConsume(ref ulong result, bool block, AutoResetEvent wakeSignal = null,
+            int timeoutMilliseconds = BufferedQuery.QueryWaitTimeoutMilliseconds)
         {
             lock (_lock)
             {
@@ -69,34 +71,63 @@ namespace Ryujinx.Graphics.Vulkan.Queries
                     return true;
                 }
 
-                if (ClearCounter)
-                {
-                    result = 0;
-                }
+                // Wait without holding the event lock: an explicit dispose command
+                // on the backend must not delay submission of this query. Keep a
+                // temporary reference so Dispose cannot return it to the pool while
+                // the consumer is still reading the mapped result.
+                Interlocked.Increment(ref _refCount);
+            }
 
+            try
+            {
                 long queryResult;
 
                 if (block)
                 {
-                    queryResult = _counter.AwaitResult(wakeSignal);
+                    if (!_counter.TryAwaitResult(out queryResult, wakeSignal, _queue.DisposalToken, timeoutMilliseconds))
+                    {
+                        if (!_queue.DisposalToken.IsCancellationRequested)
+                        {
+                            _queue.RegisterWaitTimeout();
+                        }
+
+                        return Disposed;
+                    }
                 }
                 else
                 {
                     if (!_counter.TryGetResult(out queryResult))
                     {
-                        return false;
+                        return Disposed;
                     }
                 }
 
-                result += _divisor == 1 ? (ulong)queryResult : (ulong)Math.Ceiling(queryResult / _divisor);
+                lock (_lock)
+                {
+                    if (Disposed)
+                    {
+                        return true;
+                    }
 
-                _result = result;
+                    if (ClearCounter)
+                    {
+                        result = 0;
+                    }
 
-                OnResult?.Invoke(this, result);
+                    result += _divisor == 1 ? (ulong)queryResult : (ulong)Math.Ceiling(queryResult / _divisor);
 
-                Dispose(); // Return the our resources to the pool.
+                    _result = result;
 
-                return true;
+                    OnResult?.Invoke(this, result);
+
+                    Dispose(); // Release the queue reference; the read lease retires below.
+
+                    return true;
+                }
+            }
+            finally
+            {
+                DecrementRefCount();
             }
         }
 
@@ -162,9 +193,16 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
         public void Dispose()
         {
-            Disposed = true;
+            lock (_lock)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
 
-            DecrementRefCount();
+                _disposed = true;
+                DecrementRefCount();
+            }
         }
     }
 }

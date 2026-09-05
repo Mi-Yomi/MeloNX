@@ -28,6 +28,10 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         private const int MaxRefsPerCommand = 2;
         private const int QueueCount = 10000;
         private const int RecentCommandCount = 32;
+        private const int IdleServiceIntervalMs = 8;
+        private const int BackendWaiting = -1;
+        private const int BackendInterrupt = -2;
+        private const int BackendIdleService = -3;
 
         private readonly int _elementSize;
         private readonly IRenderer _baseRenderer;
@@ -57,6 +61,9 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         private int _invokePtr = -1;
         private ExceptionDispatchInfo _interruptFailure;
         private long _backgroundBufferCopies;
+        private int _activeCommand = BackendWaiting;
+        private long _commandsCompleted;
+        private long _idleServices;
 
         private int _refProducerPtr;
         private int _refConsumerPtr;
@@ -130,7 +137,27 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
             while (_running)
             {
-                _galWorkAvailable.Wait();
+                if (!_galWorkAvailable.Wait(IdleServiceIntervalMs))
+                {
+                    // A guest can wait for a query without producing another FIFO batch.
+                    // Service deferred submissions even if the producer is itself blocked.
+                    // No GAL command (and no captured command-buffer scope) is active here.
+                    if (Volatile.Read(ref _commandCount) == 0 && Volatile.Read(ref _interruptAction) == null)
+                    {
+                        Volatile.Write(ref _activeCommand, BackendIdleService);
+                        try
+                        {
+                            _baseRenderer.FlushPendingCommands();
+                            Interlocked.Increment(ref _idleServices);
+                        }
+                        finally
+                        {
+                            Volatile.Write(ref _activeCommand, BackendWaiting);
+                        }
+                    }
+
+                    continue;
+                }
                 _galWorkAvailable.Reset();
 
                 if (Volatile.Read(ref _interruptAction) != null)
@@ -139,6 +166,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
                     // drain the emulation producer or call back into guest memory tracking.
                     try
                     {
+                        Volatile.Write(ref _activeCommand, BackendInterrupt);
                         _interruptAction();
                     }
                     catch (Exception exception)
@@ -148,6 +176,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
                     finally
                     {
                         Interlocked.Exchange(ref _interruptAction, null);
+                        Volatile.Write(ref _activeCommand, BackendWaiting);
                         _interruptRun.Set();
                     }
                 }
@@ -166,6 +195,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
                     CommandType commandType = (CommandType)command[^1];
                     RecordCommand(commandType);
+                    Volatile.Write(ref _activeCommand, (int)commandType);
 
                     try
                     {
@@ -190,6 +220,9 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
                         throw;
                     }
+
+                    Interlocked.Increment(ref _commandsCompleted);
+                    Volatile.Write(ref _activeCommand, BackendWaiting);
 
                     if (Interlocked.CompareExchange(ref _invokePtr, -1, commandPtr) == commandPtr)
                     {
@@ -230,12 +263,22 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         public string GetDiagnosticSnapshot()
         {
             var buffers = Buffers.GetDiagnostics();
+            int activeCommand = Volatile.Read(ref _activeCommand);
+            string active = activeCommand switch
+            {
+                BackendWaiting => "waiting",
+                BackendInterrupt => "interrupt",
+                BackendIdleService => "idle_submit",
+                _ => ((CommandType)activeCommand).ToString(),
+            };
 
             return $"queue_pending={Volatile.Read(ref _commandCount)}, consumer={Volatile.Read(ref _consumerPtr)}, " +
+                   $"active_command={active}, commands_completed={Interlocked.Read(ref _commandsCompleted)}, idle_services={Interlocked.Read(ref _idleServices)}, " +
                    $"background_buffer_copies={Interlocked.Read(ref _backgroundBufferCopies)}, " +
                    $"producer={Volatile.Read(ref _producerPtr)}, ref_consumer={Volatile.Read(ref _refConsumerPtr)}, " +
                    $"ref_producer={Volatile.Read(ref _refProducerPtr)}, buffers_issued={buffers.Issued}, " +
-                   $"buffers_mapped={buffers.Mapped}, buffers_in_flight={buffers.InFlight}, buffer_map_misses={buffers.Misses}";
+                   $"buffers_mapped={buffers.Mapped}, buffers_in_flight={buffers.InFlight}, buffer_map_misses={buffers.Misses}, " +
+                   $"backend=[{_baseRenderer.GetDiagnosticSnapshot()}]";
         }
 
         internal SpanRef<T> CopySpan<T>(ReadOnlySpan<T> data) where T : unmanaged

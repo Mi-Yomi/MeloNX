@@ -7,12 +7,13 @@ namespace Ryujinx.Graphics.GAL.Multithreading
     class SyncMap : IDisposable
     {
         private readonly HashSet<ulong> _inFlight = [];
-        private readonly AutoResetEvent _inFlightChanged = new(false);
+        private bool _disposed;
 
         internal void CreateSyncHandle(ulong id)
         {
             lock (_inFlight)
             {
+                ObjectDisposedException.ThrowIf(_disposed, this);
                 _inFlight.Add(id);
             }
         }
@@ -21,42 +22,37 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         {
             lock (_inFlight)
             {
+                ObjectDisposedException.ThrowIf(_disposed, this);
                 _inFlight.Remove(id);
+                // Different sync IDs share the predicate lock, not a consumable
+                // event signal that the wrong waiter can take and lose.
+                Monitor.PulseAll(_inFlight);
             }
-
-            _inFlightChanged.Set();
         }
 
         internal void WaitSyncAvailability(ulong id)
         {
             // Blocks until the handle is available.
 
-            bool signal = false;
-
-            while (true)
+            lock (_inFlight)
             {
-                lock (_inFlight)
+                while (_inFlight.Contains(id))
                 {
-                    if (!_inFlight.Contains(id))
-                    {
-                        break;
-                    }
+                    ObjectDisposedException.ThrowIf(_disposed, this);
+                    Monitor.Wait(_inFlight);
                 }
-
-                _inFlightChanged.WaitOne();
-                signal = true;
-            }
-
-            if (signal)
-            {
-                // Signal other threads which might still be waiting.
-                _inFlightChanged.Set();
             }
         }
 
         public void Dispose()
         {
-            _inFlightChanged.Dispose();
+            lock (_inFlight)
+            {
+                _disposed = true;
+                // Teardown must release pending callers as cancellation, never
+                // pretend that an uncreated native sync object became available.
+                Monitor.PulseAll(_inFlight);
+            }
         }
     }
 }

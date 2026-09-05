@@ -1,4 +1,3 @@
-using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
 using Silk.NET.Vulkan;
 using System;
@@ -10,7 +9,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 {
     class BufferedQuery : IDisposable
     {
-        private const int MaxQueryRetries = 5000;
+        internal const int QueryWaitTimeoutMilliseconds = 100;
         private const long DefaultValue = unchecked((long)0xFFFFFFFEFFFFFFFE);
         private const long DefaultValueInt = 0xFFFFFFFE;
         private const ulong HighMask = 0xFFFFFFFF00000000;
@@ -29,6 +28,9 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
         private readonly long _defaultValue;
         private int? _resetSequence;
+        private long _waitTimeouts;
+
+        internal long WaitTimeouts => Interlocked.Read(ref _waitTimeouts);
 
         public unsafe BufferedQuery(VulkanRenderer gd, Device device, PipelineFull pipeline, CounterType type, bool result32Bit)
         {
@@ -138,45 +140,43 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         {
             result = Marshal.ReadInt64(_bufferMap);
 
-            return result != _defaultValue;
+            return !WaitingForValue(result);
         }
 
-        public long AwaitResult(AutoResetEvent wakeSignal = null)
+        internal bool TryAwaitResult(out long result, AutoResetEvent wakeSignal = null,
+            CancellationToken cancellationToken = default, int timeoutMilliseconds = QueryWaitTimeoutMilliseconds)
         {
-            long data = _defaultValue;
-
-            if (wakeSignal == null)
+            long started = Environment.TickCount64;
+            SpinWait spin = new();
+            while (!cancellationToken.IsCancellationRequested)
             {
-                int iterations = 0;
-                while (WaitingForValue(data) && iterations++ < MaxQueryRetries)
+                if (TryGetResult(out result))
                 {
-                    data = Marshal.ReadInt64(_bufferMap);
+                    return true;
                 }
 
-                if (iterations >= MaxQueryRetries)
+                if (Environment.TickCount64 - started >= timeoutMilliseconds)
                 {
-                    Logger.Error?.Print(LogClass.Gpu, $"Error: Query result {_type} timed out. Took more than {MaxQueryRetries} tries.");
-                }
-            }
-            else
-            {
-                int iterations = 0;
-                while (WaitingForValue(data) && iterations++ < MaxQueryRetries)
-                {
-                    data = Marshal.ReadInt64(_bufferMap);
-                    if (WaitingForValue(data))
-                    {
-                        wakeSignal.WaitOne(1);
-                    }
+                    // Keep the event and query alive. The sentinel is not a GPU result,
+                    // and returning it would publish corrupt guest data and recycle a
+                    // query whose command buffer may not even have been submitted.
+                    Interlocked.Increment(ref _waitTimeouts);
+                    result = default;
+                    return false;
                 }
 
-                if (iterations >= MaxQueryRetries)
+                if (wakeSignal == null)
                 {
-                    Logger.Error?.Print(LogClass.Gpu, $"Error: Query result {_type} timed out. Took more than {MaxQueryRetries} tries.");
+                    spin.SpinOnce();
+                }
+                else
+                {
+                    wakeSignal.WaitOne(1);
                 }
             }
 
-            return data;
+            result = default;
+            return false;
         }
 
         public void PoolReset(CommandBuffer cmd, int resetSequence)

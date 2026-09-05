@@ -363,24 +363,13 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         public unsafe bool TryHostConditionalRendering(ICounterEvent value, ulong compare, bool isEqual)
         {
             ThreadedCounterEvent evt = value as ThreadedCounterEvent;
-            if (evt != null)
-            {
-                if (compare == 0 && evt.Type == CounterType.SamplesPassed && evt.ClearCounter)
-                {
-                    if (!evt.ReserveForHostAccess())
-                    {
-                        return false;
-                    }
-
-                    _renderer.New<TryHostConditionalRenderingCommand>()->Set(Ref(evt), compare, isEqual);
-                    _renderer.QueueCommand();
-                    return true;
-                }
-            }
-
-            _renderer.New<TryHostConditionalRenderingFlushCommand>()->Set(Ref(evt), Ref<ThreadedCounterEvent>(null), isEqual);
-            _renderer.QueueCommand();
-            return false;
+            ResultBox<bool> result = new();
+            // The backend owns both capability checks and query reservations.
+            // Predicting success here can skip CPU evaluation when the backend
+            // cannot implement the condition. Wait for its actual decision.
+            _renderer.New<TryHostConditionalRenderingCommand>()->Set(Ref(evt), Ref(result), compare, isEqual);
+            _renderer.InvokeCommand();
+            return result.Result;
         }
 
         public unsafe bool TryHostConditionalRendering(ICounterEvent value, ICounterEvent compare, bool isEqual)

@@ -104,6 +104,9 @@ namespace Ryujinx.Graphics.Gpu
         private long _lastStatsEnqueued;
         private long _lastStatsPresented;
         private long _lastStatsDropped;
+        private long _frameStallCount;
+
+        public long FrameStallCount => Interlocked.Read(ref _frameStallCount);
 
         public bool IsFrameAvailable => _framesAvailable != 0;
 
@@ -339,7 +342,12 @@ namespace Ryujinx.Graphics.Gpu
         {
             targetFps = Math.Max(1, targetFps);
 
-            _unboundedPresentTargetFps = targetFps;
+            if (Interlocked.Exchange(ref _unboundedPresentTargetFps, targetFps) == targetFps)
+            {
+                // UIKit can repeat layout/touch updates every frame. An unchanged
+                // display rate must not reset the pacing clock or flood the log.
+                return;
+            }
             Interlocked.Exchange(ref _unboundedPresentTicksPerFrame, Math.Max(1, Stopwatch.Frequency / targetFps));
             Interlocked.Exchange(ref _lastUnboundedPresentTicks, 0);
             Logger.Info?.Print(LogClass.Gpu, $"Unbounded host presentation target set: fps={targetFps}.");
@@ -386,6 +394,16 @@ namespace Ryujinx.Graphics.Gpu
                 $"interval_dropped={dropped - _lastStatsDropped}, max_queued={maxQueued}, " +
                 $"total_enqueued={enqueued}, total_presented={presented}, total_dropped={dropped}, " +
                 $"frames_available={Volatile.Read(ref _framesAvailable)}.");
+
+            if (presented > 0 && presented == _lastStatsPresented)
+            {
+                Interlocked.Increment(ref _frameStallCount);
+                // This loop still runs when guest frame production stops. The ordinary
+                // PreFrame/AdvanceSequence snapshots do not, which hid the old stall.
+                Logger.Warning?.Print(LogClass.Gpu,
+                    $"GPU frame stall: sequence={_context.SequenceNumber}, sync={_context.SyncNumber}, " +
+                    $"deferred_actions={_context.DeferredActions.Count}, {_context.Renderer.GetDiagnosticSnapshot()}");
+            }
 
             _lastStatsEnqueued = enqueued;
             _lastStatsPresented = presented;

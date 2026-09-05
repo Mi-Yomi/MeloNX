@@ -73,6 +73,18 @@ namespace Ryujinx.Graphics.GAL
 
         void PreFrame();
 
+        /// <summary>
+        /// Submits deferred work that can unblock the guest when no new commands arrive.
+        /// Called only on the backend owner thread, between complete GAL commands.
+        /// Backends without deferred submissions need no idle service.
+        /// </summary>
+        void FlushPendingCommands() { }
+
+        /// <summary>
+        /// Returns observational progress counters without waiting for GPU completion.
+        /// </summary>
+        string GetDiagnosticSnapshot() => "backend_progress=unavailable";
+
         ICounterEvent ReportCounter(CounterType type, EventHandler<ulong> resultHandler, float divisor, bool hostReserved);
 
         void ResetCounter(CounterType type);

@@ -18,7 +18,6 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
         private readonly Dictionary<BufferHandle, BufferHandle> _bufferMap = new();
         private readonly HashSet<BufferHandle> _inFlight = [];
-        private readonly AutoResetEvent _inFlightChanged = new(false);
 
         internal BufferHandle CreateBufferHandle()
         {
@@ -44,9 +43,10 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             lock (_inFlight)
             {
                 _inFlight.Remove(threadedHandle);
+                // Waiters may be waiting for different handles. A single event
+                // wake can be consumed by an unrelated handle that is not ready.
+                Monitor.PulseAll(_inFlight);
             }
-
-            _inFlightChanged.Set();
         }
 
         internal void UnassignBuffer(BufferHandle threadedHandle)
@@ -94,26 +94,12 @@ namespace Ryujinx.Graphics.GAL.Multithreading
                 }
             }
 
-            bool signal = false;
-
-            while (true)
+            lock (_inFlight)
             {
-                lock (_inFlight)
+                while (_inFlight.Contains(handle))
                 {
-                    if (!_inFlight.Contains(handle))
-                    {
-                        break;
-                    }
+                    Monitor.Wait(_inFlight);
                 }
-
-                _inFlightChanged.WaitOne();
-                signal = true;
-            }
-
-            if (signal)
-            {
-                // Signal other threads which might still be waiting.
-                _inFlightChanged.Set();
             }
 
             return MapBuffer(handle);

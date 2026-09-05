@@ -881,6 +881,42 @@ namespace Ryujinx.HLE.HOS.Kernel.Process
             }
         }
 
+        internal ThreadMetadataSnapshot CaptureThreadMetadata()
+        {
+            const int maxThreads = 64;
+            KThread[] threads = new KThread[maxThreads];
+
+            // System.Threading.Lock has its own acquisition protocol. Monitor.TryEnter
+            // on this object would not protect the list used by lock (_threadingLock).
+            // Never acquire the kernel critical section or wait for another thread.
+            if (!_threadingLock.TryEnter())
+            {
+                return new(true, null, Array.Empty<ThreadMetadata>());
+            }
+
+            int count = 0;
+            int total;
+            try
+            {
+                total = _threads.Count;
+                for (var node = _threads.First; node != null && count < maxThreads; node = node.Next)
+                {
+                    threads[count++] = node.Value;
+                }
+            }
+            finally
+            {
+                _threadingLock.Exit();
+            }
+
+            // CLR references keep the managed metadata alive if a KThread retires.
+            // No native context, wait handle, guest memory or kernel object operation
+            // may be accessed here; do not extend its kernel reference-count lifetime.
+            ThreadMetadata[] metadata = new ThreadMetadata[count];
+            for (int i = 0; i < count; i++) metadata[i] = ThreadMetadata.Capture(threads[i]);
+            return new(false, total, metadata);
+        }
+
         public bool IsCpuCoreAllowed(int core)
         {
             return (Capabilities.AllowedCpuCoresMask & (1UL << core)) != 0;

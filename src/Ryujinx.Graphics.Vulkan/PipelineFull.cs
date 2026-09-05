@@ -3,6 +3,7 @@ using Ryujinx.Graphics.Vulkan.Queries;
 using Silk.NET.Vulkan;
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Ryujinx.Graphics.Vulkan
 {
@@ -11,13 +12,14 @@ namespace Ryujinx.Graphics.Vulkan
         private const ulong MinByteWeightForFlush = 256 * 1024 * 1024; // MiB
 
         private readonly List<(QueryPool, bool)> _activeQueries;
-        private CounterQueueEvent _activeConditionalRender;
 
         private readonly List<BufferedQuery> _pendingQueryCopies;
         private readonly List<BufferHolder> _activeBufferMirrors;
 
         private ulong _byteWeight;
         private int _disposalFlushDeferralDepth;
+        private long _queryCopiesRecorded;
+        private long _idleSubmissions;
 
         internal readonly struct DisposalFlushScope : IDisposable
         {
@@ -59,6 +61,7 @@ namespace Ryujinx.Graphics.Vulkan
             foreach (BufferedQuery query in _pendingQueryCopies)
             {
                 query.PoolCopy(Cbs);
+                Interlocked.Increment(ref _queryCopiesRecorded);
             }
 
             _pendingQueryCopies.Clear();
@@ -144,62 +147,18 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void EndHostConditionalRendering()
         {
-            if (Gd.Capabilities.SupportsConditionalRendering)
-            {
-                // Gd.ConditionalRenderingApi.CmdEndConditionalRendering(CommandBuffer);
-            }
-            else
-            {
-                // throw new NotSupportedException();
-            }
-
-            _activeConditionalRender?.ReleaseHostAccess();
-            _activeConditionalRender = null;
+            // This backend evaluates conditions on the CPU until native Vulkan
+            // conditional begin/end commands are implemented together.
         }
 
         public bool TryHostConditionalRendering(ICounterEvent value, ulong compare, bool isEqual)
         {
-            // Compare an event and a constant value.
-            if (value is CounterQueueEvent evt)
-            {
-                // Easy host conditional rendering when the check matches what GL can do:
-                //  - Event is of type samples passed.
-                //  - Result is not a combination of multiple queries.
-                //  - Comparing against 0.
-                //  - Event has not already been flushed.
-
-                if (compare == 0 && evt.Type == CounterType.SamplesPassed && evt.ClearCounter)
-                {
-                    if (!value.ReserveForHostAccess())
-                    {
-                        // If the event has been flushed, then just use the values on the CPU.
-                        // The query object may already be repurposed for another draw (eg. begin + end).
-                        return false;
-                    }
-
-                    if (Gd.Capabilities.SupportsConditionalRendering)
-                    {
-                        // var buffer = evt.GetBuffer().Get(Cbs, 0, sizeof(long)).Value;
-                        // var flags = isEqual ? ConditionalRenderingFlagsEXT.InvertedBitExt : 0;
-
-                        // var conditionalRenderingBeginInfo = new ConditionalRenderingBeginInfoEXT
-                        // {
-                        //     SType = StructureType.ConditionalRenderingBeginInfoExt,
-                        //     Buffer = buffer,
-                        //     Flags = flags,
-                        // };
-
-                        // Gd.ConditionalRenderingApi.CmdBeginConditionalRendering(CommandBuffer, conditionalRenderingBeginInfo);
-                    }
-
-                    _activeConditionalRender = evt;
-                    return true;
-                }
-            }
-
-            // The GPU will flush the queries to CPU and evaluate the condition there instead.
-
-            FlushPendingQuery(); // The thread will be stalled manually flushing the counter, so flush commands now.
+            // Advertising an extension does not implement native conditional
+            // rendering. Returning true without recording its begin/end commands
+            // makes rejected guest draws execute unconditionally. Publish query
+            // work before the caller waits and evaluates the result on the CPU;
+            // this fallback never reserves a query for unused host access.
+            FlushPendingQuery();
             return false;
         }
 
@@ -216,6 +175,28 @@ namespace Ryujinx.Graphics.Vulkan
                 FlushCommandsImpl();
             }
         }
+
+        /// <summary>
+        /// Submits work which can otherwise wait forever for the next guest draw.
+        /// Call only on the backend thread between complete GAL commands.
+        /// </summary>
+        public bool FlushPendingWorkAtIdle()
+        {
+            if (_disposalFlushDeferralDepth != 0 ||
+                (!AutoFlush.ShouldFlushQuery() && _byteWeight < MinByteWeightForFlush))
+            {
+                return false;
+            }
+
+            FlushCommandsImpl();
+            Interlocked.Increment(ref _idleSubmissions);
+            return true;
+        }
+
+        public string GetPendingWorkDiagnosticSnapshot() =>
+            $"pending_query_submission={AutoFlush.ShouldFlushQuery()}, disposal_weight={Volatile.Read(ref _byteWeight)}, " +
+            $"disposal_flush_depth={Volatile.Read(ref _disposalFlushDeferralDepth)}, " +
+            $"query_copies_recorded={Interlocked.Read(ref _queryCopiesRecorded)}, idle_submissions={Interlocked.Read(ref _idleSubmissions)}";
 
         public CommandBufferScoped GetPreloadCommandBuffer()
         {
@@ -274,6 +255,9 @@ namespace Ryujinx.Graphics.Vulkan
         {
             AutoFlush.RegisterFlush(DrawCount);
             EndRenderPass();
+            // A report can arrive after an upload/dispatch already ended the render pass.
+            // Such copies must precede submission and every following query reset.
+            CopyPendingQuery();
 
             foreach ((QueryPool queryPool, _) in _activeQueries)
             {
@@ -324,6 +308,8 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 EndRenderPass();
 
+                CopyPendingQuery();
+
                 Gd.Api.CmdResetQueryPool(CommandBuffer, pool, 0, 1);
 
                 if (fromSamplePool)
@@ -356,7 +342,17 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void CopyQueryResults(BufferedQuery query)
         {
-            _pendingQueryCopies.Add(query);
+            if (RenderPassActive)
+            {
+                _pendingQueryCopies.Add(query);
+            }
+            else
+            {
+                // There may be no later render pass. Record the copy now, before a
+                // pooled query can be reset, and let the idle service submit it.
+                query.PoolCopy(Cbs);
+                Interlocked.Increment(ref _queryCopiesRecorded);
+            }
 
             if (AutoFlush.RegisterPendingQuery())
             {

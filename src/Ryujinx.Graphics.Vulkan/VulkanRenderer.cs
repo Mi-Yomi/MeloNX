@@ -1082,6 +1082,30 @@ namespace Ryujinx.Graphics.Vulkan
         {
             SyncManager.Cleanup();
             TryRunPendingMemoryTrim();
+            LogNativeMemoryOwners();
+        }
+
+        public void FlushPendingCommands()
+        {
+            if (!_initialized || _pipeline == null)
+            {
+                return;
+            }
+
+            if (_pipeline.FlushPendingWorkAtIdle())
+            {
+                _counters?.Update();
+            }
+
+            LogNativeMemoryOwners();
+        }
+
+        public string GetDiagnosticSnapshot() =>
+            $"{_pipeline?.GetPendingWorkDiagnosticSnapshot() ?? "pipeline=uninitialized"}, " +
+            $"{_counters?.GetDiagnosticSnapshot() ?? "counters=uninitialized"}";
+
+        private void LogNativeMemoryOwners()
+        {
             long now = Environment.TickCount64;
             if (OperatingSystem.IsIOS() && now - _lastNativeOwnerSampleMilliseconds >= 10_000)
             {

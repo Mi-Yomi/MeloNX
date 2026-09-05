@@ -14,6 +14,10 @@ namespace Ryujinx.Tests.Graphics
         internal readonly ConcurrentQueue<(string Operation, int Thread)> Events = new();
         internal readonly ConcurrentQueue<(int Source, int Destination, int Size)> Copies = new();
         internal Func<nint, ulong, bool> PrepareHostMappingHandler { get; set; }
+        internal Action IdleHandler { get; set; }
+        internal Func<CounterType, EventHandler<ulong>, float, bool, ICounterEvent> ReportCounterHandler { get; set; }
+        internal Func<ICounterEvent, ulong, bool, bool> ConditionalRenderingHandler { get; set; }
+        internal Action EndConditionalRenderingHandler { get; set; }
         internal BufferAccess? LastBufferAccess { get; private set; }
         private long _nextHandle;
         public event EventHandler<ScreenCaptureImageInfo> ScreenCaptured { add { } remove { } }
@@ -59,7 +63,9 @@ namespace Ryujinx.Tests.Graphics
         public IProgram LoadProgramBinary(byte[] programBinary, bool hasFragmentShader, ShaderInfo info) => throw new NotSupportedException();
         public void UpdateCounters() => throw new NotSupportedException();
         public void PreFrame() => throw new NotSupportedException();
-        public ICounterEvent ReportCounter(CounterType type, EventHandler<ulong> resultHandler, float divisor, bool hostReserved) => throw new NotSupportedException();
+        public void FlushPendingCommands() => IdleHandler?.Invoke();
+        public ICounterEvent ReportCounter(CounterType type, EventHandler<ulong> resultHandler, float divisor, bool hostReserved) =>
+            ReportCounterHandler?.Invoke(type, resultHandler, divisor, hostReserved) ?? throw new NotSupportedException();
         public void ResetCounter(CounterType type) => throw new NotSupportedException();
         public void WaitSync(ulong id) => throw new NotSupportedException();
         public void Initialize(GraphicsDebugLevel logLevel) => throw new NotSupportedException();
@@ -129,8 +135,10 @@ namespace Ryujinx.Tests.Graphics
         public void SetViewports(ReadOnlySpan<Viewport> viewports) => throw new NotSupportedException();
         public void TextureBarrier() => throw new NotSupportedException();
         public void TextureBarrierTiled() => throw new NotSupportedException();
-        public bool TryHostConditionalRendering(ICounterEvent value, ulong compare, bool isEqual) => throw new NotSupportedException();
+        public bool TryHostConditionalRendering(ICounterEvent value, ulong compare, bool isEqual) =>
+            _renderer.ConditionalRenderingHandler?.Invoke(value, compare, isEqual) ?? throw new NotSupportedException();
         public bool TryHostConditionalRendering(ICounterEvent value, ICounterEvent compare, bool isEqual) => throw new NotSupportedException();
-        public void EndHostConditionalRendering() => throw new NotSupportedException();
+        public void EndHostConditionalRendering() =>
+            (_renderer.EndConditionalRenderingHandler ?? throw new NotSupportedException()).Invoke();
     }
 }

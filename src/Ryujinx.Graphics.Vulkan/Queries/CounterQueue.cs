@@ -15,13 +15,28 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         private readonly PipelineFull _pipeline;
 
         public CounterType Type { get; }
-        public bool Disposed { get; private set; }
+        private volatile bool _disposed;
+        public bool Disposed => _disposed;
 
         private readonly Queue<CounterQueueEvent> _events = new();
         private CounterQueueEvent _current;
 
         private ulong _accumulatedCounter;
         private int _waiterCount;
+        private CounterQueueEvent _activeEvent;
+        private long _reportsQueued;
+        private long _reportsRetired;
+        private long _waitTimeouts;
+        private readonly CancellationTokenSource _disposeCancellation = new();
+
+        internal CancellationToken DisposalToken => _disposeCancellation.Token;
+
+        internal void RegisterWaitTimeout() => Interlocked.Increment(ref _waitTimeouts);
+
+        internal string GetDiagnosticSnapshot() =>
+            $"counter_{(int)Type}_pending={Math.Max(0, Interlocked.Read(ref _reportsQueued) - Interlocked.Read(ref _reportsRetired))}, " +
+            $"counter_{(int)Type}_active={Volatile.Read(ref _activeEvent) != null}, " +
+            $"counter_{(int)Type}_retired={Interlocked.Read(ref _reportsRetired)}, counter_{(int)Type}_timeouts={Interlocked.Read(ref _waitTimeouts)}";
 
         private readonly Lock _lock = new();
 
@@ -63,7 +78,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
         public void ResetFutureCounters(CommandBuffer cmd, int count)
         {
             // Pre-emptively reset queries to avoid render pass splitting.
-            lock (_queryPool)
+            lock (_lock)
             {
                 count = Math.Min(count, _queryPool.Count);
 
@@ -84,31 +99,53 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
         private void EventConsumer()
         {
-            while (!Disposed)
+            CounterQueueEvent evt = null;
+            try
             {
-                CounterQueueEvent evt = null;
-                lock (_lock)
+                while (!Disposed)
                 {
-                    if (_events.Count > 0)
+                    if (evt == null)
                     {
-                        evt = _events.Dequeue();
+                        lock (_lock)
+                        {
+                            if (_events.Count > 0)
+                            {
+                                evt = _events.Dequeue();
+                                Volatile.Write(ref _activeEvent, evt);
+                            }
+                        }
+                    }
+
+                    if (evt == null)
+                    {
+                        _queuedEvent.WaitOne(); // No more events to go through, wait for more.
+                    }
+                    else if (evt.TryConsume(ref _accumulatedCounter, true,
+                        Volatile.Read(ref _waiterCount) == 0 ? _wakeSignal : null))
+                    {
+                        Interlocked.Increment(ref _reportsRetired);
+                        Volatile.Write(ref _activeEvent, null);
+                        evt = null;
+                    }
+                    // A timed-out query remains the current event. Preserve ordering,
+                    // do not publish its sentinel, and retry until completion or shutdown.
+
+                    if (Volatile.Read(ref _waiterCount) > 0)
+                    {
+                        _eventConsumed.Set();
                     }
                 }
-
-                if (evt == null)
+            }
+            finally
+            {
+                if (evt != null)
                 {
-                    _queuedEvent.WaitOne(); // No more events to go through, wait for more.
-                }
-                else
-                {
-                    // Spin-wait rather than sleeping if there are any waiters, by passing null instead of the wake signal.
-                    evt.TryConsume(ref _accumulatedCounter, true, _waiterCount == 0 ? _wakeSignal : null);
+                    evt.Dispose();
+                    Interlocked.Increment(ref _reportsRetired);
                 }
 
-                if (_waiterCount > 0)
-                {
-                    _eventConsumed.Set();
-                }
+                Volatile.Write(ref _activeEvent, null);
+                _eventConsumed.Set();
             }
         }
 
@@ -156,6 +193,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
                 _current.Complete(draws > 0 && Type != CounterType.TransformFeedbackPrimitivesWritten, divisor);
                 _events.Enqueue(_current);
+                Interlocked.Increment(ref _reportsQueued);
 
                 _current.OnResult += resultHandler;
 
@@ -188,19 +226,21 @@ namespace Ryujinx.Graphics.Vulkan.Queries
                 return;
             }
 
+            CounterQueueEvent last;
             lock (_lock)
             {
-                // Tell the queue to process all events.
-                while (_events.Count > 0)
+                last = _activeEvent;
+                foreach (CounterQueueEvent evt in _events)
                 {
-                    CounterQueueEvent flush = _events.Peek();
-                    if (!flush.TryConsume(ref _accumulatedCounter, true))
-                    {
-                        return; // If not blocking, then return when we encounter an event that is not ready yet.
-                    }
-
-                    _events.Dequeue();
+                    last = evt;
                 }
+            }
+
+            // Only EventConsumer may update the accumulated counter. Consuming here
+            // could overtake the event that the consumer already removed from the queue.
+            if (last != null)
+            {
+                FlushTo(last);
             }
         }
 
@@ -211,16 +251,25 @@ namespace Ryujinx.Graphics.Vulkan.Queries
 
             _wakeSignal.Set();
 
-            while (!evt.Disposed)
+            try
             {
-                _eventConsumed.WaitOne(1);
+                while (!evt.Disposed && !Disposed)
+                {
+                    _eventConsumed.WaitOne(1);
+                }
             }
-
-            Interlocked.Decrement(ref _waiterCount);
+            finally
+            {
+                Interlocked.Decrement(ref _waiterCount);
+            }
         }
 
         public void Dispose()
         {
+            // Wake a pending query before taking any queue/event locks. Shutdown
+            // must not depend on a GPU result which might never become available.
+            _disposeCancellation.Cancel();
+            _wakeSignal.Set();
             lock (_lock)
             {
                 while (_events.Count > 0)
@@ -228,9 +277,10 @@ namespace Ryujinx.Graphics.Vulkan.Queries
                     CounterQueueEvent evt = _events.Dequeue();
 
                     evt.Dispose();
+                    Interlocked.Increment(ref _reportsRetired);
                 }
 
-                Disposed = true;
+                _disposed = true;
             }
 
             _queuedEvent.Set();
@@ -247,6 +297,7 @@ namespace Ryujinx.Graphics.Vulkan.Queries
             _queuedEvent.Dispose();
             _wakeSignal.Dispose();
             _eventConsumed.Dispose();
+            _disposeCancellation.Dispose();
         }
     }
 }

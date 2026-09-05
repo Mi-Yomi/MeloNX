@@ -4,6 +4,7 @@ using LibHac.Fs;
 using LibHac.Fs.Shim;
 using LibHac.FsSystem;
 using LibHac.Tools.FsSystem;
+using Ryujinx.Common.Logging;
 using Ryujinx.Cpu;
 using Ryujinx.HLE.Debugger;
 using Ryujinx.HLE.FileSystem;
@@ -567,6 +568,47 @@ namespace Ryujinx.HLE.HOS
             lock (KernelContext.Processes)
             {
                 return KernelContext.Processes.Values.FirstOrDefault(x => x.IsApplication)?.DebugInterface;
+            }
+        }
+
+        /// <summary>
+        /// Logs bounded managed thread metadata when presentation has stopped. Never
+        /// suspends the guest, resolves symbols, reads guest memory or waits for a
+        /// process or kernel lock.
+        /// </summary>
+        public void LogApplicationThreadMetadataSnapshot(ulong processId, long stallCount)
+        {
+            if (Logger.Warning == null) return;
+
+            // TryGetValue is a lock-free lookup. The dictionary's Values snapshot and
+            // the external Processes lock used during teardown must not be taken here.
+            if (_isDisposed || !KernelContext.Processes.TryGetValue(processId, out KProcess process))
+            {
+                Logger.Warning?.Print(LogClass.Kernel,
+                    $"Guest stall threads v1: stall={stallCount}, pid={processId}, status=skipped, reason=process_unavailable.");
+                return;
+            }
+
+            ThreadMetadataSnapshot snapshot = process.CaptureThreadMetadata();
+            if (snapshot.ThreadListBusy)
+            {
+                Logger.Warning?.Print(LogClass.Kernel,
+                    $"Guest stall threads v1: stall={stallCount}, pid={processId}, status=skipped, reason=thread_list_busy, total=unknown.");
+                return;
+            }
+
+            Logger.Warning?.Print(LogClass.Kernel,
+                $"Guest stall threads v1: stall={stallCount}, pid={processId}, status=captured, consistency=best_effort_racy, " +
+                $"total={snapshot.TotalThreads}, captured={snapshot.Threads.Length}, truncated={snapshot.TruncatedThreads}, " +
+                "guest_memory_read=False, pc=unknown, active_wait_handles=unknown.");
+            foreach (ThreadMetadata thread in snapshot.Threads)
+            {
+                string mutexOwner = thread.MutexOwnerUid?.ToString() ?? "none";
+                Logger.Warning?.Print(LogClass.Kernel,
+                    $"Guest stall thread v1: stall={stallCount}, pid={processId}, uid={thread.ThreadUid}, host_name=\"{thread.HostName}\", " +
+                    $"sched_flags=0x{(ushort)thread.SchedFlags:x4}, waiting_sync={thread.WaitingSync}, " +
+                    $"waiting_arbitration={thread.WaitingInArbitration}, mutex_owner_uid={mutexOwner}, mutex_address=0x{thread.MutexAddress:x}, " +
+                    $"termination_requested={thread.TerminationRequested}, current_core={thread.CurrentCore}, priority={thread.DynamicPriority}.");
             }
         }
 

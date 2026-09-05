@@ -89,6 +89,7 @@ namespace Ryujinx.Library
         private volatile bool _isStopped;
         private int _stopRequested;
         private int _disposed;
+        private long _lastGuestThreadStallCount;
 
         public bool _ranFirstFrame;
 
@@ -241,6 +242,13 @@ namespace Ryujinx.Library
                             Device.ProcessFrame();
                             Device.Statistics.RecordFifoEnd();
                         }
+                        else
+                        {
+                            // A single-threaded backend also needs to submit pending
+                            // queries when the guest stops producing FIFO commands.
+                            // ThreadedRenderer services this on its own backend loop.
+                            Device.Gpu.Renderer.FlushPendingCommands();
+                        }
 
                         if (Device.PresentLoop(SwapBuffers))
                         {
@@ -251,6 +259,8 @@ namespace Ryujinx.Library
                              }
 
                         }
+
+                        LogGuestThreadsOnFrameStall();
 
                         if (_ticks >= _ticksPerFrame)
                         {
@@ -309,6 +319,30 @@ namespace Ryujinx.Library
             // dispose guest/GPU resources on the requesting thread.
             _pauseEvent.Set();
             _inputUpdatedEvent.Set();
+        }
+
+        private void LogGuestThreadsOnFrameStall()
+        {
+            long stallCount = Device.Gpu.Window.FrameStallCount;
+            if (stallCount == _lastGuestThreadStallCount) return;
+            _lastGuestThreadStallCount = stallCount;
+
+            if (_isStopped || _isPaused || Volatile.Read(ref _stopRequested) != 0 || Logger.Warning == null) return;
+
+            try
+            {
+                // ActiveApplication uses a dictionary TryGetValue, without taking
+                // the process-list lock that termination may hold for a long time.
+                ulong processId = Device.Processes.ActiveApplication.ProcessId;
+                Device.System.LogApplicationThreadMetadataSnapshot(processId, stallCount);
+            }
+            catch (Exception exception)
+            {
+                // A diagnostic failure must not turn a recoverable stall into a crash.
+                // No exception message/guest strings or expensive unwind is requested.
+                Logger.Warning?.Print(LogClass.Kernel,
+                    $"Guest stall threads v1: stall={stallCount}, status=skipped, reason=snapshot_error, error_type={exception.GetType().Name}.");
+            }
         }
 
         public static void ProcessMainThreadQueue()

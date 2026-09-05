@@ -1082,6 +1082,10 @@ namespace Ryujinx.Ava.Systems
                         Device.ProcessFrame();
                         Device.Statistics.RecordFifoEnd();
                     }
+                    else
+                    {
+                        Device.Gpu.Renderer.FlushPendingCommands();
+                    }
 
                     while (Device.ConsumeFrameAvailable())
                     {

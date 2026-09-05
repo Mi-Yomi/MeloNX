@@ -32,6 +32,13 @@ namespace Ryujinx.Common.Memory
     /// </summary>
     internal sealed class BoundedArrayPool<T>
     {
+        // Sparse CPU mirrors rent several 4-KiB pages before returning them together.
+        // Keeping only one array of each length makes every following burst allocate
+        // all but one page again. Small duplicates share the existing global limits
+        // without evicting large conversion arrays to make room for cheap pages.
+        // Large buffers still retain only one instance of each length.
+        private const int SmallArrayBytes = 4 * 1024;
+
         private readonly record struct Entry(T[] Array, long ReturnedAt, MemoryOwnerPurpose Purpose);
         private struct PurposeStatistics
         {
@@ -143,7 +150,7 @@ namespace Ryujinx.Common.Memory
                 _purposes[(int)purpose].LeasedBytes -= bytes;
                 int index = LowerBound(array.Length);
                 if (bytes == 0 || bytes > _maxArrayBytes || _maxRetainedArrays == 0 ||
-                    (index < _entries.Count && _entries[index].Array.Length == array.Length))
+                    (bytes > SmallArrayBytes && index < _entries.Count && _entries[index].Array.Length == array.Length))
                 {
                     Discard(bytes, purpose);
                     return;
@@ -152,7 +159,11 @@ namespace Ryujinx.Common.Memory
                 while (_entries.Count != 0 &&
                     (_retainedBytes > _maxRetainedBytes - bytes || _entries.Count >= _maxRetainedArrays))
                 {
-                    RemoveOldest();
+                    if (!RemoveOldest(smallOnly: bytes <= SmallArrayBytes))
+                    {
+                        Discard(bytes, purpose);
+                        return;
+                    }
                 }
 
                 index = LowerBound(array.Length);
@@ -163,11 +174,16 @@ namespace Ryujinx.Common.Memory
             }
         }
 
-        private void RemoveOldest()
+        private bool RemoveOldest(bool smallOnly = false)
         {
-            int oldest = 0;
-            for (int i = 1; i < _entries.Count; i++)
-                if (_entries[i].ReturnedAt < _entries[oldest].ReturnedAt) oldest = i;
+            int oldest = -1;
+            for (int i = 0; i < _entries.Count; i++)
+            {
+                if (smallOnly && Bytes(_entries[i].Array) > SmallArrayBytes) continue;
+                if (oldest < 0 || _entries[i].ReturnedAt < _entries[oldest].ReturnedAt) oldest = i;
+            }
+            if (oldest < 0) return false;
+
             Entry entry = _entries[oldest];
             long bytes = Bytes(entry.Array);
             _entries.RemoveAt(oldest);
@@ -175,6 +191,7 @@ namespace Ryujinx.Common.Memory
             _purposes[(int)entry.Purpose].RetainedBytes -= bytes;
             _purposes[(int)entry.Purpose].RetainedArrays--;
             Discard(bytes, entry.Purpose);
+            return true;
         }
 
         private void Discard(long bytes, MemoryOwnerPurpose purpose)

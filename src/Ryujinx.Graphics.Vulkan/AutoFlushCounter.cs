@@ -30,7 +30,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         private long _lastFlush;
         private ulong _lastDrawCount;
-        private bool _hasPendingQuery;
+        private volatile bool _hasPendingQuery;
         private int _consecutiveQueries;
         private int _queryCount;
 
