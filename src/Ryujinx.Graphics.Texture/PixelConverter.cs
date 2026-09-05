@@ -22,7 +22,7 @@ namespace Ryujinx.Graphics.Texture
 
         public unsafe static MemoryOwner<byte> ConvertR4G4ToR4G4B4A4(ReadOnlySpan<byte> data, int width)
         {
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2, MemoryOwnerPurpose.Decode);
             Span<byte> outputSpan = output.Span;
 
             (int remainder, int outRemainder, int height) = GetLineRemainders(data.Length, width, 1, 2);
@@ -74,7 +74,7 @@ namespace Ryujinx.Graphics.Texture
 
         public static MemoryOwner<byte> ConvertR5G6B5ToR8G8B8A8(ReadOnlySpan<byte> data, int width)
         {
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2, MemoryOwnerPurpose.Decode);
             int offset = 0;
             int outOffset = 0;
 
@@ -111,7 +111,7 @@ namespace Ryujinx.Graphics.Texture
 
         public static MemoryOwner<byte> ConvertR5G5B5ToR8G8B8A8(ReadOnlySpan<byte> data, int width, bool forceAlpha)
         {
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2, MemoryOwnerPurpose.Decode);
             int offset = 0;
             int outOffset = 0;
 
@@ -148,7 +148,7 @@ namespace Ryujinx.Graphics.Texture
 
         public static MemoryOwner<byte> ConvertA1B5G5R5ToR8G8B8A8(ReadOnlySpan<byte> data, int width)
         {
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2, MemoryOwnerPurpose.Decode);
             int offset = 0;
             int outOffset = 0;
 
@@ -185,7 +185,7 @@ namespace Ryujinx.Graphics.Texture
 
         public static MemoryOwner<byte> ConvertR4G4B4A4ToR8G8B8A8(ReadOnlySpan<byte> data, int width)
         {
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(data.Length * 2, MemoryOwnerPurpose.Decode);
             int offset = 0;
             int outOffset = 0;
 

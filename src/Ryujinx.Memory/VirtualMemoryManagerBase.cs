@@ -130,7 +130,7 @@ namespace Ryujinx.Memory
             }
             else
             {
-                MemoryOwner<byte> memoryOwner = MemoryOwner<byte>.Rent(size);
+                MemoryOwner<byte> memoryOwner = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.GuestBridge);
 
                 Read(va, memoryOwner.Span);
 

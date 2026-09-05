@@ -318,7 +318,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             }
             else
             {
-                MemoryOwner<byte> memoryOwner = MemoryOwner<byte>.Rent(size);
+                MemoryOwner<byte> memoryOwner = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.GuestBridge);
 
                 ReadImpl(va, memoryOwner.Span, tracked);
 

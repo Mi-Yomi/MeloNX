@@ -99,6 +99,90 @@ namespace Ryujinx.Tests.Graphics
         }
 
         [Test]
+        public void PurposeAccountingFollowsActualCapacityAcrossReuseAndTrim()
+        {
+            BoundedArrayPool<ushort> pool = new(4096, 8, 2048);
+            ushort[] decoded = pool.Rent(512, MemoryOwnerPurpose.Decode);
+            Assert.That(pool.GetStatistics(MemoryOwnerPurpose.Decode).CreatedBytes, Is.EqualTo(1024));
+            pool.Return(decoded, MemoryOwnerPurpose.Decode);
+
+            ushort[] upload = pool.Rent(300, MemoryOwnerPurpose.Upload);
+            Assert.That(upload, Is.SameAs(decoded));
+            Assert.That(pool.GetStatistics(MemoryOwnerPurpose.Decode).RetainedBytes, Is.Zero);
+            MemoryOwnerPoolStatistics active = pool.GetStatistics(MemoryOwnerPurpose.Upload);
+            Assert.That(active.LeasedBytes, Is.EqualTo(1024), "Charge capacity, not requested length.");
+            Assert.That(active.PeakLeasedBytes, Is.EqualTo(1024));
+            Assert.That(active.Reuses, Is.EqualTo(1));
+            Assert.That(active.CreatedArrays, Is.Zero);
+            pool.Trim(0);
+            Assert.That(pool.GetStatistics(MemoryOwnerPurpose.Upload).LeasedBytes, Is.EqualTo(1024));
+            pool.Return(upload, MemoryOwnerPurpose.Upload);
+            Assert.That(pool.GetStatistics(MemoryOwnerPurpose.Upload).RetainedBytes, Is.EqualTo(1024));
+            pool.Trim(0);
+            Assert.That(pool.GetStatistics(MemoryOwnerPurpose.Upload).DiscardedBytes, Is.EqualTo(1024));
+            Assert.That(pool.GetStatistics(MemoryOwnerPurpose.Upload).DiscardedArrays, Is.EqualTo(1));
+            Assert.That(pool.GetStatistics().LeasedBytes, Is.Zero);
+            Assert.That(pool.GetStatistics().RetainedBytes, Is.Zero);
+        }
+
+        [Test]
+        public void ConcurrentPurposeTotalsReconcileAfterOutstandingJobsReturn()
+        {
+            BoundedArrayPool<byte> pool = new(32768, 16, 16384);
+            Parallel.For(0, 1000, i =>
+            {
+                MemoryOwnerPurpose purpose = (MemoryOwnerPurpose)(i % (int)MemoryOwnerPurpose.Count);
+                byte[] array = pool.Rent(256 + i % 16 * 64, purpose);
+                array.AsSpan().Fill((byte)i);
+                if (i % 7 == 0) pool.Trim(4096);
+                Assert.That(array[0], Is.EqualTo((byte)i));
+                pool.Return(array, purpose);
+            });
+
+            MemoryOwnerPoolStatistics total = pool.GetStatistics();
+            MemoryOwnerPoolStatistics[] purposes = Enumerable.Range(0, (int)MemoryOwnerPurpose.Count)
+                .Select(i => pool.GetStatistics((MemoryOwnerPurpose)i)).ToArray();
+            Assert.That(purposes.Sum(p => p.LeasedBytes), Is.Zero);
+            Assert.That(purposes.Sum(p => p.RetainedBytes), Is.EqualTo(total.RetainedBytes));
+            Assert.That(purposes.Sum(p => p.Rents), Is.EqualTo(total.Rents));
+            Assert.That(purposes.Sum(p => p.Reuses), Is.EqualTo(total.Reuses));
+            Assert.That(purposes.Sum(p => p.CreatedBytes), Is.EqualTo(total.CreatedBytes));
+            Assert.That(purposes.Sum(p => p.CreatedArrays), Is.EqualTo(total.CreatedArrays));
+            Assert.That(purposes.Sum(p => p.DiscardedBytes), Is.EqualTo(total.DiscardedBytes));
+            Assert.That(purposes.Sum(p => p.DiscardedArrays), Is.EqualTo(total.DiscardedArrays));
+            Assert.That(total.CreatedBytes - total.DiscardedBytes, Is.EqualTo(total.RetainedBytes));
+        }
+
+        [Test]
+        public void PurposeSurvivesOwnershipTransferAndDoubleDispose()
+        {
+            MemoryOwnerPoolStatistics before = MemoryOwner<long>.GetPoolStatistics(MemoryOwnerPurpose.GuestBridge);
+            MemoryOwner<long> owner = MemoryOwner<long>.RentCopy(new long[] { 1, 2, 3 }, MemoryOwnerPurpose.GuestBridge);
+            Task.Run(() =>
+            {
+                Assert.That(owner.Span[2], Is.EqualTo(3));
+                owner.Dispose();
+                owner.Dispose();
+            }).GetAwaiter().GetResult();
+            MemoryOwnerPoolStatistics after = MemoryOwner<long>.GetPoolStatistics(MemoryOwnerPurpose.GuestBridge);
+            Assert.That(after.Rents - before.Rents, Is.EqualTo(1));
+            Assert.That(after.LeasedBytes, Is.EqualTo(before.LeasedBytes));
+        }
+
+        [Test]
+        public void InvalidPurposeDoesNotMutatePoolAndEmptyRentCreatesNoArray()
+        {
+            BoundedArrayPool<byte> pool = new(4096, 8, 2048);
+            Assert.Throws<ArgumentOutOfRangeException>(() => pool.Rent(32, MemoryOwnerPurpose.Count));
+            Assert.That(pool.GetStatistics().Rents, Is.Zero);
+            byte[] empty = pool.Rent(0, MemoryOwnerPurpose.Readback);
+            pool.Return(empty, MemoryOwnerPurpose.Readback);
+            Assert.That(pool.GetStatistics().CreatedArrays, Is.Zero);
+            Assert.That(pool.GetStatistics().DiscardedArrays, Is.Zero);
+            Assert.That(pool.GetStatistics().LeasedBytes, Is.Zero);
+        }
+
+        [Test]
         public void MemoryOwnerDisposeIsIdempotentAndDisposedAccessIsRejected()
         {
             MemoryOwner<byte> owner = MemoryOwner<byte>.RentCleared(127);

@@ -200,7 +200,7 @@ namespace Ryujinx.Graphics.Gpu.Engine.InlineToMemory
                     if (target != null)
                     {
                         target.SynchronizeMemory();
-                        MemoryOwner<byte> dataCopy = MemoryOwner<byte>.RentCopy(data);
+                        MemoryOwner<byte> dataCopy = MemoryOwner<byte>.RentCopy(data, MemoryOwnerPurpose.Upload);
                         target.SetData(dataCopy, 0, 0, new GAL.Rectangle<int>(_dstX, _dstY, _lineLengthIn / target.Info.FormatInfo.BytesPerPixel, _lineCount));
                         target.SignalModified();
 

@@ -22,7 +22,7 @@ namespace Ryujinx.Graphics.Texture
                 size += Math.Max(1, width >> l) * Math.Max(1, height >> l) * Math.Max(1, depth >> l) * layers * 4;
             }
 
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.Decode);
 
             Span<byte> tile = stackalloc byte[BlockWidth * BlockHeight * 4];
 
@@ -110,7 +110,7 @@ namespace Ryujinx.Graphics.Texture
                 size += Math.Max(1, width >> l) * Math.Max(1, height >> l) * Math.Max(1, depth >> l) * layers * 4;
             }
 
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.Decode);
 
             Span<byte> tile = stackalloc byte[BlockWidth * BlockHeight * 4];
 
@@ -205,7 +205,7 @@ namespace Ryujinx.Graphics.Texture
                 size += Math.Max(1, width >> l) * Math.Max(1, height >> l) * Math.Max(1, depth >> l) * layers * 4;
             }
 
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.Decode);
 
             Span<byte> tile = stackalloc byte[BlockWidth * BlockHeight * 4];
             Span<byte> rPal = stackalloc byte[8];
@@ -305,7 +305,7 @@ namespace Ryujinx.Graphics.Texture
             // Backends currently expect a stride alignment of 4 bytes, so output width must be aligned.
             int alignedWidth = BitUtils.AlignUp(width, 4);
 
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.Decode);
             Span<byte> outputSpan = output.Span;
 
             ReadOnlySpan<ulong> data64 = MemoryMarshal.Cast<byte, ulong>(data);
@@ -413,7 +413,7 @@ namespace Ryujinx.Graphics.Texture
             // Backends currently expect a stride alignment of 4 bytes, so output width must be aligned.
             int alignedWidth = BitUtils.AlignUp(width, 2);
 
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.Decode);
 
             ReadOnlySpan<ulong> data64 = MemoryMarshal.Cast<byte, ulong>(data);
 
@@ -535,7 +535,7 @@ namespace Ryujinx.Graphics.Texture
                 size += Math.Max(1, width >> l) * Math.Max(1, height >> l) * Math.Max(1, depth >> l) * layers * 8;
             }
 
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.Decode);
             Span<byte> outputSpan = output.Span;
 
             int inputOffset = 0;
@@ -574,7 +574,7 @@ namespace Ryujinx.Graphics.Texture
                 size += Math.Max(1, width >> l) * Math.Max(1, height >> l) * Math.Max(1, depth >> l) * layers * 4;
             }
 
-            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size);
+            MemoryOwner<byte> output = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.Decode);
             Span<byte> outputSpan = output.Span;
 
             int inputOffset = 0;

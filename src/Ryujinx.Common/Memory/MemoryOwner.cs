@@ -23,20 +23,24 @@ namespace Ryujinx.Common.Memory
 
         public static MemoryOwnerPoolStatistics GetPoolStatistics() => Pool.GetStatistics();
 
+        public static MemoryOwnerPoolStatistics GetPoolStatistics(MemoryOwnerPurpose purpose) => Pool.GetStatistics(purpose);
+
         /// <summary>Releases only idle references; existing owners and queued transfers stay valid.</summary>
         public static long TrimPool(long targetRetainedBytes = 0) => Pool.Trim(targetRetainedBytes);
 
         private readonly int _length;
+        private readonly MemoryOwnerPurpose _purpose;
         private T[]? _array;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="MemoryOwner{T}"/> class with the specified parameters.
         /// </summary>
         /// <param name="length">The length of the new memory buffer to use</param>
-        private MemoryOwner(int length)
+        private MemoryOwner(int length, MemoryOwnerPurpose purpose)
         {
             _length = length;
-            _array = Pool.Rent(length);
+            _purpose = purpose;
+            _array = Pool.Rent(length, purpose);
         }
 
         /// <summary>
@@ -46,7 +50,7 @@ namespace Ryujinx.Common.Memory
         /// <returns>A <see cref="MemoryOwner{T}"/> instance of the requested length</returns>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="length"/> is not valid</exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static MemoryOwner<T> Rent(int length) => new(length);
+        public static MemoryOwner<T> Rent(int length, MemoryOwnerPurpose purpose = MemoryOwnerPurpose.Unclassified) => new(length, purpose);
 
         /// <summary>
         /// Creates a new <see cref="MemoryOwner{T}"/> instance with the specified length and the content cleared.
@@ -55,9 +59,9 @@ namespace Ryujinx.Common.Memory
         /// <returns>A <see cref="MemoryOwner{T}"/> instance of the requested length and the content cleared</returns>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when <paramref name="length"/> is not valid</exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static MemoryOwner<T> RentCleared(int length)
+        public static MemoryOwner<T> RentCleared(int length, MemoryOwnerPurpose purpose = MemoryOwnerPurpose.Unclassified)
         {
-            MemoryOwner<T> result = new(length);
+            MemoryOwner<T> result = new(length, purpose);
 
             result._array.AsSpan(0, length).Clear();
 
@@ -69,9 +73,9 @@ namespace Ryujinx.Common.Memory
         /// </summary>
         /// <param name="buffer">The buffer to copy</param>
         /// <returns>A <see cref="MemoryOwner{T}"/> instance with the same length and content as <paramref name="buffer"/></returns>
-        public static MemoryOwner<T> RentCopy(ReadOnlySpan<T> buffer)
+        public static MemoryOwner<T> RentCopy(ReadOnlySpan<T> buffer, MemoryOwnerPurpose purpose = MemoryOwnerPurpose.Unclassified)
         {
-            MemoryOwner<T> result = new(buffer.Length);
+            MemoryOwner<T> result = new(buffer.Length, purpose);
 
             buffer.CopyTo(result._array);
 
@@ -135,7 +139,7 @@ namespace Ryujinx.Common.Memory
 
             if (array is not null)
             {
-                Pool.Return(array);
+                Pool.Return(array, _purpose);
             }
         }
 

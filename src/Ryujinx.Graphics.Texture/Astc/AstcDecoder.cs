@@ -294,7 +294,7 @@ namespace Ryujinx.Graphics.Texture.Astc
             int layers,
             out MemoryOwner<byte> decoded)
         {
-            decoded = MemoryOwner<byte>.Rent(QueryDecompressedSize(width, height, depth, levels, layers));
+            decoded = MemoryOwner<byte>.Rent(QueryDecompressedSize(width, height, depth, levels, layers), MemoryOwnerPurpose.Decode);
 
             AstcDecoder decoder = new(data, decoded.Memory, blockWidth, blockHeight, width, height, depth, levels, layers);
 

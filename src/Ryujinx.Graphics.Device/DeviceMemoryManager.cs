@@ -144,7 +144,7 @@ namespace Ryujinx.Graphics.Device
             }
             else
             {
-                MemoryOwner<byte> memoryOwner = MemoryOwner<byte>.Rent(size);
+                MemoryOwner<byte> memoryOwner = MemoryOwner<byte>.Rent(size, MemoryOwnerPurpose.GuestBridge);
 
                 ReadImpl(va, memoryOwner.Span);
 
