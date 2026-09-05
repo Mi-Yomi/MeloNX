@@ -40,12 +40,17 @@ namespace Ryujinx.Tests.Cpu
             }
         }
 
-        [Test]
-        public void CrossPartitionUnmapDefersDiscardUntilLiveViewsArePreserved()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void CrossPartitionUnmapPreservesLiveViewsAndDiscardsOnlyWholeHostPages(bool releaseWholeHostPage)
         {
             const ulong PartitionSize = 1UL << 25;
             const byte LeftValue = 0x35;
             const byte RightValue = 0x7a;
+            ulong hostPageSize = MemoryBlock.GetPageSize();
+            ulong releasedSize = releaseWholeHostPage ? hostPageSize : GuestPageSize;
+            ulong leftAddress = PartitionSize - releasedSize;
+            ulong rightAddress = PartitionSize + (2 * releasedSize);
 
             using MemoryBlock backing = new(0x20000, MemoryAllocationFlags.Reserve);
             List<(ulong Offset, ulong Size)> discardRequests = [];
@@ -59,10 +64,10 @@ namespace Ryujinx.Tests.Cpu
                 (block, offset, size) =>
                 {
                     discardRequests.Add((offset, size));
-
-                    Assert.That(memory.GetSpan(PartitionSize - GuestPageSize, 1)[0], Is.EqualTo(LeftValue));
-                    Assert.That(memory.GetSpan(PartitionSize + (2 * GuestPageSize), 1)[0], Is.EqualTo(RightValue));
-
+                    Assert.That(offset % hostPageSize, Is.Zero);
+                    Assert.That(size % hostPageSize, Is.Zero);
+                    Assert.That(memory.GetSpan(leftAddress, (int)releasedSize).ToArray(), Is.All.EqualTo(LeftValue));
+                    Assert.That(memory.GetSpan(rightAddress, (int)releasedSize).ToArray(), Is.All.EqualTo(RightValue));
                     return true;
                 });
 
@@ -70,17 +75,24 @@ namespace Ryujinx.Tests.Cpu
 
             try
             {
-                MapFreshHeap(memory, PartitionSize - GuestPageSize, GuestPageSize);
-                MapFreshHeap(memory, PartitionSize, GuestPageSize);
-                MapFreshHeap(memory, PartitionSize + (2 * GuestPageSize), GuestPageSize);
+                MapFreshHeap(memory, leftAddress, releasedSize);
+                MapFreshHeap(memory, PartitionSize, releasedSize);
+                MapFreshHeap(memory, rightAddress, releasedSize);
+                memory.Write(leftAddress, Enumerable.Repeat(LeftValue, (int)releasedSize).ToArray());
+                memory.Write(rightAddress, Enumerable.Repeat(RightValue, (int)releasedSize).ToArray());
+                memory.Unmap(PartitionSize, releasedSize);
 
-                memory.Write(PartitionSize - GuestPageSize, LeftValue);
-                memory.Write(PartitionSize + (2 * GuestPageSize), RightValue);
+                // On a 16 KiB host the 4 KiB hole shares its native page with the live right
+                // neighbour. No discard is permitted. A full host-page hole must be reclaimed.
+                bool sharesHostPage = releasedSize < hostPageSize && rightAddress < PartitionSize + hostPageSize;
+                Assert.That(discardRequests, Has.Count.EqualTo(sharesHostPage ? 0 : 1));
+                if (!sharesHostPage)
+                {
+                    Assert.That(discardRequests[0].Size, Is.EqualTo(hostPageSize));
+                }
 
-                memory.Unmap(PartitionSize, GuestPageSize);
-
-                Assert.That(discardRequests, Has.Count.EqualTo(1));
-                Assert.That(discardRequests[0].Size, Is.EqualTo(MemoryBlock.GetPageSize()));
+                Assert.That(memory.GetSpan(leftAddress, (int)releasedSize).ToArray(), Is.All.EqualTo(LeftValue));
+                Assert.That(memory.GetSpan(rightAddress, (int)releasedSize).ToArray(), Is.All.EqualTo(RightValue));
             }
             finally
             {
