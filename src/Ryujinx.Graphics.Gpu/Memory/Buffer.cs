@@ -1027,7 +1027,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="address">Address of the region to copy</param>
         /// <param name="size">Size of the region to copy in bytes</param>
         /// <returns>A span with <paramref name="dataSpan"/>, and the data for all modified ranges if any</returns>
-        private ReadOnlySpan<byte> CopyFromDependantVirtualBuffers(ReadOnlySpan<byte> dataSpan, ulong address, ulong size)
+        internal ReadOnlySpan<byte> CopyFromDependantVirtualBuffers(ReadOnlySpan<byte> dataSpan, ulong address, ulong size)
         {
             _virtualDependenciesLock.EnterReadLock();
 
@@ -1055,7 +1055,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                             int physicalOffset = (int)(mAddress - Address);
                             int virtualOffset = virtualBuffer.Range.FindOffset(new(mAddress, mSize));
 
-                            _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)size);
+                            _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
                             virtualBuffer.GetData(storage.AsSpan().Slice((int)(mAddress - address), (int)mSize), virtualOffset, (int)mSize);
                         });
                     }
