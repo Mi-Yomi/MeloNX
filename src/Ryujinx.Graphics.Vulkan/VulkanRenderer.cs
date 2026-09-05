@@ -2,6 +2,7 @@ using Gommon;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Helper;
 using Ryujinx.Common.Logging;
+using Ryujinx.Common.Memory;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Shader;
 using Ryujinx.Graphics.Shader.Translation;
@@ -1262,6 +1263,10 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
+            // Release idle scratch roots before scheduled GC. No live owner is invalidated.
+            long scratchReleased = OperatingSystem.IsIOS() && availableMemoryBytes <= 512UL * 1024 * 1024
+                ? MemoryOwner<byte>.TrimPool(16L * 1024 * 1024)
+                : 0;
             var deviceMemoryBefore = GetDeviceMemoryBudget();
             MemoryAllocatorStatistics allocatorBefore = MemoryAllocator.GetStatistics();
             long now = Environment.TickCount64;
@@ -1371,7 +1376,7 @@ namespace Ryujinx.Graphics.Vulkan
                 LogClass.Gpu,
                 $"Renderer memory trim: critical_requested={aggressive}, heavy_cache_trim={runAggressiveTrim}, " +
                 $"descriptor_trim={runReusableDescriptorTrim}, managed_gc={runManagedCollection}, device_idle_wait={deviceIdleRequired}, " +
-                $"available_memory={availableMemoryBytes}, managed_at_decision={managedAtDecision}, " +
+                $"available_memory={availableMemoryBytes}, managed_at_decision={managedAtDecision}, scratch_idle_released_bytes={scratchReleased}, " +
                 $"retired_submissions={commandBufferTrim.RetiredSubmissions}, " +
                 $"command_buffers_total={commandBufferTrim.TotalCommandBuffers}, " +
                 $"command_buffers_queued_before={commandBufferTrim.QueuedBefore}, " +

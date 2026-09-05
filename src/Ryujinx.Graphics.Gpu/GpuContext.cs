@@ -1,6 +1,7 @@
 using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
+using Ryujinx.Common.Memory;
 using Ryujinx.Graphics.Device;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.GAL.Multithreading;
@@ -424,6 +425,9 @@ namespace Ryujinx.Graphics.Gpu
                 {
                     _lastOwnerSampleMilliseconds = now;
                     Logger.Info?.Print(LogClass.Gpu, "GPU memory owners v1: accounting=logical_not_additive, " + GetCrashDiagnosticSnapshot());
+                    MemoryOwnerPoolStatistics scratch = MemoryOwner<byte>.GetPoolStatistics();
+                    Logger.Info?.Print(LogClass.Gpu,
+                        $"Scratch byte pool v1: accounting=managed_array_payload_not_resident, retained_bytes={scratch.RetainedBytes}, leased_bytes={scratch.LeasedBytes}, peak_leased_bytes={scratch.PeakLeasedBytes}, retained_arrays={scratch.RetainedArrays}, rents={scratch.Rents}, reuses={scratch.Reuses}, discarded_bytes={scratch.DiscardedBytes}.");
                     foreach (var entry in PhysicalMemoryRegistry)
                         Logger.Info?.Print(LogClass.Gpu, $"Guest memory owners v1: pid={entry.Key}, accounting=virtual_or_logical_not_resident, " + entry.Value.GetMemoryOwnerSnapshot());
                 }

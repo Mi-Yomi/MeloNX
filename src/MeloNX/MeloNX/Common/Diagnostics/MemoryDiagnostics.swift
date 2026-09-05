@@ -196,6 +196,8 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                     "buffer_cache_recovery_available_bytes": 768 * 1024 * 1024,
                     "buffer_cache_recovery_seconds": 20,
                     "headroom_observation_only_abi": true,
+                    "scratch_byte_pool_max_idle_bytes": 64 * 1024 * 1024,
+                    "scratch_pool_max_idle_arrays_per_type": 64,
                     "ios_buffer_cache_emergency_limit_mib": 32,
                     "ios_texture_cache_limit_mib": 128,
                     "ios_vulkan_command_buffers": 8,
