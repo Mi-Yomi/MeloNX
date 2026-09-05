@@ -30,8 +30,8 @@ namespace Ryujinx.Tests.Graphics
                         producerThread = Environment.CurrentManagedThreadId;
                         try
                         {
-                            first = renderer.CreateBuffer(16);
-                            second = renderer.CreateBuffer(16);
+                            first = renderer.CreateBuffer(16, BufferAccess.Default);
+                            second = renderer.CreateBuffer(16, BufferAccess.Default);
                             renderer.SetBufferData(first, 0, new byte[] { 1, 2, 3, 4 });
                             for (int i = 0; i < copies; i++) renderer.Pipeline.CopyBuffer(first, second, 0, 0, 4);
                         }
