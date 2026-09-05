@@ -14,15 +14,17 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly struct HostMemoryAllocation
         {
             public readonly Auto<MemoryAllocation> Allocation;
+            public readonly DeviceMemory Memory;
             public readonly nint Pointer;
             public readonly ulong Size;
 
             public ulong Start => (ulong)Pointer;
             public ulong End => (ulong)Pointer + Size;
 
-            public HostMemoryAllocation(Auto<MemoryAllocation> allocation, nint pointer, ulong size)
+            public HostMemoryAllocation(Auto<MemoryAllocation> allocation, DeviceMemory memory, nint pointer, ulong size)
             {
                 Allocation = allocation;
+                Memory = memory;
                 Pointer = pointer;
                 Size = size;
             }
@@ -131,7 +133,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                 MemoryAllocation allocation = new(this, deviceMemory, pageAlignedPointer, 0, pageAlignedSize);
                 Auto<MemoryAllocation> allocAuto = new(allocation);
-                HostMemoryAllocation hostAlloc = new(allocAuto, pageAlignedPointer, pageAlignedSize);
+                HostMemoryAllocation hostAlloc = new(allocAuto, deviceMemory, pageAlignedPointer, pageAlignedSize);
 
                 allocAuto.IncrementReferenceCount();
                 allocAuto.Dispose(); // Kept alive by ref count only.
@@ -180,7 +182,9 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 _allocations.RemoveAll(allocation =>
                 {
-                    if (allocation.Allocation.GetUnsafe().Memory.Handle == memory.Handle)
+                    // Final Auto disposal has already detached its value. Registry
+                    // identity must survive that teardown and never read through Auto.
+                    if (allocation.Memory.Handle == memory.Handle)
                     {
                         _allocationTree.Remove(allocation.Start, allocation);
                         Interlocked.Add(ref _importedBytes, -(long)allocation.Size);

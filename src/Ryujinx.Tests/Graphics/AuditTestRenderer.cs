@@ -13,6 +13,8 @@ namespace Ryujinx.Tests.Graphics
         internal readonly ConcurrentDictionary<BufferHandle, byte[]> Buffers = new();
         internal readonly ConcurrentQueue<(string Operation, int Thread)> Events = new();
         internal readonly ConcurrentQueue<(int Source, int Destination, int Size)> Copies = new();
+        internal Func<nint, ulong, bool> PrepareHostMappingHandler { get; set; }
+        internal BufferAccess? LastBufferAccess { get; private set; }
         private long _nextHandle;
         public event EventHandler<ScreenCaptureImageInfo> ScreenCaptured { add { } remove { } }
         public bool PreferThreading => true;
@@ -22,6 +24,7 @@ namespace Ryujinx.Tests.Graphics
         public AuditTestRenderer() => Pipeline = new AuditTestPipeline(this);
         public BufferHandle CreateBuffer(int size, BufferAccess access = BufferAccess.Default)
         {
+            LastBufferAccess = access;
             ulong value = (ulong)Interlocked.Increment(ref _nextHandle);
             BufferHandle handle = Unsafe.As<ulong, BufferHandle>(ref value);
             Buffers[handle] = GC.AllocateArray<byte>(size, pinned: true);
@@ -47,7 +50,8 @@ namespace Ryujinx.Tests.Graphics
         public ISampler CreateSampler(SamplerCreateInfo info) => throw new NotSupportedException();
         public ITexture CreateTexture(TextureCreateInfo info) => new AuditTestTexture(this);
         public ITextureArray CreateTextureArray(int size, bool isBuffer) => throw new NotSupportedException();
-        public bool PrepareHostMapping(nint address, ulong size) => throw new NotSupportedException();
+        public bool PrepareHostMapping(nint address, ulong size) =>
+            PrepareHostMappingHandler?.Invoke(address, size) ?? throw new NotSupportedException();
         public void CreateSync(ulong id, bool strict) => throw new NotSupportedException();
         public Capabilities GetCapabilities() => throw new NotSupportedException();
         public ulong GetCurrentSync() => throw new NotSupportedException();

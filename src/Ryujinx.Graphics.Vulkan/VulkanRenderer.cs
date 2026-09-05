@@ -1525,6 +1525,7 @@ namespace Ryujinx.Graphics.Vulkan
         public bool PrepareHostMapping(nint address, ulong size)
         {
             return Capabilities.SupportsHostImportedMemory &&
+                BufferManager.HostImportedBuffersSupported &&
                 HostMemoryAllocator.TryImport(BufferManager.HostImportedBufferMemoryRequirements, BufferManager.DefaultBufferMemoryFlags, address, size);
         }
     }
