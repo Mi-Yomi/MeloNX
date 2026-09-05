@@ -109,12 +109,12 @@ int main(int argc, const char* argv[]) {
             VkApplicationInfo application{VK_STRUCTURE_TYPE_APPLICATION_INFO};
             application.pApplicationName = "MeloNX host import regression";
             application.apiVersion = VK_API_VERSION_1_1;
-            const char* instanceExtensions[] = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME};
             VkInstanceCreateInfo instanceInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
-            instanceInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+            // dlopen calls the driver directly. Portability enumeration belongs
+            // to the Vulkan loader and is absent from MoltenVK's instance
+            // extension list; requesting it here returns EXTENSION_NOT_PRESENT.
+            // This surface-less Vulkan 1.1 transfer test needs no instance extensions.
             instanceInfo.pApplicationInfo = &application;
-            instanceInfo.enabledExtensionCount = 1;
-            instanceInfo.ppEnabledExtensionNames = instanceExtensions;
             VkInstance instance = VK_NULL_HANDLE;
             check(api.CreateInstance(&instanceInfo, nullptr, &instance), "create_instance");
             uint32_t physicalCount = 0;
