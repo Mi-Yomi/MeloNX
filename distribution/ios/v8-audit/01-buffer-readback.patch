@@ -1,0 +1,201 @@
+diff --git a/src/Ryujinx.Graphics.Gpu/Memory/Buffer.cs b/src/Ryujinx.Graphics.Gpu/Memory/Buffer.cs
+index c86650a..8270224 100644
+--- a/src/Ryujinx.Graphics.Gpu/Memory/Buffer.cs
++++ b/src/Ryujinx.Graphics.Gpu/Memory/Buffer.cs
+@@ -750,10 +750,18 @@ namespace Ryujinx.Graphics.Gpu.Memory
+         {
+             int offset = (int)(address - Address);
+ 
+-            using PinnedSpan<byte> data = _context.Renderer.GetBufferData(handle, offset, (int)size);
+-
+-            // TODO: When write tracking shaders, they will need to be aware of changes in overlapping buffers.
+-            _physicalMemory.WriteUntracked(address, CopyFromDependantVirtualBuffers(data.Get(), address, size));
++            // Keep the base read and virtual overlays in one dependency snapshot. Otherwise the
++            // producer could consume a virtual dirty range between those two reads.
++            _virtualDependenciesLock.EnterReadLock();
++            try
++            {
++                using PinnedSpan<byte> data = _context.Renderer.GetBufferData(handle, offset, (int)size);
++                _physicalMemory.WriteUntracked(address, ReadVirtualBufferData(data.Get(), address, size));
++            }
++            finally
++            {
++                _virtualDependenciesLock.ExitReadLock();
++            }
+         }
+ 
+         /// <summary>
+@@ -997,78 +1005,74 @@ namespace Ryujinx.Graphics.Gpu.Memory
+         [MethodImpl(MethodImplOptions.NoInlining)]
+         private void CopyFromDependantVirtualBuffersImpl()
+         {
+-            foreach (MultiRangeBuffer virtualBuffer in _virtualDependencies.OrderBy(x => x.ModificationSequenceNumber))
++            _virtualDependenciesLock.EnterWriteLock();
++            try
+             {
+-                virtualBuffer.MarkUsed(_context.SequenceNumber);
+-                virtualBuffer.ConsumeModifiedRegion(this, (mAddress, mSize) =>
++                foreach (MultiRangeBuffer virtualBuffer in _virtualDependencies.OrderBy(x => x.ModificationSequenceNumber))
+                 {
+-                    // Get offset inside both this and the virtual buffer.
+-                    // Note that sometimes there is no right answer for the virtual offset,
+-                    // as the same physical range might be mapped multiple times inside a virtual buffer.
+-                    // We just assume it does not happen in practice as it can only be implemented correctly
+-                    // when the host has support for proper sparse mapping.
++                    virtualBuffer.MarkUsed(_context.SequenceNumber);
++                    virtualBuffer.ConsumeModifiedRegion(this, (mAddress, mSize) =>
++                    {
++                        // Get offset inside both this and the virtual buffer.
++                        // Note that sometimes there is no right answer for the virtual offset,
++                        // as the same physical range might be mapped multiple times inside a virtual buffer.
++                        // We just assume it does not happen in practice as it can only be implemented correctly
++                        // when the host has support for proper sparse mapping.
+ 
+-                    ulong mEndAddress = mAddress + mSize;
+-                    mAddress = Math.Max(mAddress, Address);
+-                    mSize = Math.Min(mEndAddress, EndAddress) - mAddress;
++                        ulong mEndAddress = mAddress + mSize;
++                        mAddress = Math.Max(mAddress, Address);
++                        mSize = Math.Min(mEndAddress, EndAddress) - mAddress;
+ 
+-                    int physicalOffset = (int)(mAddress - Address);
+-                    int virtualOffset = virtualBuffer.Range.FindOffset(new(mAddress, mSize));
++                        int physicalOffset = (int)(mAddress - Address);
++                        int virtualOffset = virtualBuffer.Range.FindOffset(new(mAddress, mSize));
+ 
+-                    _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
+-                });
++                        _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
++                    });
++                }
++            }
++            finally
++            {
++                _virtualDependenciesLock.ExitWriteLock();
+             }
+         }
+ 
+         /// <summary>
+-        /// Copies all overlapping modified ranges from all virtual buffers back into this buffer, and returns an updated span with the data.
++        /// Overlays virtual GPU modifications onto a CPU readback without writing to the GAL command queue.
+         /// </summary>
+         /// <param name="dataSpan">Span where the unmodified data will be taken from for the output</param>
+         /// <param name="address">Address of the region to copy</param>
+         /// <param name="size">Size of the region to copy in bytes</param>
+         /// <returns>A span with <paramref name="dataSpan"/>, and the data for all modified ranges if any</returns>
+-        private ReadOnlySpan<byte> CopyFromDependantVirtualBuffers(ReadOnlySpan<byte> dataSpan, ulong address, ulong size)
++        // The caller holds _virtualDependenciesLock while reading both the base and overlays.
++        // Do not clear virtual dirty ranges here: their copy into Handle still belongs to the
++        // GPU producer. Retaining them also preserves correctness when a readback fails.
++        internal ReadOnlySpan<byte> ReadVirtualBufferData(ReadOnlySpan<byte> dataSpan, ulong address, ulong size)
+         {
+-            _virtualDependenciesLock.EnterReadLock();
++            if (_virtualDependencies == null)
++            {
++                return dataSpan;
++            }
+ 
+-            try
++            byte[] storage = dataSpan.ToArray();
++            foreach (MultiRangeBuffer virtualBuffer in _virtualDependencies.OrderBy(x => x.ModificationSequenceNumber))
+             {
+-                if (_virtualDependencies != null)
++                virtualBuffer.ReadModifiedRegion(address, size, (mAddress, mSize) =>
+                 {
+-                    byte[] storage = dataSpan.ToArray();
+-
+-                    foreach (MultiRangeBuffer virtualBuffer in _virtualDependencies.OrderBy(x => x.ModificationSequenceNumber))
++                    ulong mEndAddress = mAddress + mSize;
++                    mAddress = Math.Max(mAddress, address);
++                    ulong overlapEnd = Math.Min(mEndAddress, address + size);
++                    if (mAddress >= overlapEnd)
+                     {
+-                        virtualBuffer.MarkUsed(_context.SequenceNumber);
+-                        virtualBuffer.ConsumeModifiedRegion(address, size, (mAddress, mSize) =>
+-                        {
+-                            // Get offset inside both this and the virtual buffer.
+-                            // Note that sometimes there is no right answer for the virtual offset,
+-                            // as the same physical range might be mapped multiple times inside a virtual buffer.
+-                            // We just assume it does not happen in practice as it can only be implemented correctly
+-                            // when the host has support for proper sparse mapping.
+-
+-                            ulong mEndAddress = mAddress + mSize;
+-                            mAddress = Math.Max(mAddress, address);
+-                            mSize = Math.Min(mEndAddress, address + size) - mAddress;
+-
+-                            int physicalOffset = (int)(mAddress - Address);
+-                            int virtualOffset = virtualBuffer.Range.FindOffset(new(mAddress, mSize));
+-
+-                            _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)size);
+-                            virtualBuffer.GetData(storage.AsSpan().Slice((int)(mAddress - address), (int)mSize), virtualOffset, (int)mSize);
+-                        });
++                        return;
+                     }
+ 
+-                    dataSpan = storage;
+-                }
+-            }
+-            finally
+-            {
+-                _virtualDependenciesLock.ExitReadLock();
++                    mSize = overlapEnd - mAddress;
++                    int virtualOffset = virtualBuffer.Range.FindOffset(new(mAddress, mSize));
++                    virtualBuffer.GetData(storage.AsSpan((int)(mAddress - address), (int)mSize), virtualOffset, (int)mSize);
++                });
+             }
+ 
+-            return dataSpan;
++            return storage;
+         }
+ 
+         /// <summary>
+diff --git a/src/Ryujinx.Graphics.Gpu/Memory/BufferModifiedRangeList.cs b/src/Ryujinx.Graphics.Gpu/Memory/BufferModifiedRangeList.cs
+index aef04ab..423b3f1 100644
+--- a/src/Ryujinx.Graphics.Gpu/Memory/BufferModifiedRangeList.cs
++++ b/src/Ryujinx.Graphics.Gpu/Memory/BufferModifiedRangeList.cs
+@@ -289,15 +289,20 @@ namespace Ryujinx.Graphics.Gpu.Memory
+             BufferModifiedRange[] overlaps = FindOverlapsAsArray(address, size, out int length);
+             Lock.ExitReadLock();
+ 
+-            if (length != 0)
++            try
+             {
+                 for (int i = 0; i < length; i++)
+                 {
+                     BufferModifiedRange overlap = overlaps[i];
+                     rangeAction(overlap.Address, overlap.Size);
+                 }
+-                
+-                ArrayPool<BufferModifiedRange>.Shared.Return(overlaps);
++            }
++            finally
++            {
++                if (overlaps != null)
++                {
++                    ArrayPool<BufferModifiedRange>.Shared.Return(overlaps);
++                }
+             }
+         }
+ 
+diff --git a/src/Ryujinx.Graphics.Gpu/Memory/MultiRangeBuffer.cs b/src/Ryujinx.Graphics.Gpu/Memory/MultiRangeBuffer.cs
+index a92b896..061dbaa 100644
+--- a/src/Ryujinx.Graphics.Gpu/Memory/MultiRangeBuffer.cs
++++ b/src/Ryujinx.Graphics.Gpu/Memory/MultiRangeBuffer.cs
+@@ -245,7 +245,16 @@ namespace Ryujinx.Graphics.Gpu.Memory
+         }
+ 
+         /// <summary>
+-        /// Calls the specified <paramref name="rangeAction"/> for all modified ranges that overlaps with <paramref name="address"/> and <paramref name="size"/>.
++        /// Reads modifications without consuming the producer's pending backing-buffer copy.
++        /// Background readbacks use this path; only the GPU producer may consume these ranges.
++        /// </summary>
++        public void ReadModifiedRegion(ulong address, ulong size, Action<ulong, ulong> rangeAction)
++        {
++            _modifiedRanges?.GetRanges(address, size, rangeAction);
++        }
++
++        /// <summary>
++        /// Calls the specified action for overlapping modified ranges, then consumes them.
+         /// </summary>
+         /// <param name="address">Address of the region to consume</param>
+         /// <param name="size">Size of the region to consume</param>
