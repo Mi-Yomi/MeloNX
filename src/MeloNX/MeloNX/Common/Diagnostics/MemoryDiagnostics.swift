@@ -19,6 +19,10 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private let lowTrimRepeatInterval: TimeInterval = 20
     private let criticalTrimRepeatInterval: TimeInterval = 6
     private var timer: DispatchSourceTimer?
+    private var coreActive = false
+    private var coreReturnedAtUptime: TimeInterval?
+    private var coreExitCode: Int?
+    private var postStopMilestones: Set<Int> = []
     private var observers: [NSObjectProtocol] = []
     private var file: FileHandle?
     private var sessionDirectory: URL?
@@ -123,6 +127,10 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 sessionDirectory = directory
                 pruneSessions()
                 startedAtUptime = ProcessInfo.processInfo.systemUptime
+                coreActive = true
+                coreReturnedAtUptime = nil
+                coreExitCode = nil
+                postStopMilestones.removeAll()
                 sampledPeak = 0
                 lowSampleStreak = 0
                 lastAcceptedTrimUptime = -Double.infinity
@@ -138,6 +146,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                     "os": metadata.os,
                     "physical_memory_bytes": metadata.physicalMemory,
                     "sample_interval_seconds": 2,
+                    "post_stop_sample_seconds": 60,
                     "selected_jit_cache": metadata.selectedJit.title,
                     "increased_memory_limit_entitlement": metadata.increasedMemoryLimit,
                     "extended_virtual_addressing_entitlement": metadata.extendedVirtualAddressing,
@@ -209,7 +218,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 let sampler = DispatchSource.makeTimerSource(queue: queue)
                 sampler.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(100))
                 sampler.setEventHandler { [weak self] in
-                    self?.recordSample(event: "sample")
+                    self?.sampleTick()
                 }
                 timer = sampler
                 sampler.resume()
@@ -221,8 +230,39 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         }
     }
 
+    func markStopRequested() {
+        queue.sync {
+            coreActive = false
+            recordSample(event: "stop_requested")
+        }
+    }
+
     func stopSession(exitCode: Int) {
-        queue.sync { finishSession(exitCode: exitCode) }
+        queue.sync {
+            guard file != nil, coreReturnedAtUptime == nil else { return }
+            coreActive = false
+            coreReturnedAtUptime = ProcessInfo.processInfo.systemUptime
+            coreExitCode = exitCode
+            recordSample(event: "main_returned", exitCode: exitCode)
+        }
+    }
+
+    private func sampleTick() {
+        guard let returnedAt = coreReturnedAtUptime else {
+            recordSample(event: "sample")
+            return
+        }
+        let elapsed = ProcessInfo.processInfo.systemUptime - returnedAt
+        for milestone in [10, 30, 60] where elapsed >= Double(milestone) {
+            if postStopMilestones.insert(milestone).inserted {
+                recordSample(event: "post_stop_\(milestone)s", exitCode: coreExitCode)
+            }
+        }
+        if elapsed >= 60 {
+            finishSession(exitCode: coreExitCode)
+        } else {
+            recordSample(event: "post_stop_sample", exitCode: coreExitCode)
+        }
     }
 
     /// Last-chance path used from an arbitrary managed thread. All storage is prepared when the
@@ -410,7 +450,13 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             "elapsed_seconds": (ProcessInfo.processInfo.systemUptime - startedAtUptime).rounded(),
             "os_proc_available_memory_bytes": availableMemory
         ]
-        appendJitCacheUsage(to: &record)
+        record["core_active"] = coreActive
+        if let returnedAt = coreReturnedAtUptime {
+            record["post_stop_elapsed_seconds"] = ProcessInfo.processInfo.systemUptime - returnedAt
+        }
+        if coreActive {
+            appendJitCacheUsage(to: &record)
+        }
         if let pressure = evaluateMemoryPressure(event: event, availableMemory: availableMemory) {
             record["gpu_trim_request"] = pressure.level
             record["gpu_trim_source"] = pressure.source
@@ -481,6 +527,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     }
 
     private func evaluateMemoryPressure(event: String, availableMemory: UInt64) -> (level: String, source: String, result: Int32)? {
+        guard coreActive else { return nil }
         let now = ProcessInfo.processInfo.systemUptime
 
         if event == "memory_warning", now - lastAcceptedCriticalTrimUptime >= criticalTrimRepeatInterval {
@@ -599,6 +646,10 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     }
 
     private func closeSession() {
+        coreActive = false
+        coreReturnedAtUptime = nil
+        coreExitCode = nil
+        postStopMilestones.removeAll()
         timer?.cancel()
         timer = nil
         for observer in observers { NotificationCenter.default.removeObserver(observer) }

@@ -124,6 +124,7 @@ class RyujinxController: ObservableObject {
     private init() {}
     
     @Published var isRunning: RunningState = .stopped
+    @Published var isStopping = false
     @Published var games: [GameInfo] = []
     @Published var settings: Options = .init(inputPath: "")
     
@@ -194,6 +195,12 @@ class RyujinxController: ObservableObject {
     
     
     
+    func stopGame() {
+        guard emulationThreadActive, !isStopping else { return }
+        isStopping = true
+        Ryujinx.stopEmulation()
+    }
+
     func startGame(_ game: GameInfo) {
         guard !emulationThreadActive, !isRunning.hasStarted() else { return }
         
@@ -244,6 +251,7 @@ class RyujinxController: ObservableObject {
         isRunning = .started(game: game)
         _isPaused = false
         wasManuallyPaused = false
+        isStopping = false
         emulationThreadActive = true
         
         let nativeSettingsManager = NativeSettingsManager.shared
@@ -257,6 +265,8 @@ class RyujinxController: ObservableObject {
             
             DispatchQueue.main.async {
                 self.emulationThreadActive = false
+                self.isStopping = false
+                Ryujinx.emulationView = nil
                 
                 if response != 0 {
                     self.isRunning = .crashed(result: "Code: \(response)")

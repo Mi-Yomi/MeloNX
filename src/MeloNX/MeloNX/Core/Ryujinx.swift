@@ -28,6 +28,7 @@ final class Ryujinx {
     }
     
     static func stopEmulation() {
+        MemoryDiagnostics.shared.markStopRequested()
         MeloNX.stop_emulation()
     }
     
@@ -303,6 +304,7 @@ final class Ryujinx {
     }
 
     static func stopEmulation() {
+        MemoryDiagnostics.shared.markStopRequested()
         MeloNX.stop_emulation()
     }
 
