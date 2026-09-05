@@ -239,7 +239,10 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void AddDependency(int offset, int size, ICacheKey key, Dependency dependency)
         {
-            List<Entry> entries = GetEntries(offset, size);
+            if (!TryGetEntries(offset, size, out List<Entry> entries))
+            {
+                return;
+            }
 
             for (int i = 0; i < entries.Count; i++)
             {
@@ -262,7 +265,10 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void Remove(int offset, int size, ICacheKey key)
         {
-            List<Entry> entries = GetEntries(offset, size);
+            if (!TryGetEntries(offset, size, out List<Entry> entries))
+            {
+                return;
+            }
 
             for (int i = 0; i < entries.Count; i++)
             {
@@ -284,15 +290,16 @@ namespace Ryujinx.Graphics.Vulkan
 
         public bool TryGetValue(int offset, int size, ICacheKey key, out T value)
         {
-            List<Entry> entries = GetEntries(offset, size);
-
-            foreach (Entry entry in entries)
+            if (TryGetEntries(offset, size, out List<Entry> entries))
             {
-                if (entry.Key.KeyEqual(key))
+                foreach (Entry entry in entries)
                 {
-                    value = entry.Value;
+                    if (entry.Key.KeyEqual(key))
+                    {
+                        value = entry.Value;
 
-                    return true;
+                        return true;
+                    }
                 }
             }
 
@@ -356,6 +363,19 @@ namespace Ryujinx.Graphics.Vulkan
                     }
                 }
             }
+        }
+
+        private readonly bool TryGetEntries(int offset, int size, out List<Entry> entries)
+        {
+            // Queries/removals must not retain an empty range for every address observed.
+            // In particular, dependency invalidation may query an already-cleared cache.
+            if (_ranges != null)
+            {
+                return _ranges.TryGetValue(PackRange(offset, size), out entries);
+            }
+
+            entries = null;
+            return false;
         }
 
         private List<Entry> GetEntries(int offset, int size)

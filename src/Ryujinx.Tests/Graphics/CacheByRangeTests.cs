@@ -40,6 +40,75 @@ namespace Ryujinx.Tests.Graphics
         }
 
         [Test]
+        public void MissingLookupsDoNotRetainAnEmptyRangePerGuestAddress()
+        {
+            CacheByRange<TestValue> cache = new();
+            TestCacheKey presentKey = new();
+            TestCacheKey absentKey = new();
+            TestValue value = new();
+            cache.Add(0, 4, presentKey, value);
+
+            // Warm the lookup and assertion paths before measuring. A read miss must not
+            // allocate/retain a dictionary entry and List for each streamed guest range.
+            cache.TryGetValue(4, 4, absentKey, out _);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            bool found = false;
+            for (int i = 1; i <= 20_000; i++)
+                found |= cache.TryGetValue(i * 4, 4, absentKey, out _);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(found, Is.False);
+            Assert.That(allocated, Is.Zero, "Read misses must not create retained empty ranges.");
+            Assert.That(cache.TryGetValue(0, 4, presentKey, out TestValue stillPresent), Is.True);
+            Assert.That(stillPresent, Is.SameAs(value));
+            cache.Clear();
+            Assert.That(value.DisposeCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void MissingRemovalDoesNotAllocateOrDisposeLiveEntries()
+        {
+            CacheByRange<TestValue> cache = new();
+            TestCacheKey presentKey = new();
+            TestCacheKey absentKey = new();
+            TestValue value = new();
+            cache.Add(0, 4, presentKey, value);
+            cache.Remove(4, 4, absentKey);
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 1; i <= 20_000; i++)
+                cache.Remove(i * 4, 4, absentKey);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(allocated, Is.Zero);
+            Assert.That(value.DisposeCount, Is.Zero);
+            cache.Clear();
+            Assert.That(value.DisposeCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void DependencyForAbsentOwnerDoesNotCreatePhantomRanges()
+        {
+            CacheByRange<TestValue> cache = new();
+            TestCacheKey presentKey = new();
+            TestCacheKey absentKey = new();
+            TestValue value = new();
+            cache.Add(0, 4, presentKey, value);
+            cache.AddDependency(4, 4, absentKey, default);
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 1; i <= 20_000; i++)
+                cache.AddDependency(i * 4, 4, absentKey, default);
+            long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+            Assert.That(allocated, Is.Zero);
+            Assert.That(cache.TryGetValue(0, 4, presentKey, out TestValue stillPresent), Is.True);
+            Assert.That(stillPresent, Is.SameAs(value));
+            cache.Clear();
+            Assert.That(value.DisposeCount, Is.EqualTo(1));
+        }
+
+        [Test]
         public void ClearToleratesEntryDisposalReenteringTheCache()
         {
             CacheByRange<TestValue> cache = new();
