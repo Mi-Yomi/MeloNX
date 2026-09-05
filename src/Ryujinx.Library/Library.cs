@@ -432,11 +432,8 @@ namespace Ryujinx.Library
         [UnmanagedCallersOnly(EntryPoint = "stop_emulation")]
         public static void StopEmulation()
         {
-            if (_window != null)
-            {
-                _window.Exit();
-                DisposeEmulationContext();
-            }
+            Volatile.Read(ref _activeMemoryPressureContext)?.StopAcceptingMemoryPressureReports();
+            Volatile.Read(ref _window)?.Exit();
         }
 
         private static void DisposeEmulationContext()
@@ -1285,10 +1282,10 @@ namespace Ryujinx.Library
             {
                 Volatile.Read(ref _activeMemoryPressureContext)?.StopAcceptingMemoryPressureReports();
                 Interlocked.Exchange(ref _activeMemoryPressureContext, null);
+                WindowBase completedWindow = Interlocked.Exchange(ref _window, null);
+                completedWindow?.Dispose();
+                DisposeEmulationContext();
             }
-
-            DisposeEmulationContext();
-            _window.Dispose();
 
             if (OperatingSystem.IsWindows())
             {

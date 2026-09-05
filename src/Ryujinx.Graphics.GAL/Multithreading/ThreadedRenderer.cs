@@ -32,7 +32,8 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         private readonly IRenderer _baseRenderer;
         private Thread _gpuThread;
         private Thread _backendThread;
-        private bool _running;
+        private volatile bool _running;
+        private int _disposeRequested;
 
         private readonly AutoResetEvent _frameComplete = new(true);
 
@@ -597,26 +598,43 @@ namespace Ryujinx.Graphics.GAL.Multithreading
         {
             GC.SuppressFinalize(this);
 
-            // Dispose must happen from the render thread, after all commands have completed.
+            if (Thread.CurrentThread == _gpuThread)
+            {
+                throw new InvalidOperationException("The GPU producer cannot dispose its own threaded renderer.");
+            }
 
-            // Stop the GPU thread.
-            _running = false;
-            _galWorkAvailable.Set();
+            if (Interlocked.Exchange(ref _disposeRequested, 1) != 0)
+            {
+                return;
+            }
 
+            // The caller has stopped the producer. Keep the consumer alive while joining it
+            // and while draining resource deletions queued by GpuContext.Dispose afterwards.
             if (_gpuThread != null && _gpuThread.IsAlive)
             {
                 _gpuThread.Join();
             }
 
-            // Dispose the renderer.
-            _baseRenderer.Dispose();
+            if (_backendThread != null && _backendThread.IsAlive && Thread.CurrentThread != _backendThread)
+            {
+                FlushThreadedCommands();
+                Interrupt(() =>
+                {
+                    _baseRenderer.Dispose();
+                    _running = false;
+                });
+                _backendThread.Join();
+            }
+            else
+            {
+                _running = false;
+                _baseRenderer.Dispose();
+            }
 
-            // Dispose events.
             _frameComplete.Dispose();
             _galWorkAvailable.Dispose();
             _invokeRun.Dispose();
             _interruptRun.Dispose();
-
             Sync.Dispose();
         }
     }

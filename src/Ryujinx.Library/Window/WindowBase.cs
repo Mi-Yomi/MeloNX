@@ -84,8 +84,10 @@ namespace Ryujinx.Library
 
 
         private long _ticks;
-        public bool _isActive;
-        private bool _isStopped;
+        public volatile bool _isActive;
+        private volatile bool _isStopped;
+        private int _stopRequested;
+        private int _disposed;
 
         public bool _ranFirstFrame;
 
@@ -213,96 +215,98 @@ namespace Ryujinx.Library
 
             Device.Gpu.Renderer.RunLoop(() =>
             {
-                Device.Gpu.SetGpuThread();
-                Device.Gpu.InitializeShaderCache(_gpuCancellationTokenSource.Token);
-
-                while (_isActive)
+                try
                 {
-                    if (_isStopped)
+                    Device.Gpu.SetGpuThread();
+                    Device.Gpu.InitializeShaderCache(_gpuCancellationTokenSource.Token);
+
+                    while (_isActive)
                     {
-                        return;
-                    }
-
-                    _pauseEvent.WaitOne();
-
-                    _ticks += _chrono.ElapsedTicks;
-
-                    _chrono.Restart();
-
-                    if (Device.WaitFifo())
-                    {
-                        Device.Statistics.RecordFifoStart();
-                        Device.ProcessFrame();
-                        Device.Statistics.RecordFifoEnd();
-                    }
-
-                    if (Device.PresentLoop(SwapBuffers))
-                    {
-                        if (!_ranFirstFrame)
-                        { 
-                            _ranFirstFrame = true;
-                            SendStatistics(false);
-                         }
-                        
-                    }
-
-                    if (_ticks >= _ticksPerFrame)
-                    {
-                        string dockedMode = Device.System.State.DockedMode ? "Docked" : "Handheld";
-                        float scale = GraphicsConfig.ResScale;
-                        if (scale != 1)
+                        if (_isStopped)
                         {
-                            dockedMode += $" ({scale}x)";
+                            break;
                         }
 
-                        
-                        SendStatistics();
+                        _pauseEvent.WaitOne();
 
-                        /*
-                            Device.EnableDeviceVsync,
-                            dockedMode,
-                            Device.Configuration.AspectRatio.ToText(),
-                            $"Game: {Device.Statistics.GetGameFrameRate():00.00} FPS ({Device.Statistics.GetGameFrameTime():00.00} ms)",
-                            $"FIFO: {Device.Statistics.GetFifoPercent():0.00} %",
-                            $"GPU: {_gpuDriverName}"));
-                        */
-                        
-                        _ticks = Math.Min(_ticks - _ticksPerFrame, _ticksPerFrame);
+                        _ticks += _chrono.ElapsedTicks;
+
+                        _chrono.Restart();
+
+                        if (Device.WaitFifo())
+                        {
+                            Device.Statistics.RecordFifoStart();
+                            Device.ProcessFrame();
+                            Device.Statistics.RecordFifoEnd();
+                        }
+
+                        if (Device.PresentLoop(SwapBuffers))
+                        {
+                            if (!_ranFirstFrame)
+                            {
+                                _ranFirstFrame = true;
+                                SendStatistics(false);
+                             }
+
+                        }
+
+                        if (_ticks >= _ticksPerFrame)
+                        {
+                            string dockedMode = Device.System.State.DockedMode ? "Docked" : "Handheld";
+                            float scale = GraphicsConfig.ResScale;
+                            if (scale != 1)
+                            {
+                                dockedMode += $" ({scale}x)";
+                            }
+
+
+                            SendStatistics();
+
+                            /*
+                                Device.EnableDeviceVsync,
+                                dockedMode,
+                                Device.Configuration.AspectRatio.ToText(),
+                                $"Game: {Device.Statistics.GetGameFrameRate():00.00} FPS ({Device.Statistics.GetGameFrameTime():00.00} ms)",
+                                $"FIFO: {Device.Statistics.GetFifoPercent():0.00} %",
+                                $"GPU: {_gpuDriverName}"));
+                            */
+
+                            _ticks = Math.Min(_ticks - _ticksPerFrame, _ticksPerFrame);
+                        }
+                    }
+
+                    if (Device.Gpu.Renderer is ThreadedRenderer threaded)
+                    {
+                        threaded.FlushThreadedCommands();
                     }
                 }
-
-                if (Device.Gpu.Renderer is ThreadedRenderer threaded)
+                finally
                 {
-                    threaded.FlushThreadedCommands();
+                    _gpuDoneEvent.Set();
                 }
-
-                _gpuDoneEvent.Set();
             });
+
+            // Without the threaded wrapper this thread owns the Vulkan context itself.
+            if (Device.Gpu.Renderer is not ThreadedRenderer)
+            {
+                Device.DisposeGpu();
+            }
 
             FinalizeWindowRenderer();
         }
 
         public void Exit()
         {
-            TouchScreenManager?.Dispose();
-            NpadManager?.Dispose();
-            Device.Dispose();
-
-            if (_isStopped)
+            if (Interlocked.Exchange(ref _stopRequested, 1) != 0)
             {
                 return;
             }
 
-            _gpuCancellationTokenSource.Cancel();
-
-            _isStopped = true;
-            _isActive = false;
+            Logger.Info?.Print(LogClass.Application, "Emulation teardown: stop_requested.");
+            // This can be called by UI, guest callbacks, or ExecuteProgram. Never join or
+            // dispose guest/GPU resources on the requesting thread.
+            _pauseEvent.Set();
             _inputUpdatedEvent.Set();
-
-            _exitEvent.WaitOne();
-            _exitEvent.Dispose();
-
-            NativeGamepadDriver.OnInputUpdated -= SignalInputUpdated;
         }
 
         public static void ProcessMainThreadQueue()
@@ -315,7 +319,7 @@ namespace Ryujinx.Library
 
         public void MainLoop()
         {
-            while (_isActive)
+            while (_isActive && Volatile.Read(ref _stopRequested) == 0)
             {
                 UpdateFrame();
 
@@ -372,12 +376,35 @@ namespace Ryujinx.Library
             };
             renderLoopThread.Start();
 
-            MainLoop();
+            try
+            {
+                MainLoop();
+            }
+            finally
+            {
+                Device.Gpu.StopAcceptingMemoryPressureReports();
+                _pauseEvent.Set();
+                // Termination may wait for guest GPU work. The producer and consumer must
+                // remain alive until all guest threads and NV service channels are stopped.
+                Device.System.Dispose();
+                Logger.Info?.Print(LogClass.Application, "Emulation teardown: guest_threads_stopped.");
+                _gpuCancellationTokenSource.Cancel();
+                _isStopped = true;
+                _isActive = false;
+                _pauseEvent.Set();
+                _inputUpdatedEvent.Set();
 
-            _gpuDoneEvent.WaitOne();
-            _gpuDoneEvent.Dispose();
-
-            Exit();
+                _gpuDoneEvent.WaitOne();
+                Logger.Info?.Print(LogClass.Application, "Emulation teardown: producer_done.");
+                if (Device.Gpu.Renderer is ThreadedRenderer)
+                {
+                    // High-level disposal can enqueue commands. The wrapper drains those
+                    // before disposing the native backend on its owner and joining it.
+                    Device.DisposeGpu();
+                }
+                renderLoopThread.Join();
+                Logger.Info?.Print(LogClass.Application, "Emulation teardown: backend_disposed.");
+            }
         }
 
         public bool DisplayInputDialog(SoftwareKeyboardUIArgs args, out string userText)
@@ -522,7 +549,7 @@ namespace Ryujinx.Library
 
         protected virtual void Dispose(bool disposing)
         {
-            if (disposing)
+            if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0)
             {
                 _isActive = false;
                 _inputUpdatedEvent.Set();
