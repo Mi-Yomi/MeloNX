@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 
 namespace Ryujinx.Graphics.Vulkan
@@ -30,9 +31,9 @@ namespace Ryujinx.Graphics.Vulkan
         private T _value;
 
         private readonly BitMap _cbOwnership;
-        private readonly MultiFenceHolder _waitable;
-        private readonly IAutoPrivate[] _referencedObjs;
-        private readonly IMirrorable<T> _mirrorable;
+        private MultiFenceHolder _waitable;
+        private IAutoPrivate[] _referencedObjs;
+        private IMirrorable<T> _mirrorable;
 
         private bool _disposed;
         private bool _destroyed;
@@ -62,6 +63,15 @@ namespace Ryujinx.Graphics.Vulkan
 
         public T GetMirrorable(CommandBufferScoped cbs, ref int offset, int size, out bool mirrored)
         {
+            // Binding caches can retain a wrapper after its last resource reference is
+            // retired. Match Get's existing empty-value contract without reviving or
+            // calling the disposed mirror owner.
+            if (_destroyed)
+            {
+                mirrored = false;
+                return default;
+            }
+
             Auto<T> mirror = _mirrorable.GetMirrorable(cbs, ref offset, size, out mirrored);
             mirror._waitable?.AddBufferUse(cbs.CommandBufferIndex, offset, size, false);
             return mirror.Get(cbs);
@@ -69,6 +79,11 @@ namespace Ryujinx.Graphics.Vulkan
 
         public T Get(CommandBufferScoped cbs, int offset, int size, bool write = false)
         {
+            if (_destroyed)
+            {
+                return default;
+            }
+
             _mirrorable?.ClearMirrors(cbs, offset, size);
             _waitable?.AddBufferUse(cbs.CommandBufferIndex, offset, size, write);
             return Get(cbs);
@@ -161,19 +176,48 @@ namespace Ryujinx.Graphics.Vulkan
         {
             if (Interlocked.Decrement(ref _referenceCount) == 0)
             {
-                _value.Dispose();
+                T value = _value;
+                IAutoPrivate[] referencedObjs = _referencedObjs;
+
+                // Dispose() may only relinquish the creator's reference while command
+                // buffers are still using this resource. Detach these managed roots ONLY
+                // here, at the existing final native-release boundary. A stale binding
+                // can retain this Auto, but must not retain a BufferHolder's upload data,
+                // usage bitmap or a chain of already-retired resource wrappers.
                 _value = default;
+                _mirrorable = null;
+                _waitable = null;
+                _referencedObjs = null;
                 _destroyed = true;
 
-                // Value is no longer in use by the GPU, dispose all other
-                // resources that it references.
-                if (_referencedObjs != null)
+                ExceptionDispatchInfo failure = null;
+                try
                 {
-                    for (int i = 0; i < _referencedObjs.Length; i++)
+                    value.Dispose();
+                }
+                catch (Exception error)
+                {
+                    failure = ExceptionDispatchInfo.Capture(error);
+                }
+
+                // Every dependency acquired in the constructor must be released even if
+                // a native destructor throws. Preserve the first failure for the caller.
+                if (referencedObjs != null)
+                {
+                    for (int i = 0; i < referencedObjs.Length; i++)
                     {
-                        _referencedObjs[i].DecrementReferenceCount();
+                        try
+                        {
+                            referencedObjs[i].DecrementReferenceCount();
+                        }
+                        catch (Exception error)
+                        {
+                            failure ??= ExceptionDispatchInfo.Capture(error);
+                        }
                     }
                 }
+
+                failure?.Throw();
             }
 
             Debug.Assert(_referenceCount >= 0);
@@ -183,8 +227,10 @@ namespace Ryujinx.Graphics.Vulkan
         {
             if (!_disposed)
             {
-                DecrementReferenceCount();
+                // A throwing final destructor must not permit a second Dispose to
+                // decrement the already-zero reference count again.
                 _disposed = true;
+                DecrementReferenceCount();
             }
         }
     }
