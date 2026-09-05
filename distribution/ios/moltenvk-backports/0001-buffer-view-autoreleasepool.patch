@@ -1,0 +1,22 @@
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm b/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm
+index fc95c3f9..5bb7378d 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm
+@@ -339,6 +339,9 @@ id<MTLTexture> MVKBufferView::getMTLTexture() {
+             mtlBuff = _buffer->getMTLBuffer();
+             mtlBuffOffset = _buffer->getMTLBufferOffset() + _offset;
+         }
++        // Backport of upstream 5ff9bced: descriptor writes can reach this lazy
++        // creation path outside command encoding's autorelease pools.
++        @autoreleasepool {
+         MTLTextureDescriptor* mtlTexDesc;
+         if ( mtlFeats.textureBuffers ) {
+             mtlTexDesc = [MTLTextureDescriptor textureBufferDescriptorWithPixelFormat: _mtlPixelFormat
+@@ -359,6 +362,7 @@ id<MTLTexture> MVKBufferView::getMTLTexture() {
+ 											bytesPerRow: _mtlBytesPerRow];
+ 		getDevice()->makeResident(_mtlTexture);
+ 		propagateDebugName();
++        }
+     }
+     return _mtlTexture;
+ }

@@ -93,6 +93,16 @@ test -d "$APP"
 test -s "$APP/Frameworks/Ryujinx.Library.dylib"
 MOLTENVK="$APP/Frameworks/libMoltenVK.dylib"
 test -s "$MOLTENVK"
+# A rebuilt driver is a separate, source-locked artifact. Preserve the clean app
+# checkout and replace only its packaged dynamic library after the Xcode build.
+if [[ -n "${MELO_MVK_ARTIFACT_DIR:-}" ]]; then
+  python3 distribution/ios/verify-moltenvk-artifact.py "$MELO_MVK_ARTIFACT_DIR"
+  SOURCE_MOLTENVK="$MELO_MVK_ARTIFACT_DIR/libMoltenVK.dylib"
+  EXPECTED_MOLTENVK_SHA256="$(shasum -a 256 "$SOURCE_MOLTENVK" | awk '{ print $1 }')"
+  cp "$SOURCE_MOLTENVK" "$MOLTENVK"
+  tar -C "$MELO_MVK_ARTIFACT_DIR" -czf "$OUTPUT_ROOT/MeloNX-MoltenVK-$SHORT_SHA.tar.gz" .
+  printf 'moltenvk_artifact_dir=%s\n' "$MELO_MVK_ARTIFACT_DIR" >> "$BUILD_INFO"
+fi
 MOLTENVK_SHA256="$(shasum -a 256 "$MOLTENVK" | awk '{ print $1 }')"
 test "$MOLTENVK_SHA256" = "$EXPECTED_MOLTENVK_SHA256"
 cmp "$SOURCE_MOLTENVK" "$MOLTENVK"
@@ -156,6 +166,14 @@ fi
 ditto "$NATIVE_DSYM" "$SYMBOL_ROOT/Ryujinx.Library.dylib.dSYM"
 printf 'native_dsym_arm64_uuid=%s\n' "$NATIVE_DSYM_UUID" >> "$SYMBOL_MANIFEST"
 
+if [[ -n "${MELO_MVK_ARTIFACT_DIR:-}" ]]; then
+  ditto -x -k "$MELO_MVK_ARTIFACT_DIR/libMoltenVK.dylib.dSYM.zip" "$SYMBOL_ROOT"
+  MOLTENVK_DSYM_UUID="$(arm64_uuid "$SYMBOL_ROOT/libMoltenVK.dylib.dSYM")"
+  test -n "$MOLTENVK_DSYM_UUID"
+  test "$MOLTENVK_DSYM_UUID" = "$MOLTENVK_BINARY_UUID"
+  printf 'moltenvk_dsym_arm64_uuid=%s\n' "$MOLTENVK_DSYM_UUID" >> "$SYMBOL_MANIFEST"
+fi
+
 tar -C "$SYMBOL_ROOT" -czf "$OUTPUT_ROOT/MeloNX-symbols-$SHORT_SHA.tar.gz" .
 
 MOLTENVK_ID="$(otool -D "$MOLTENVK" | sed -n '2p')"
@@ -187,6 +205,9 @@ unzip -t "$IPA_PATH" > "$OUTPUT_ROOT/logs/ipa-archive-check.log"
   checksum_files=("MeloNX-$SHORT_SHA-unprovisioned.ipa" "MeloNX-source-$SHORT_SHA.tar.gz")
   if [[ -f "MeloNX-symbols-$SHORT_SHA.tar.gz" ]]; then
     checksum_files+=("MeloNX-symbols-$SHORT_SHA.tar.gz")
+  fi
+  if [[ -f "MeloNX-MoltenVK-$SHORT_SHA.tar.gz" ]]; then
+    checksum_files+=("MeloNX-MoltenVK-$SHORT_SHA.tar.gz")
   fi
   shasum -a 256 "${checksum_files[@]}" > SHA256SUMS.txt
 )

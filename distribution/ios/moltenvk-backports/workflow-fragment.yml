@@ -1,0 +1,21 @@
+# Insert in the release job before build-unsigned-ipa.sh. Requires macos-26,
+# checkout of github.sha, and sufficient timeout for both native and app builds.
+# The owning release workflow controls publication and branch restrictions.
+steps:
+  - name: Validate MoltenVK artifact inspection
+    shell: bash
+    run: python3 -m unittest discover -s distribution/ios/moltenvk-backports -p 'test_*.py' -v
+  - name: Build pinned MoltenVK 1.4.0 lifetime backport
+    shell: bash
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      MELO_MVK_VARIANT: patched
+    run: bash distribution/ios/build-moltenvk.sh
+  - name: Build iOS package with verified native artifact
+    shell: bash
+    env:
+      MELO_MVK_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/moltenvk
+    run: bash distribution/ios/build-unsigned-ipa.sh
+  # Include artifacts/moltenvk in the owning job's always() diagnostic upload.
+  # Include native source archives, backport, notices, manifest and dSYM in its
+  # published source/symbol archives and release checksums.
