@@ -1,0 +1,163 @@
+name: GTA V v10 cache stability release
+
+on:
+  push:
+    branches: [codex/gta-v10-cache-stability]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gta-v10-cache-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'Mi-Yomi/MeloNX' && github.ref == 'refs/heads/codex/gta-v10-cache-stability'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Apply isolated source commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if test -f distribution/ios/v10-audit/prepare.py; then
+            python3 distribution/ios/v10-audit/prepare.py
+            git rm -r distribution/ios/v10-audit
+            git commit -m 'chore: remove applied v10 preparation files'
+            git push origin HEAD:refs/heads/codex/gta-v10-cache-stability
+          fi
+          test -z "$(git status --porcelain)"
+      - name: Record immutable source
+        id: source
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: prepare
+    runs-on: macos-26
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+      DOTNET_INSTALL_DIR: ${{ github.workspace }}/.tools/dotnet-macos
+      NUGET_PACKAGES: ${{ github.workspace }}/.tools/nuget/packages
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.source_sha }}
+          persist-credentials: false
+      - name: Record build request
+        shell: bash
+        run: |
+          mkdir -p artifacts/ios/logs artifacts/test-results
+          printf 'source_commit=%s\nrun_url=%s/%s/actions/runs/%s\n' \
+            "$SOURCE_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > artifacts/ios/build-info.txt
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.400'
+          architecture: arm64
+      - name: Run Swift allocation ownership tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc src/MeloNX/MeloNX/Common/MemoryLimits/MemoryBenchmarkRun.swift \
+            tests/swift/MemoryBenchmarkRunTests.swift -o artifacts/test-results/ram-tests
+          artifacts/test-results/ram-tests | tee artifacts/test-results/swift-regressions.txt
+      - name: Run cache, scratch and existing graphics regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test src/Ryujinx.Tests/Ryujinx.Tests.csproj \
+            --configuration Release \
+            --filter 'FullyQualifiedName~TextureGroupLifecycleTests|FullyQualifiedName~AutoDeleteCacheTests|FullyQualifiedName~MoltenVKConfigurationTests|FullyQualifiedName~CacheEvictionPolicyTests|FullyQualifiedName~DescriptorPoolSizingTests|FullyQualifiedName~VulkanMemoryTrimPolicyTests|FullyQualifiedName~VirtualBufferCopyTests|FullyQualifiedName~ThreadedRendererShutdownTests|FullyQualifiedName~ThreadedReadbackTests|FullyQualifiedName~ThreadedTextureLifetimeTests|FullyQualifiedName~PageTableReclamationTests|FullyQualifiedName~MemoryPressureMailboxTests|FullyQualifiedName~PrivateMemoryAllocatorTests|FullyQualifiedName~PrivateMappingInitializationTests|FullyQualifiedName~PrivateMemoryOwnershipTests|FullyQualifiedName~BufferCacheStabilityTests|FullyQualifiedName~MemoryPressureRecoveryTests|FullyQualifiedName~BoundedScratchPoolTests' \
+            --blame-hang-timeout 3m \
+            --logger 'trx;LogFileName=gta-v10-regressions.trx' \
+            --results-directory artifacts/test-results 2>&1 | tee artifacts/test-results/csharp-regressions.txt
+      - name: Run memory tracking regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test src/Ryujinx.Tests.Memory/Ryujinx.Tests.Memory.csproj \
+            --configuration Release --blame-hang-timeout 3m \
+            --logger 'trx;LogFileName=memory-v10-regressions.trx' \
+            --results-directory artifacts/test-results 2>&1 | tee artifacts/test-results/memory-regressions.txt
+      - name: Build iOS package for re-signing
+        shell: bash
+        run: |
+          git diff --exit-code
+          bash distribution/ios/build-unsigned-ipa.sh
+      - name: Upload package, symbols and test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: MeloNX-v10-cache-${{ needs.prepare.outputs.source_sha }}
+          path: |
+            artifacts/ios/*.ipa
+            artifacts/ios/*.tar.gz
+            artifacts/ios/*.txt
+            artifacts/ios/*.plist
+            artifacts/ios/*.entitlements
+            artifacts/ios/Package.resolved
+            artifacts/ios/logs/
+            artifacts/test-results/*.trx
+            artifacts/test-results/*.txt
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+      - name: Publish experimental release after all gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${SOURCE_SHA:0:12}"
+          TAG="gta-v10-cache-$SHORT_SHA"
+          IPA="artifacts/ios/MeloNX-$SHORT_SHA-unprovisioned.ipa"
+          test -s "$IPA"
+          test -s artifacts/test-results/gta-v10-regressions.trx
+          test -s artifacts/test-results/memory-v10-regressions.trx
+          cp docs/GTA-V-V10-CACHE-STABILITY.ru.md artifacts/ios/RELEASE-NOTES.md
+          printf '\nSource commit: `%s`\n\nCI: %s/%s/actions/runs/%s\n' \
+            "$SOURCE_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> artifacts/ios/RELEASE-NOTES.md
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          lines = ['\n## CI results\n']
+          for path in sorted(Path('artifacts/test-results').glob('*v10-regressions.trx')):
+              root = ET.parse(path).getroot()
+              ns = {'t': 'http://microsoft.com/schemas/VisualStudio/TeamTest/2010'}
+              counters = root.find('.//t:Counters', ns).attrib
+              assert int(counters['failed']) == 0 and int(counters['passed']) > 0, counters
+              lines.append(f"- {path.name}: {counters['passed']} passed, {counters['failed']} failed; total {counters['total']}.\n")
+          lines.append(Path('artifacts/test-results/swift-regressions.txt').read_text())
+          with Path('artifacts/ios/RELEASE-NOTES.md').open('a') as out:
+              out.writelines(lines)
+          PY
+          gh release create "$TAG" "$IPA" artifacts/ios/*.tar.gz artifacts/ios/*.txt \
+            artifacts/test-results/*.trx artifacts/test-results/*.txt \
+            --target "$SOURCE_SHA" --draft --prerelease --latest=false \
+            --title "MeloNX v10 — cache stability / bounded scratch ($SHORT_SHA)" \
+            --notes-file artifacts/ios/RELEASE-NOTES.md
+          gh release edit "$TAG" --draft=false --prerelease --latest=false
+          gh release view "$TAG" --json url,assets,targetCommitish > artifacts/release.json
+          cat artifacts/release.json
+          echo '### Release' >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$TAG" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
