@@ -490,7 +490,4 @@ write('docs/GTA-V-V8-AUDIT-RELEASE.ru.md', '''# MeloNX GTA V v8 audit — experi
 
 IPA unprovisioned: требуется повторная подпись для sideload. Для первого A/B полностью перезапустить приложение, сохранить настройки и прогретый Shader Cache. После Stop оставить приложение открытым на 60 секунд без нового запуска; background suspension может отложить samples, фактическое elapsed записывается. Экспортировать session.json, все memory*.jsonl, core log и matching .ips при наличии.
 ''')
-# Keep ordinary manual packaging useful for the resulting source branch too.
-p = ' .github/workflows/ios-experimental.yml'.strip()
-replace(p, 'FullyQualifiedName~VulkanMemoryTrimPolicyTests\'', 'FullyQualifiedName~VulkanMemoryTrimPolicyTests|FullyQualifiedName~VirtualBufferCopyTests|FullyQualifiedName~ThreadedRendererShutdownTests\'')
-commit('docs: record experimental scope and extend manual regression gate', ['docs/GTA-V-V8-AUDIT-RELEASE.ru.md', p])
+commit('docs: record experimental release scope', ['docs/GTA-V-V8-AUDIT-RELEASE.ru.md'])
