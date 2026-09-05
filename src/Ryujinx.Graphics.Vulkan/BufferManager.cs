@@ -412,6 +412,11 @@ namespace Ryujinx.Graphics.Vulkan
             return null;
         }
 
+        internal long GetStorageIdentity(BufferHandle handle)
+        {
+            return TryGetBuffer(handle, out BufferHolder holder) ? holder.StorageIdentity : 0;
+        }
+
         public Auto<DisposableBufferView> CreateView(BufferHandle handle, VkFormat format, int offset, int size, Action invalidateView)
         {
             if (TryGetBuffer(handle, out BufferHolder holder))

@@ -15,7 +15,7 @@ namespace Ryujinx.Graphics.Vulkan
         private int _size;
         private Auto<DisposableBufferView> _bufferView;
 
-        private int _bufferCount;
+        private long _storageIdentity;
 
         public int Width { get; }
         public int Height { get; }
@@ -102,10 +102,15 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void SetStorage(BufferRange buffer)
         {
+            // IdList handles and native Vulkan handles can both be recycled. Compare
+            // the backing allocation's identity, not the global allocation count:
+            // creating an unrelated buffer must not destroy a still-valid view.
+            long storageIdentity = _gd.BufferManager.GetStorageIdentity(buffer.Handle);
+
             if (_bufferHandle == buffer.Handle &&
                 _offset == buffer.Offset &&
                 _size == buffer.Size &&
-                _bufferCount == _gd.BufferManager.BufferCount)
+                _storageIdentity == storageIdentity)
             {
                 return;
             }
@@ -113,7 +118,7 @@ namespace Ryujinx.Graphics.Vulkan
             _bufferHandle = buffer.Handle;
             _offset = buffer.Offset;
             _size = buffer.Size;
-            _bufferCount = _gd.BufferManager.BufferCount;
+            _storageIdentity = storageIdentity;
 
             ReleaseImpl();
         }
