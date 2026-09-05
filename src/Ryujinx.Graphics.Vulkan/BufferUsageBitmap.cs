@@ -29,15 +29,9 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void Add(int cbIndex, int offset, int size, bool write)
         {
-            if (size == 0)
+            if (!BufferRangeBounds.TryNormalize(_size, offset, ref size))
             {
                 return;
-            }
-
-            // Some usages can be out of bounds (vertex buffer on amd), so bound if necessary.
-            if (offset + size > _size)
-            {
-                size = _size - offset;
             }
 
             int cbBase = cbIndex * _bitsPerCb + (write ? _writeBitOffset : 0);
@@ -49,7 +43,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         public bool OverlapsWith(int cbIndex, int offset, int size, bool write = false)
         {
-            if (size == 0)
+            if (!BufferRangeBounds.TryNormalize(_size, offset, ref size))
             {
                 return false;
             }
