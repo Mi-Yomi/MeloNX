@@ -156,7 +156,11 @@ cp "$BACKPORT_DIR/source-lock.json" "$OUTPUT_ROOT/source-lock.json"
 git -C "$SOURCE_ROOT" diff --binary HEAD > "$OUTPUT_ROOT/applied-source.patch"
 if [[ "$VARIANT" == patched ]]; then
   git -C "$SOURCE_ROOT" apply --reverse --check "$BACKPORT_DIR/0001-buffer-view-autoreleasepool.patch"
-  test "$(git -C "$SOURCE_ROOT" diff --name-only HEAD)" = 'MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm'
+  # Prove that the complete tracked tree is exactly baseline + this patch,
+  # including changes elsewhere inside the same file, not just its filename.
+  git -C "$SOURCE_ROOT" apply --reverse "$BACKPORT_DIR/0001-buffer-view-autoreleasepool.patch"
+  git -C "$SOURCE_ROOT" diff --exit-code HEAD
+  git -C "$SOURCE_ROOT" apply "$BACKPORT_DIR/0001-buffer-view-autoreleasepool.patch"
 else
   git -C "$SOURCE_ROOT" diff --exit-code HEAD
 fi

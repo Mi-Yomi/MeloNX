@@ -1,5 +1,6 @@
 """Run all Python regressions and reject silent loss of required test coverage."""
 import json
+import argparse
 from pathlib import Path
 import unittest
 
@@ -14,9 +15,14 @@ def test_ids(suite):
 
 def main():
     root = Path(__file__).resolve().parents[1]
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--required", default=str(root / "distribution/ios/v11-required-tests.json"))
+    args = parser.parse_args()
     suite = unittest.defaultTestLoader.discover(str(root / "tools/tests"))
+    native_tests = root / "distribution/ios/moltenvk-backports"
+    suite.addTests(unittest.TestLoader().discover(str(native_tests), top_level_dir=str(native_tests)))
     discovered = set(test_ids(suite))
-    required = set(json.loads((root / "distribution/ios/v11-required-tests.json").read_text())["python"])
+    required = set(json.loads(Path(args.required).read_text())["python"])
     missing = required - discovered
     if not required or missing:
         raise SystemExit("Required Python tests missing: " + ", ".join(sorted(missing)))

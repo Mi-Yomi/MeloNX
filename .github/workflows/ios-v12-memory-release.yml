@@ -1,0 +1,154 @@
+name: GTA V v12 render memory fixes release
+
+on:
+  push:
+    branches: [codex/gta-v12-render-memory]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gta-v12-memory-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'Mi-Yomi/MeloNX' && github.ref == 'refs/heads/codex/gta-v12-render-memory'
+    runs-on: macos-26
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+      DOTNET_INSTALL_DIR: ${{ github.workspace }}/.tools/dotnet-macos
+      NUGET_PACKAGES: ${{ github.workspace }}/.tools/nuget/packages
+      SOURCE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Record build request
+        shell: bash
+        run: |
+          mkdir -p artifacts/ios/logs artifacts/test-results
+          printf 'source_commit=%s\nrun_url=%s/%s/actions/runs/%s\n' \
+            "$SOURCE_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > artifacts/ios/build-info.txt
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.400'
+          architecture: arm64
+      - name: Run analyzer and release-gate regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/run_python_regressions.py --required distribution/ios/v12-required-tests.json 2>&1 | tee artifacts/test-results/python-regressions.txt
+      - name: Run Swift allocation ownership tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcrun swiftc src/MeloNX/MeloNX/Common/MemoryLimits/MemoryBenchmarkRun.swift \
+            tests/swift/MemoryBenchmarkRunTests.swift -o artifacts/test-results/ram-tests
+          artifacts/test-results/ram-tests | tee artifacts/test-results/swift-regressions.txt
+          grep -Fx 'MemoryBenchmarkRunTests: 7 passed' artifacts/test-results/swift-regressions.txt
+      - name: Run cache, scratch and existing graphics regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test src/Ryujinx.Tests/Ryujinx.Tests.csproj \
+            --configuration Release \
+            --filter 'FullyQualifiedName~BufferUsageBitmapTests|FullyQualifiedName~BufferPendingUploadTests|FullyQualifiedName~AutoLifetimeTests|FullyQualifiedName~BufferViewStorageIdentityTests|FullyQualifiedName~BufferCacheGrowthTests|FullyQualifiedName~PendingBufferDataTests|FullyQualifiedName~PendingBufferLifetimeTests|FullyQualifiedName~TextureGroupLifecycleTests|FullyQualifiedName~AutoDeleteCacheTests|FullyQualifiedName~MoltenVKConfigurationTests|FullyQualifiedName~CacheEvictionPolicyTests|FullyQualifiedName~DescriptorPoolSizingTests|FullyQualifiedName~VulkanMemoryTrimPolicyTests|FullyQualifiedName~VirtualBufferCopyTests|FullyQualifiedName~ThreadedRendererShutdownTests|FullyQualifiedName~ThreadedReadbackTests|FullyQualifiedName~ThreadedTextureLifetimeTests|FullyQualifiedName~PageTableReclamationTests|FullyQualifiedName~MemoryPressureMailboxTests|FullyQualifiedName~PrivateMemoryAllocatorTests|FullyQualifiedName~PrivateMappingInitializationTests|FullyQualifiedName~PrivateMemoryOwnershipTests|FullyQualifiedName~BufferCacheStabilityTests|FullyQualifiedName~MemoryPressureRecoveryTests|FullyQualifiedName~BoundedScratchPoolTests|FullyQualifiedName~CacheByRangeTests|FullyQualifiedName~ExecutionTimingTests|FullyQualifiedName~TextureFormatCensusTests' \
+            --blame-hang-timeout 3m \
+            --logger 'trx;LogFileName=gta-v12-regressions.trx' \
+            --results-directory artifacts/test-results 2>&1 | tee artifacts/test-results/csharp-regressions.txt
+      - name: Run memory tracking regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet test src/Ryujinx.Tests.Memory/Ryujinx.Tests.Memory.csproj \
+            --configuration Release --blame-hang-timeout 3m \
+            --logger 'trx;LogFileName=memory-v12-regressions.trx' \
+            --results-directory artifacts/test-results 2>&1 | tee artifacts/test-results/memory-regressions.txt
+      - name: Enforce complete regression evidence
+        shell: bash
+        run: |
+          python3 tools/verify_test_results.py --required distribution/ios/v12-required-tests.json \
+            --targeted artifacts/test-results/gta-v12-regressions.trx \
+            --memory artifacts/test-results/memory-v12-regressions.trx \
+            --out artifacts/test-results/verification.json
+      - name: Rebuild source-locked MoltenVK with buffer-view lifetime backport
+        shell: bash
+        run: bash distribution/ios/build-moltenvk.sh
+      - name: Build iOS package for re-signing
+        env:
+          MELO_MVK_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/moltenvk
+        shell: bash
+        run: |
+          git diff --exit-code
+          bash distribution/ios/build-unsigned-ipa.sh
+      - name: Upload package, symbols and test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: MeloNX-v12-memory-${{ github.sha }}
+          path: |
+            artifacts/ios/*.ipa
+            artifacts/ios/*.tar.gz
+            artifacts/ios/*.txt
+            artifacts/ios/*.plist
+            artifacts/ios/*.entitlements
+            artifacts/ios/Package.resolved
+            artifacts/ios/logs/
+            artifacts/moltenvk/logs/
+            artifacts/moltenvk/*.json
+            artifacts/moltenvk/build-status.txt
+            artifacts/test-results/*.trx
+            artifacts/test-results/*.txt
+            artifacts/test-results/*.json
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+      - name: Publish experimental release after all gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${SOURCE_SHA:0:12}"
+          TAG="gta-v12-memory-$SHORT_SHA"
+          IPA="artifacts/ios/MeloNX-$SHORT_SHA-unprovisioned.ipa"
+          test -s "$IPA"
+          test -s artifacts/test-results/gta-v12-regressions.trx
+          test -s artifacts/test-results/memory-v12-regressions.trx
+          cp docs/GTA-V-V12-RENDER-MEMORY.ru.md artifacts/ios/RELEASE-NOTES.md
+          printf '\nSource commit: `%s`\n\nCI: %s/%s/actions/runs/%s\n' \
+            "$SOURCE_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> artifacts/ios/RELEASE-NOTES.md
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          results = json.loads(Path('artifacts/test-results/verification.json').read_text())
+          with Path('artifacts/ios/RELEASE-NOTES.md').open('a') as out:
+              out.write('\n## CI results\n\n')
+              for name, result in results.items():
+                  out.write(f"- {name}: {result['outcomes']}; total {result['total']}.\n")
+                  for test in result['not_run']:
+                      out.write(f"  - NOT RUN: {test}\n")
+              out.write(Path('artifacts/test-results/swift-regressions.txt').read_text())
+              out.write(Path('artifacts/test-results/python-regressions.txt').read_text())
+          PY
+          gh release create "$TAG" "$IPA" artifacts/ios/*.tar.gz artifacts/ios/*.txt \
+            artifacts/test-results/*.trx artifacts/test-results/*.txt artifacts/test-results/*.json \
+            --target "$SOURCE_SHA" --draft --prerelease --latest=false \
+            --title "MeloNX v12 — sparse mirrors / buffer reuse / rebuilt MoltenVK ($SHORT_SHA)" \
+            --notes-file artifacts/ios/RELEASE-NOTES.md
+          gh release edit "$TAG" --draft=false --prerelease --latest=false
+          gh release view "$TAG" --json url,assets,targetCommitish > artifacts/release.json
+          cat artifacts/release.json
+          echo '### Release' >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$TAG" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"
