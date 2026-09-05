@@ -1,3 +1,4 @@
+using Ryujinx.Common;
 using Silk.NET.Vulkan;
 using System;
 using System.Collections.Generic;
@@ -344,6 +345,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                         lock (_queueLock)
                         {
+                            using var timing = ExecutionTimings.Measure(ExecutionStage.CommandBufferSubmit);
                             _api.QueueSubmit(_queue, 1, in sInfo, entry.Fence.GetUnsafe()).ThrowOnError();
                         }
                     }

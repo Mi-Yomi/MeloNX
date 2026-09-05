@@ -423,13 +423,30 @@ namespace Ryujinx.Graphics.Gpu
                 long now = Environment.TickCount64;
                 if (now - _lastOwnerSampleMilliseconds >= 10_000)
                 {
+                    using var timing = ExecutionTimings.Measure(ExecutionStage.DiagnosticSnapshot);
                     _lastOwnerSampleMilliseconds = now;
                     Logger.Info?.Print(LogClass.Gpu, "GPU memory owners v1: accounting=logical_not_additive, " + GetCrashDiagnosticSnapshot());
                     MemoryOwnerPoolStatistics scratch = MemoryOwner<byte>.GetPoolStatistics();
                     Logger.Info?.Print(LogClass.Gpu,
-                        $"Scratch byte pool v1: accounting=managed_array_payload_not_resident, retained_bytes={scratch.RetainedBytes}, leased_bytes={scratch.LeasedBytes}, peak_leased_bytes={scratch.PeakLeasedBytes}, retained_arrays={scratch.RetainedArrays}, rents={scratch.Rents}, reuses={scratch.Reuses}, discarded_bytes={scratch.DiscardedBytes}.");
+                        $"Scratch byte pool v1: accounting=managed_array_payload_not_resident, retained_bytes={scratch.RetainedBytes}, leased_bytes={scratch.LeasedBytes}, peak_leased_bytes={scratch.PeakLeasedBytes}, retained_arrays={scratch.RetainedArrays}, rents={scratch.Rents}, reuses={scratch.Reuses}, discarded_bytes={scratch.DiscardedBytes}, created_arrays={scratch.CreatedArrays}, created_bytes={scratch.CreatedBytes}, discarded_arrays={scratch.DiscardedArrays}.");
+                    for (MemoryOwnerPurpose purpose = 0; purpose < MemoryOwnerPurpose.Count; purpose++)
+                    {
+                        MemoryOwnerPoolStatistics owner = MemoryOwner<byte>.GetPoolStatistics(purpose);
+                        // Readback not routed through this pool has no coverage here. Only emit
+                        // categories observed at an actual rental site, never a misleading zero.
+                        if (owner.Rents == 0) continue;
+                        Logger.Info?.Print(LogClass.Gpu,
+                            $"Scratch purpose v1: type=byte, purpose={purpose}, accounting=managed_array_payload_not_resident, " +
+                            $"retained_bytes={owner.RetainedBytes}, leased_bytes={owner.LeasedBytes}, peak_leased_bytes={owner.PeakLeasedBytes}, " +
+                            $"retained_arrays={owner.RetainedArrays}, rents={owner.Rents}, reuses={owner.Reuses}, " +
+                            $"created_arrays={owner.CreatedArrays}, created_bytes={owner.CreatedBytes}, " +
+                            $"discarded_arrays={owner.DiscardedArrays}, discarded_bytes={owner.DiscardedBytes}.");
+                    }
                     foreach (var entry in PhysicalMemoryRegistry)
+                    {
                         Logger.Info?.Print(LogClass.Gpu, $"Guest memory owners v1: pid={entry.Key}, accounting=virtual_or_logical_not_resident, " + entry.Value.GetMemoryOwnerSnapshot());
+                        Logger.Info?.Print(LogClass.Gpu, $"Texture format census v1: pid={entry.Key}, " + entry.Value.TextureCache.GetFormatDiagnosticSnapshot());
+                    }
                 }
             }
 

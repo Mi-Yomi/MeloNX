@@ -1,3 +1,4 @@
+using Ryujinx.Common;
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.Shader;
@@ -73,6 +74,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         private unsafe void Compile(ShaderSource shaderSource)
         {
+            using var timing = ExecutionTimings.Measure(ExecutionStage.ShaderModuleCompile);
             try
             {
                 byte[] spirv = shaderSource.BinaryCode;

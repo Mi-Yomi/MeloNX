@@ -1,4 +1,5 @@
 using Gommon;
+using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Helper;
 using Ryujinx.Common.Logging;
@@ -1084,6 +1085,7 @@ namespace Ryujinx.Graphics.Vulkan
             long now = Environment.TickCount64;
             if (OperatingSystem.IsIOS() && now - _lastNativeOwnerSampleMilliseconds >= 10_000)
             {
+                using var timing = ExecutionTimings.Measure(ExecutionStage.DiagnosticSnapshot);
                 long elapsed = now - _lastNativeOwnerSampleMilliseconds;
                 _lastNativeOwnerSampleMilliseconds = now;
                 var textures = TextureStorage.GetOwnerStatistics();
@@ -1092,7 +1094,7 @@ namespace Ryujinx.Graphics.Vulkan
                 var device = GetDeviceMemoryBudget();
                 var gc = GC.GetGCMemoryInfo();
                 long allocated = GC.GetTotalAllocatedBytes(false);
-                long rate = _lastNativeOwnerAllocatedBytes == 0 ? 0 : (allocated - _lastNativeOwnerAllocatedBytes) * 1000 / Math.Max(1, elapsed);
+                long? rate = _lastNativeOwnerAllocatedBytes == 0 ? null : (allocated - _lastNativeOwnerAllocatedBytes) * 1000 / Math.Max(1, elapsed);
                 _lastNativeOwnerAllocatedBytes = allocated;
                 Logger.Info?.Print(LogClass.Gpu,
                     $"Native memory owners v1: accounting=overlapping_not_additive, texture_storage_owners={textures.Owners}, " +
@@ -1101,7 +1103,10 @@ namespace Ryujinx.Graphics.Vulkan
                     $"allocator_reserved_bytes={allocation.ReservedBytes}, allocator_used_bytes={allocation.UsedBytes}, allocator_blocks={allocation.Blocks}, " +
                     $"driver_usage_bytes={device.Usage}, driver_budget_bytes={device.Budget}, " +
                     $"managed_heap_bytes={gc.HeapSizeBytes}, managed_committed_bytes={gc.TotalCommittedBytes}, " +
-                    $"managed_fragmented_bytes={gc.FragmentedBytes}, managed_allocation_bytes_per_second={rate}");
+                    $"managed_fragmented_bytes={gc.FragmentedBytes}, managed_allocation_bytes_per_second={rate?.ToString() ?? "unknown"}, " +
+                    $"managed_allocated_bytes={allocated}, gen0_collections={GC.CollectionCount(0)}, " +
+                    $"gen1_collections={GC.CollectionCount(1)}, gen2_collections={GC.CollectionCount(2)}");
+                Logger.Info?.Print(LogClass.Gpu, ExecutionTimings.GetSnapshot());
             }
         }
 

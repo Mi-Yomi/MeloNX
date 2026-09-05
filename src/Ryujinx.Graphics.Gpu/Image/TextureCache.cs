@@ -49,6 +49,15 @@ namespace Ryujinx.Graphics.Gpu.Image
 
         private readonly AutoDeleteCache _cache;
 
+        internal TextureFormatCensus FormatCensus { get; } = new();
+
+        /// <summary>Owner-thread only. No renderer calls, guest data, or per-texture enumeration.</summary>
+        internal string GetFormatDiagnosticSnapshot()
+        {
+            Debug.Assert(_context.IsGpuThread());
+            return FormatCensus.GetDiagnosticSnapshot();
+        }
+
         internal ulong CachedBytes => _cache.CachedBytes;
         internal ulong Capacity => _cache.Capacity;
         internal (

@@ -125,6 +125,18 @@ namespace Ryujinx.Graphics.Gpu.Image
         private ITexture _setHostTexture;
         private int _scaledSetScore;
 
+        private TextureCensusRegistration _hostCensus;
+        private TextureCensusRegistration _arrayViewCensus;
+        private TextureCensusRegistration _flushCensus;
+        private TextureCensusRegistration _setCensus;
+
+        private TextureFormatCensus FormatCensus => _physicalMemory?.TextureCache.FormatCensus;
+
+        private TextureCensusRegistration RegisterHostTexture(TextureCreateInfo info, TextureAllocationRole role)
+        {
+            return FormatCensus?.Add(Info, info, _context.Capabilities, role) ?? default;
+        }
+
         private Texture _viewStorage;
 
         private List<Texture> _views;
@@ -307,6 +319,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                 TextureCreateInfo createInfo = TextureCache.GetCreateInfo(Info, _context.Capabilities, ScaleFactor);
                 HostTexture = _context.Renderer.CreateTexture(createInfo);
+                _hostCensus = RegisterHostTexture(createInfo, TextureAllocationRole.Storage);
 
                 SynchronizeMemory(); // Load the data.
                 if (ScaleMode == TextureScaleMode.Scaled)
@@ -331,6 +344,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                     TextureCreateInfo createInfo = TextureCache.GetCreateInfo(Info, _context.Capabilities, ScaleFactor);
                     HostTexture = _context.Renderer.CreateTexture(createInfo);
+                    _hostCensus = RegisterHostTexture(createInfo, TextureAllocationRole.Storage);
                 }
             }
         }
@@ -375,6 +389,7 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             TextureCreateInfo createInfo = TextureCache.GetCreateInfo(info, _context.Capabilities, ScaleFactor);
             texture.HostTexture = HostTexture.CreateView(createInfo, firstLayer, firstLevel);
+            texture._hostCensus = texture.RegisterHostTexture(createInfo, TextureAllocationRole.View);
 
             _viewStorage.AddView(texture);
 
@@ -513,19 +528,27 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="copy">True if the data should be copied to the texture, false otherwise</param>
         /// <param name="storage">Texture to use instead of creating one</param>
         /// <returns>A host texture containing a scaled version of this texture</returns>
-        private ITexture GetScaledHostTexture(float scale, bool copy, ITexture storage = null)
+        private ITexture GetScaledHostTexture(float scale, bool copy, ref TextureCensusRegistration registration, TextureAllocationRole role, ITexture storage = null)
         {
+            TextureCensusRegistration createdRegistration = registration;
             if (storage == null)
             {
                 TextureCreateInfo createInfo = TextureCache.GetCreateInfo(Info, _context.Capabilities, scale);
                 storage = _context.Renderer.CreateTexture(createInfo);
+                createdRegistration = RegisterHostTexture(createInfo, role);
             }
 
             if (copy)
             {
+                FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.ScaledCopy);
+                FormatCensus?.MarkUsage(createdRegistration, TextureObservedUsage.ScaledCopy);
                 HostTexture.CopyTo(storage, new Extents2D(0, 0, HostTexture.Width, HostTexture.Height), new Extents2D(0, 0, storage.Width, storage.Height), true);
             }
 
+            // The caller only stores the new host texture on success. Do not attach its census
+            // token to a different/null auxiliary texture if the copy throws. The outstanding
+            // issued allocation remains visible until an actual Release is observed.
+            registration = createdRegistration;
             return storage;
         }
 
@@ -555,11 +578,12 @@ namespace Ryujinx.Graphics.Gpu.Image
 
                 ScaleFactor = scale;
 
-                ITexture newStorage = GetScaledHostTexture(ScaleFactor, true);
+                TextureCensusRegistration newRegistration = default;
+                ITexture newStorage = GetScaledHostTexture(ScaleFactor, true, ref newRegistration, TextureAllocationRole.Storage);
 
                 Logger.Debug?.Print(LogClass.Gpu, $"  Copy performed: {HostTexture.Width}x{HostTexture.Height} to {newStorage.Width}x{newStorage.Height}");
 
-                ReplaceStorage(newStorage);
+                ReplaceStorage(newStorage, newRegistration);
 
                 // All views must be recreated against the new storage.
 
@@ -571,7 +595,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                     TextureCreateInfo viewCreateInfo = TextureCache.GetCreateInfo(view.Info, _context.Capabilities, scale);
                     ITexture newView = HostTexture.CreateView(viewCreateInfo, view.FirstLayer - FirstLayer, view.FirstLevel - FirstLevel);
 
-                    view.ReplaceStorage(newView);
+                    view.ReplaceStorage(newView, view.RegisterHostTexture(viewCreateInfo, TextureAllocationRole.View));
                     view.ScaleMode = newScaleMode;
                 }
             }
@@ -690,10 +714,12 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             MemoryOwner<byte> result = ConvertToHostCompatibleFormat(data);
 
+            FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.Upload);
+
             if (ScaleFactor != 1f && AllowScaledSetData())
             {
                 // If needed, create a texture to load from 1x scale.
-                ITexture texture = _setHostTexture = GetScaledHostTexture(1f, false, _setHostTexture);
+                ITexture texture = _setHostTexture = GetScaledHostTexture(1f, false, ref _setCensus, TextureAllocationRole.UploadAuxiliary, _setHostTexture);
 
                 texture.SetData(result);
 
@@ -713,6 +739,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="data">New data</param>
         public void SetData(MemoryOwner<byte> data)
         {
+            FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.Upload);
             BlacklistScale();
 
             Group.CheckDirty(this, true);
@@ -732,6 +759,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="level">Target level</param>
         public void SetData(MemoryOwner<byte> data, int layer, int level)
         {
+            FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.Upload);
             BlacklistScale();
 
             HostTexture.SetData(data, layer, level);
@@ -750,6 +778,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="region">Target sub-region of the texture to update</param>
         public void SetData(MemoryOwner<byte> data, int layer, int level, Rectangle<int> region)
         {
+            FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.Upload);
             BlacklistScale();
 
             HostTexture.SetData(data, layer, level, region);
@@ -767,6 +796,34 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="single">True to convert a single slice</param>
         /// <returns>Converted data</returns>
         public MemoryOwner<byte> ConvertToHostCompatibleFormat(ReadOnlySpan<byte> data, int level = 0, bool single = false)
+        {
+            TextureFormatCensus census = FormatCensus;
+            if (census == null)
+            {
+                return ConvertToHostCompatibleFormatCore(data, level, single);
+            }
+
+            TextureFallbackReason reason = TextureFormatCensus.GetFallbackReason(
+                Info, TextureCompatibility.ToHostCompatibleFormat(Info, _context.Capabilities).Format, _context.Capabilities);
+            long start = Stopwatch.GetTimestamp();
+            bool failed = true;
+            int outputBytes = 0;
+            try
+            {
+                MemoryOwner<byte> output = ConvertToHostCompatibleFormatCore(data, level, single);
+                outputBytes = output.Length;
+                failed = false;
+                return output;
+            }
+            finally
+            {
+                // Cumulative per-cache counters survive eviction. Output transfers to the caller;
+                // purpose-tagged MemoryOwner counters measure actual scratch lifetime separately.
+                census.RecordConversion(reason, data.Length, outputBytes, Stopwatch.GetTimestamp() - start, failed);
+            }
+        }
+
+        private MemoryOwner<byte> ConvertToHostCompatibleFormatCore(ReadOnlySpan<byte> data, int level, bool single)
         {
             int width = Info.Width;
             int height = Info.Height;
@@ -834,6 +891,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                         layers,
                         out MemoryOwner<byte> decoded))
                     {
+                        FormatCensus?.RecordInvalidAstc();
                         string texInfo = $"{Info.Target} {Info.FormatInfo.Format} {Info.Width}x{Info.Height}x{Info.DepthOrLayers} levels {Info.Levels}";
 
                         Logger.Debug?.Print(LogClass.Gpu, $"Invalid ASTC texture at 0x{Info.GpuAddress:X} ({texInfo}).");
@@ -1086,7 +1144,7 @@ namespace Ryujinx.Graphics.Gpu.Image
             if (ScaleFactor != 1f)
             {
                 // If needed, create a texture to flush back to host at 1x scale.
-                texture = _flushHostTexture = GetScaledHostTexture(1f, true, _flushHostTexture);
+                texture = _flushHostTexture = GetScaledHostTexture(1f, true, ref _flushCensus, TextureAllocationRole.ReadbackAuxiliary, _flushHostTexture);
             }
 
             return texture;
@@ -1121,6 +1179,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="texture">The specific host texture to flush. Defaults to this texture</param>
         private void GetTextureDataFromGpu(Span<byte> output, bool blacklist, ITexture texture = null)
         {
+            FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.Readback);
             PinnedSpan<byte> data;
 
             if (texture != null)
@@ -1166,6 +1225,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <param name="texture">The specific host texture to flush. Defaults to this texture</param>
         public void GetTextureDataSliceFromGpu(Span<byte> output, int layer, int level, bool blacklist, ITexture texture = null)
         {
+            FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.Readback);
             PinnedSpan<byte> data;
 
             if (texture != null)
@@ -1334,6 +1394,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// <returns>A view of this texture with the requested target, or null if the target is invalid for this texture</returns>
         public ITexture GetTargetTexture(Target target)
         {
+            FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.ShaderAccess);
             if (target == Target)
             {
                 return HostTexture;
@@ -1363,6 +1424,7 @@ namespace Ryujinx.Graphics.Gpu.Image
                 ITexture viewTexture = HostTexture.CreateView(createInfo, 0, 0);
 
                 _arrayViewTexture = viewTexture;
+                _arrayViewCensus = RegisterHostTexture(createInfo, TextureAllocationRole.View);
                 _arrayViewTarget = target;
 
                 return viewTexture;
@@ -1452,7 +1514,8 @@ namespace Ryujinx.Graphics.Gpu.Image
                 }
             }
 
-            ReplaceStorage(hostTexture);
+            ReplaceStorage(hostTexture, FormatCensus?.Add(info,
+                TextureCache.GetCreateInfo(info, _context.Capabilities, ScaleFactor), _context.Capabilities, TextureAllocationRole.View) ?? default);
 
             if (_viewStorage != this)
             {
@@ -1488,6 +1551,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// </summary>
         public void SignalModified()
         {
+            FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.GpuWrite);
             _scaledSetScore = Math.Max(0, _scaledSetScore - 1);
 
             if (_modifiedStale || Group.HasCopyDependencies)
@@ -1508,6 +1572,7 @@ namespace Ryujinx.Graphics.Gpu.Image
         {
             if (bound)
             {
+                FormatCensus?.MarkUsage(_hostCensus, TextureObservedUsage.GpuWrite);
                 _scaledSetScore = Math.Max(0, _scaledSetScore - 1);
             }
 
@@ -1533,11 +1598,12 @@ namespace Ryujinx.Graphics.Gpu.Image
         /// Replaces the host texture, while disposing of the old one if needed.
         /// </summary>
         /// <param name="hostTexture">The new host texture</param>
-        private void ReplaceStorage(ITexture hostTexture)
+        private void ReplaceStorage(ITexture hostTexture, TextureCensusRegistration registration)
         {
             DisposeTextures();
 
             HostTexture = hostTexture;
+            _hostCensus = registration;
         }
 
         /// <summary>
@@ -1762,14 +1828,18 @@ namespace Ryujinx.Graphics.Gpu.Image
 
             _currentData = null;
             HostTexture.Release();
+            FormatCensus?.Release(ref _hostCensus);
 
             _arrayViewTexture?.Release();
+            FormatCensus?.Release(ref _arrayViewCensus);
             _arrayViewTexture = null;
 
             _flushHostTexture?.Release();
+            FormatCensus?.Release(ref _flushCensus);
             _flushHostTexture = null;
 
             _setHostTexture?.Release();
+            FormatCensus?.Release(ref _setCensus);
             _setHostTexture = null;
         }
 

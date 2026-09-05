@@ -250,12 +250,15 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
         internal unsafe T* New<T>() where T : unmanaged, IGALCommand
         {
-            while (_producerPtr == (Volatile.Read(ref _consumerPtr) + QueueCount - 1) % QueueCount)
+            if (_producerPtr == (Volatile.Read(ref _consumerPtr) + QueueCount - 1) % QueueCount)
             {
-                // If incrementing the producer pointer would overflow, we need to wait.
-                // _consumerPtr can only move forward, so there's no race to worry about here.
-
-                Thread.Sleep(1);
+                using var timing = ExecutionTimings.Measure(ExecutionStage.GalQueueBackpressure);
+                while (_producerPtr == (Volatile.Read(ref _consumerPtr) + QueueCount - 1) % QueueCount)
+                {
+                    // The consumer can only move forward. Measure existing backpressure;
+                    // do not take timestamps on the ordinary per-draw path.
+                    Thread.Sleep(1);
+                }
             }
 
             int taken = _producerPtr;
@@ -315,11 +318,13 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             QueueCommand();
 
             // Wait for the command to complete.
+            using var timing = ExecutionTimings.Measure(ExecutionStage.GalInvokeWait);
             _invokeRun.Wait();
         }
 
         internal void WaitForFrame()
         {
+            using var timing = ExecutionTimings.Measure(ExecutionStage.GalFrameWait);
             _frameComplete.WaitOne();
         }
 
@@ -632,6 +637,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
                     _galWorkAvailable.Set();
 
+                    using var timing = ExecutionTimings.Measure(ExecutionStage.GalExternalInterruptWait);
                     _interruptRun.WaitOne();
                     _interruptFailure?.Throw();
                 }

@@ -1,3 +1,4 @@
+using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Logging;
 using Ryujinx.Graphics.GAL;
@@ -395,6 +396,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         public unsafe override void Present(ITexture texture, ImageCrop crop, Action swapBuffersCallback)
         {
+            using var timing = ExecutionTimings.Measure(ExecutionStage.PresentCpu);
             TextureView view = (TextureView)texture;
             int guestWidth = view.Width;
             int guestHeight = view.Height;
@@ -420,13 +422,17 @@ namespace Ryujinx.Graphics.Vulkan
 
             while (true)
             {
-                Result acquireResult = _gd.SwapchainApi.AcquireNextImage(
+                Result acquireResult;
+                using (ExecutionTimings.Measure(ExecutionStage.SwapchainAcquire))
+                {
+                    acquireResult = _gd.SwapchainApi.AcquireNextImage(
                     _device,
                     _swapchain,
                     ulong.MaxValue,
                     _imageAvailableSemaphores[semaphoreIndex],
                     new Fence(),
                     ref nextImage);
+                }
 
                 if (acquireResult == Result.ErrorOutOfDateKhr)
                 {
@@ -622,6 +628,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             lock (_gd.QueueLock)
             {
+                using var queueTiming = ExecutionTimings.Measure(ExecutionStage.QueuePresent);
                 queueResult = _gd.SwapchainApi.QueuePresent(_gd.Queue, in presentInfo);
             }
 

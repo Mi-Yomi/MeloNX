@@ -1,3 +1,4 @@
+using Ryujinx.Common;
 using Silk.NET.Vulkan;
 using System;
 using System.Threading;
@@ -104,6 +105,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void Wait()
         {
+            using var timing = ExecutionTimings.Measure(ExecutionStage.FenceWait);
             if (_concurrentWaitUnsupported)
             {
                 AcquireLock();

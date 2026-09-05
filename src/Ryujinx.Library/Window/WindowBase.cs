@@ -1,3 +1,4 @@
+using Ryujinx.Common;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Common.Configuration.Hid;
 using Ryujinx.Common.Logging;
@@ -235,6 +236,7 @@ namespace Ryujinx.Library
 
                         if (Device.WaitFifo())
                         {
+                            using var timing = ExecutionTimings.Measure(ExecutionStage.GuestFifoProcess);
                             Device.Statistics.RecordFifoStart();
                             Device.ProcessFrame();
                             Device.Statistics.RecordFifoEnd();
