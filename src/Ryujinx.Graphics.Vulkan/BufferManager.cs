@@ -74,6 +74,12 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly Device _device;
 
         private readonly IdList<BufferHolder> _buffers;
+        private readonly BufferLifecycleDiagnostics _diagnostics = new();
+
+        internal void PublishDiagnosticSnapshot() => _diagnostics.Publish();
+        internal string GetDiagnosticSnapshot() => _diagnostics.GetSnapshot();
+        internal ReadOnlyMemory<byte> GetDiagnosticSnapshotUtf8() => _diagnostics.GetSnapshotUtf8();
+        internal long DiagnosticPublishFailures => _diagnostics.PublishFailures;
 
         public int BufferCount { get; private set; }
 
@@ -97,6 +103,7 @@ namespace Ryujinx.Graphics.Vulkan
         public unsafe BufferHandle CreateHostImported(VulkanRenderer gd, nint pointer, int size)
         {
             (Auto<MemoryAllocation> allocation, ulong offset) = gd.HostMemoryAllocator.GetExistingAllocation(pointer, (ulong)size);
+            _diagnostics?.Attempt(size, BufferAllocationPurpose.Imported);
             VkBuffer buffer = default;
             bool bufferCreated = false;
             try
@@ -107,6 +114,7 @@ namespace Ryujinx.Graphics.Vulkan
             }
             catch
             {
+                _diagnostics?.Failed(size, BufferAllocationPurpose.Imported);
                 try
                 {
                     // A failed vkCreateBuffer does not produce an owned native handle.
@@ -121,7 +129,7 @@ namespace Ryujinx.Graphics.Vulkan
                 throw;
             }
 
-            BufferHolder holder = new(gd, _device, buffer, allocation, size, BufferAllocationType.HostMapped, BufferAllocationType.HostMapped, (int)offset);
+            BufferHolder holder = new(gd, _device, buffer, allocation, size, BufferAllocationType.HostMapped, BufferAllocationType.HostMapped, (int)offset, _diagnostics);
 
             ulong handle64 = (uint)_buffers.Add(holder);
             BufferCount++;
@@ -130,6 +138,21 @@ namespace Ryujinx.Graphics.Vulkan
         }
 
         public unsafe BufferHandle CreateSparse(VulkanRenderer gd, ReadOnlySpan<BufferRange> storageBuffers)
+        {
+            try
+            {
+                return CreateSparseCore(gd, storageBuffers);
+            }
+            catch
+            {
+                long size = 0;
+                foreach (BufferRange range in storageBuffers) size += range.Size;
+                _diagnostics?.Failed((int)size, BufferAllocationPurpose.SparseAlias);
+                throw;
+            }
+        }
+
+        private unsafe BufferHandle CreateSparseCore(VulkanRenderer gd, ReadOnlySpan<BufferRange> storageBuffers)
         {
             BufferUsageFlags usage = DefaultBufferUsageFlags;
 
@@ -144,6 +167,7 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 size += (ulong)range.Size;
             }
+            _diagnostics?.Attempt((int)size, BufferAllocationPurpose.SparseAlias);
 
             BufferCreateInfo bufferCreateInfo = new()
             {
@@ -220,7 +244,7 @@ namespace Ryujinx.Graphics.Vulkan
                 gd.Api.QueueBindSparse(gd.Queue, 1, in bindSparseInfo, default).ThrowOnError();
             }
 
-            BufferHolder holder = new(gd, _device, buffer, (int)size, storageAllocations);
+            BufferHolder holder = new(gd, _device, buffer, (int)size, storageAllocations, _diagnostics);
 
             BufferCount++;
 
@@ -234,9 +258,10 @@ namespace Ryujinx.Graphics.Vulkan
             int size,
             bool sparseCompatible = false,
             BufferAllocationType baseType = BufferAllocationType.HostMapped,
-            bool forceMirrors = false)
+            bool forceMirrors = false,
+            BufferAllocationPurpose purpose = BufferAllocationPurpose.General)
         {
-            return CreateWithHandle(gd, size, out _, sparseCompatible, baseType, forceMirrors);
+            return CreateWithHandle(gd, size, out _, sparseCompatible, baseType, forceMirrors, purpose);
         }
 
         public BufferHandle CreateWithHandle(
@@ -245,9 +270,10 @@ namespace Ryujinx.Graphics.Vulkan
             out BufferHolder holder,
             bool sparseCompatible = false,
             BufferAllocationType baseType = BufferAllocationType.HostMapped,
-            bool forceMirrors = false)
+            bool forceMirrors = false,
+            BufferAllocationPurpose purpose = BufferAllocationPurpose.General)
         {
-            holder = Create(gd, size, forConditionalRendering: false, sparseCompatible, baseType);
+            holder = Create(gd, size, forConditionalRendering: false, sparseCompatible, baseType, purpose);
             if (holder == null)
             {
                 return BufferHandle.Null;
@@ -276,7 +302,7 @@ namespace Ryujinx.Graphics.Vulkan
             else
             {
                 // Create a temporary buffer.
-                BufferHandle handle = CreateWithHandle(gd, size, out BufferHolder holder);
+                BufferHandle handle = CreateWithHandle(gd, size, out BufferHolder holder, purpose: BufferAllocationPurpose.Transient);
 
                 return new ScopedTemporaryBuffer(this, holder, handle, 0, size, false);
             }
@@ -358,8 +384,11 @@ namespace Ryujinx.Graphics.Vulkan
             int size,
             bool forConditionalRendering = false,
             bool sparseCompatible = false,
-            BufferAllocationType baseType = BufferAllocationType.HostMapped)
+            BufferAllocationType baseType = BufferAllocationType.HostMapped,
+            BufferAllocationPurpose purpose = BufferAllocationPurpose.General)
         {
+            if (forConditionalRendering) purpose = BufferAllocationPurpose.Query;
+            _diagnostics?.Attempt(size, purpose);
             BufferAllocationType type = baseType;
 
             if (baseType == BufferAllocationType.Auto)
@@ -367,16 +396,27 @@ namespace Ryujinx.Graphics.Vulkan
                 type = BufferAllocationType.HostMapped;
             }
 
-            (VkBuffer buffer, MemoryAllocation allocation, BufferAllocationType resultType) =
-                CreateBacking(gd, size, type, forConditionalRendering, sparseCompatible);
+            VkBuffer buffer;
+            MemoryAllocation allocation;
+            BufferAllocationType resultType;
+            try
+            {
+                (buffer, allocation, resultType) = CreateBacking(gd, size, type, forConditionalRendering, sparseCompatible);
+            }
+            catch
+            {
+                _diagnostics?.Failed(size, purpose);
+                throw;
+            }
 
             if (buffer.Handle != 0)
             {
-                BufferHolder holder = new(gd, _device, buffer, allocation, size, baseType, resultType);
+                BufferHolder holder = new(gd, _device, buffer, allocation, size, baseType, resultType, _diagnostics, purpose);
 
                 return holder;
             }
 
+            _diagnostics?.Failed(size, purpose);
             Logger.Error?.Print(LogClass.Gpu, $"Failed to create buffer with size 0x{size:X} and type \"{baseType}\".");
 
             return null;
@@ -511,14 +551,14 @@ namespace Ryujinx.Graphics.Vulkan
 
                 if (!hasConvertedIndexBuffer)
                 {
-                    convertedIndexBuffer = Create(gd, convertedCount * 4);
+                    convertedIndexBuffer = Create(gd, convertedCount * 4, purpose: BufferAllocationPurpose.Conversion);
                     indexBufferKey.SetBuffer(convertedIndexBuffer.GetBuffer());
                     indexBufferHolder.AddCachedConvertedBuffer(indexBuffer.Offset, indexBuffer.Size, indexBufferKey, convertedIndexBuffer);
                 }
 
                 if (!hasConvertedIndirectBuffer)
                 {
-                    convertedIndirectBuffer = Create(gd, indirectBuffer.Size);
+                    convertedIndirectBuffer = Create(gd, indirectBuffer.Size, purpose: BufferAllocationPurpose.Conversion);
                     indirectBufferHolder.AddCachedConvertedBuffer(indirectBuffer.Offset, indirectBuffer.Size, indirectBufferKey, convertedIndirectBuffer);
                 }
 

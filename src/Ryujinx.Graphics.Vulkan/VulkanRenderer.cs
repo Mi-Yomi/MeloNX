@@ -24,7 +24,7 @@ using SamplerCreateInfo = Ryujinx.Graphics.GAL.SamplerCreateInfo;
 
 namespace Ryujinx.Graphics.Vulkan
 {
-    public sealed class VulkanRenderer : IRenderer
+    public sealed partial class VulkanRenderer : IRenderer
     {
         [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "malloc_zone_pressure_relief")]
         private static extern nuint MallocZonePressureRelief(nint zone, nuint goal);
@@ -1106,6 +1106,7 @@ namespace Ryujinx.Graphics.Vulkan
 
         private void LogNativeMemoryOwners()
         {
+            PublishMemoryForensics();
             long now = Environment.TickCount64;
             if (OperatingSystem.IsIOS() && now - _lastNativeOwnerSampleMilliseconds >= 10_000)
             {
@@ -1292,6 +1293,7 @@ namespace Ryujinx.Graphics.Vulkan
                 return;
             }
 
+            _forensicTrimStage.Set("scratch_and_policy");
             // Release idle scratch roots before scheduled GC. No live owner is invalidated.
             long scratchReleased = OperatingSystem.IsIOS() && availableMemoryBytes <= 512UL * 1024 * 1024
                 ? MemoryOwner<byte>.TrimPool(16L * 1024 * 1024)
@@ -1318,6 +1320,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (runAggressiveTrim)
             {
+                _forensicTrimStage.Set("derived_buffer_and_pipeline_cache");
                 _lastHeavyMemoryTrimMilliseconds = now;
 
                 // Derived index and vertex buffers are reproducible from their source buffers.
@@ -1332,11 +1335,14 @@ namespace Ryujinx.Graphics.Vulkan
             bool deviceIdleRequired = !OperatingSystem.IsIOS() || runAggressiveTrim || runReusableDescriptorTrim;
             if (deviceIdleRequired)
             {
+                _forensicTrimStage.Set("flush_commands");
                 FlushAllCommands();
+                _forensicTrimStage.Set("wait_device_idle");
                 WaitForDeviceIdleSynchronized();
             }
 
             // Trim retires only signalled fences. Unsubmitted/in-flight dependencies survive.
+            _forensicTrimStage.Set("retire_command_dependencies");
             CommandBufferPoolTrimResult commandBufferTrim = CommandBufferPool.Trim();
             var backgroundTrim = BackgroundResources.Trim();
             int pipelineVariants = 0;
@@ -1355,6 +1361,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (runReusableDescriptorTrim)
             {
+                _forensicTrimStage.Set("descriptor_cache");
                 _lastDescriptorMemoryTrimMilliseconds = now;
                 var descriptorResult = PipelineLayoutCache.TrimReusableDescriptorSets();
                 descriptorLayouts = descriptorResult.Layouts;
@@ -1374,12 +1381,14 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (runManagedCollection)
             {
+                _forensicTrimStage.Set("managed_gc");
                 _lastManagedMemoryCollectionMilliseconds = now;
                 long collectionStart = Stopwatch.GetTimestamp();
                 GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: false);
                 managedCollectionDurationMicroseconds = Stopwatch.GetElapsedTime(collectionStart).Ticks / 10;
             }
 
+            _forensicTrimStage.Set("malloc_pressure_relief");
             nuint mallocRelieved = 0;
             if (OperatingSystem.IsIOS())
             {
@@ -1400,6 +1409,8 @@ namespace Ryujinx.Graphics.Vulkan
             GCMemoryInfo gcInfoAfter = GC.GetGCMemoryInfo();
             var deviceMemoryAfter = GetDeviceMemoryBudget();
             MemoryAllocatorStatistics allocatorAfter = MemoryAllocator.GetStatistics();
+
+            _forensicTrimStage.Set("complete");
 
             Logger.Warning?.Print(
                 LogClass.Gpu,

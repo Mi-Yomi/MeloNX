@@ -19,6 +19,19 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     private let lowTrimRepeatInterval: TimeInterval = 20
     private let criticalTrimRepeatInterval: TimeInterval = 6
     private var timer: DispatchSourceTimer?
+    private var pressureSource: DispatchSourceMemoryPressure?
+    private var cadence = MemoryForensicCadence()
+    private var nativeSampler: MemoryForensicNativeSampler?
+    private var coreSnapshotReader: MemoryForensicCoreReader?
+    private var forensicJournal: MemoryForensicJournal?
+    private var breadcrumbJournal: MemoryForensicJournal?
+    private var forensicSampleSequence: UInt64 = 0
+    private var forensicWriteFailures: UInt64 = 0
+    private var forensicUnavailablePackets: UInt64 = 0
+    private var forensicSnapshotFailures: UInt64 = 0
+    private var lastSampleDurationMs = 0.0
+    private var forensicSessionTimeUTC: String?
+    private var forensicSourceCommit: String?
     private var coreActive = false
     private var coreReturnedAtUptime: TimeInterval?
     private var coreExitCode: Int?
@@ -135,17 +148,44 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 lowSampleStreak = 0
                 lastAcceptedTrimUptime = -Double.infinity
                 lastAcceptedCriticalTrimUptime = -Double.infinity
+                cadence = MemoryForensicCadence()
+                forensicSampleSequence = 0
+                forensicWriteFailures = 0
+                forensicUnavailablePackets = 0
+                forensicSnapshotFailures = 0
+                lastSampleDurationMs = 0
+                let sessionTimeUTC = Self.timestamp()
+                forensicSessionTimeUTC = sessionTimeUTC
+                forensicSourceCommit = metadata.sourceCommit
                 try openManagedCrashMarker(in: directory)
                 try openSegment()
+                openForensicJournals(in: directory)
+                nativeSampler = MemoryForensicNativeSampler()
+                coreSnapshotReader = MemoryForensicCoreReader()
 
                 var header: [String: Any] = [
-                    "schema_version": 6,
+                    "schema_version": 7,
                     "event": "session_start",
-                    "time_utc": Self.timestamp(),
+                    "time_utc": sessionTimeUTC,
                     "device_model": metadata.model,
                     "os": metadata.os,
                     "physical_memory_bytes": metadata.physicalMemory,
                     "sample_interval_seconds": 2,
+                    "forensic_sample_interval_low_headroom_seconds": 1,
+                    "forensic_fast_sample_enter_headroom_bytes": MemoryForensicCadence.criticalHeadroom,
+                    "forensic_fast_sample_exit_headroom_bytes": MemoryForensicCadence.recoveryHeadroom,
+                    "forensic_core_snapshot_capacity_bytes": MemoryForensicCoreReader.capacity,
+                    "forensic_segment_limit_bytes": 4 * 1024 * 1024,
+                    "forensic_segment_count": 2,
+                    "forensic_breadcrumb_segment_limit_bytes": 128 * 1024,
+                    "forensic_breadcrumb_segment_count": 2,
+                    "forensic_malloc_sample_interval_seconds": 10,
+                    "forensic_vm_page_walk_enabled": false,
+                    "forensic_native_sampler_schema": 1,
+                    "forensic_core_snapshot_statuses": "positive=bytes;0=empty;-1=unavailable;-2=capacity;-3=busy;-4=core_error;-5=invalid_payload",
+                    "forensic_memory_accounting": "task_vm_ledgers, malloc, Metal and core owners overlap; do not sum them as physical RAM",
+                    "forensic_metal_metric": "system MTLDevice.currentAllocatedSize; overlaps MoltenVK VK_EXT_memory_budget",
+                    "forensic_abrupt_termination_capture": "prewritten durable breadcrumbs; no callback guaranteed for jetsam/SIGKILL",
                     "post_stop_sample_seconds": 60,
                     "selected_jit_cache": metadata.selectedJit.title,
                     "increased_memory_limit_entitlement": metadata.increasedMemoryLimit,
@@ -227,7 +267,8 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 guard file != nil else { return }
                 installObservers()
                 let sampler = DispatchSource.makeTimerSource(queue: queue)
-                sampler.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(100))
+                sampler.schedule(deadline: .now() + .seconds(cadence.intervalSeconds),
+                                 repeating: .seconds(cadence.intervalSeconds), leeway: .milliseconds(100))
                 sampler.setEventHandler { [weak self] in
                     self?.sampleTick()
                 }
@@ -425,6 +466,16 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     }
 
     private func installObservers() {
+        let pressure = DispatchSource.makeMemoryPressureSource(eventMask: [.normal, .warning, .critical], queue: queue)
+        pressure.setEventHandler { [weak self, weak pressure] in
+            guard let self, let pressure else { return }
+            let flags = pressure.data
+            let event = flags.contains(.critical) ? "dispatch_memory_critical" :
+                (flags.contains(.warning) ? "dispatch_memory_warning" : "dispatch_memory_normal")
+            self.recordSample(event: event)
+        }
+        pressureSource = pressure
+        pressure.resume()
         let events: [(Notification.Name, String)] = [
             (UIApplication.didReceiveMemoryWarningNotification, "memory_warning"),
             (UIApplication.didEnterBackgroundNotification, "background"),
@@ -445,7 +496,15 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
     }
 
     private func recordSample(event: String, exitCode: Int? = nil) {
+        // JSON/Metal/Foundation bridging must not retain temporary Objective-C
+        // objects until an unspecified outer GCD autorelease pool is drained.
+        autoreleasepool { recordSampleImpl(event: event, exitCode: exitCode) }
+    }
+
+    private func recordSampleImpl(event: String, exitCode: Int?) {
         guard file != nil else { return }
+        let sampleStarted = ProcessInfo.processInfo.systemUptime
+        forensicSampleSequence += 1
         let availableMemory = UInt64(os_proc_available_memory())
         var info = task_vm_info_data_t()
         let capacity = MemoryLayout<task_vm_info_data_t>.stride / MemoryLayout<integer_t>.stride
@@ -461,19 +520,21 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             "elapsed_seconds": (ProcessInfo.processInfo.systemUptime - startedAtUptime).rounded(),
             "os_proc_available_memory_bytes": availableMemory
         ]
+        record["forensic_sample_sequence"] = forensicSampleSequence
+        if let forensicSessionTimeUTC { record["session_time_utc"] = forensicSessionTimeUTC }
+        if let forensicSourceCommit { record["source_commit"] = forensicSourceCommit }
+        record["elapsed_precise_seconds"] = sampleStarted - startedAtUptime
+        let oldInterval = cadence.intervalSeconds
+        let interval = cadence.update(availableBytes: availableMemory, active: coreActive)
+        if interval != oldInterval {
+            timer?.schedule(deadline: .now() + .seconds(interval), repeating: .seconds(interval), leeway: .milliseconds(100))
+        }
+        record["effective_sample_interval_seconds"] = interval
         record["core_active"] = coreActive
         record["thermal_state_raw"] = ProcessInfo.processInfo.thermalState.rawValue
         record["low_power_mode"] = ProcessInfo.processInfo.isLowPowerModeEnabled
         if let returnedAt = coreReturnedAtUptime {
             record["post_stop_elapsed_seconds"] = ProcessInfo.processInfo.systemUptime - returnedAt
-        }
-        if coreActive {
-            appendJitCacheUsage(to: &record)
-        }
-        if let pressure = evaluateMemoryPressure(event: event, availableMemory: availableMemory) {
-            record["gpu_trim_request"] = pressure.level
-            record["gpu_trim_source"] = pressure.source
-            record["gpu_trim_request_result"] = pressure.result
         }
         if result == KERN_SUCCESS {
             sampledPeak = max(sampledPeak, info.phys_footprint)
@@ -486,11 +547,93 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
             record["task_info_error"] = result
         }
         if let exitCode { record["emulation_exit_code"] = exitCode }
+        // Persist the cheap kernel observation before allocator introspection or
+        // any managed ABI. A final incomplete phase localizes where sampling ended.
+        writeForensicBreadcrumb(phase: "before_native_allocators", record: record)
+        nativeSampler?.append(now: sampleStarted, to: &record)
+        writeForensicBreadcrumb(phase: "before_jit_query", record: record)
+        if coreActive { appendJitCacheUsage(to: &record) }
+        writeForensicBreadcrumb(phase: "before_pressure_report", record: record)
+        if let pressure = evaluateMemoryPressure(event: event, availableMemory: availableMemory) {
+            record["gpu_trim_request"] = pressure.level
+            record["gpu_trim_source"] = pressure.source
+            record["gpu_trim_request_result"] = pressure.result
+        }
+        writeForensicBreadcrumb(phase: "before_core_snapshot", record: record)
+        let coreStarted = ProcessInfo.processInfo.systemUptime
+        let coreSample = coreSnapshotReader?.capture { buffer, capacity in
+            get_memory_forensic_snapshot(buffer, capacity)
+        }
+        record["forensic_core_snapshot_elapsed_precise_seconds"] = coreStarted - startedAtUptime
+        record["forensic_core_snapshot_status"] = coreSample?.status ?? -1
+        record["forensic_core_snapshot_bytes"] = coreSample?.bytes ?? 0
+        record["forensic_core_snapshot_duration_ms"] = (ProcessInfo.processInfo.systemUptime - coreStarted) * 1000
+        if let status = coreSample?.status, status < 0 {
+            if status == -1 || status == -3 { forensicUnavailablePackets += 1 }
+            else { forensicSnapshotFailures += 1 }
+        }
+        record["forensic_unavailable_packets"] = forensicUnavailablePackets
+        record["forensic_snapshot_failures"] = forensicSnapshotFailures
+        record["forensic_write_failures"] = forensicWriteFailures
+        record["forensic_previous_sample_duration_ms"] = lastSampleDurationMs
+        // Cumulative costs include actual fsync calls, including rotation. Together
+        // with the previous whole-sample duration they quantify diagnostic overhead.
+        if let breadcrumbJournal {
+            record["forensic_breadcrumb_sync_count"] = breadcrumbJournal.synchronizationCount
+            record["forensic_breadcrumb_sync_duration_ms"] = breadcrumbJournal.synchronizationDurationMilliseconds
+        }
+        if let forensicJournal {
+            record["forensic_packet_sync_count"] = forensicJournal.synchronizationCount
+            record["forensic_packet_sync_duration_ms"] = forensicJournal.synchronizationDurationMilliseconds
+        }
+        record["forensic_journal_available"] = forensicJournal != nil
+        record["forensic_breadcrumbs_available"] = breadcrumbJournal != nil
+        var packet: [String: Any] = ["schema_version": 1, "event": "memory_forensic_snapshot", "native": record]
+        if let core = coreSample?.value { packet["core"] = core }
+        do {
+            try forensicJournal?.write(packet)
+        } catch {
+            forensicWriteFailures += 1
+            forensicJournal?.close()
+            forensicJournal = nil
+        }
+        record["forensic_write_failures"] = forensicWriteFailures
         do {
             try writeRecord(record)
+            writeForensicBreadcrumb(phase: "sample_complete", record: record)
         } catch {
             closeSession()
             print("Memory diagnostics stopped after a write error.")
+        }
+        lastSampleDurationMs = (ProcessInfo.processInfo.systemUptime - sampleStarted) * 1000
+    }
+
+    private func openForensicJournals(in directory: URL) {
+        do {
+            forensicJournal = try MemoryForensicJournal(directory: directory, stem: "memory-forensics",
+                segmentLimit: 4 * 1024 * 1024, recordLimit: 128 * 1024)
+        } catch { forensicWriteFailures += 1 }
+        do {
+            breadcrumbJournal = try MemoryForensicJournal(directory: directory, stem: "memory-breadcrumbs",
+                segmentLimit: 128 * 1024, recordLimit: 4096)
+        } catch { forensicWriteFailures += 1 }
+    }
+
+    private func writeForensicBreadcrumb(phase: String, record: [String: Any]) {
+        guard let breadcrumbJournal else { return }
+        var breadcrumb: [String: Any] = ["schema_version": 1, "event": "memory_forensic_phase", "phase": phase,
+            "phase_elapsed_precise_seconds": ProcessInfo.processInfo.systemUptime - startedAtUptime]
+        for key in ["time_utc", "session_time_utc", "source_commit", "elapsed_precise_seconds", "forensic_sample_sequence", "core_active",
+                    "os_proc_available_memory_bytes", "phys_footprint_bytes", "task_vm_internal_bytes",
+                    "task_vm_compressed_bytes", "task_vm_limit_bytes_remaining", "metal_current_allocated_size_bytes",
+                    "forensic_core_snapshot_status", "forensic_write_failures"] {
+            if let value = record[key] { breadcrumb[key] = value }
+        }
+        do { try breadcrumbJournal.write(breadcrumb) }
+        catch {
+            forensicWriteFailures += 1
+            breadcrumbJournal.close()
+            self.breadcrumbJournal = nil
         }
     }
 
@@ -537,6 +680,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         record["task_vm_external_bytes"] = info.external
         record["task_vm_device_bytes"] = info.device
         record["task_vm_region_count"] = info.region_count
+        MemoryForensicTaskFields.append(info, count: infoCount, to: &record)
     }
 
     private func evaluateMemoryPressure(event: String, availableMemory: UInt64) -> (level: String, source: String, result: Int32)? {
@@ -668,10 +812,20 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         postStopMilestones.removeAll()
         timer?.cancel()
         timer = nil
+        pressureSource?.cancel()
+        pressureSource = nil
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers.removeAll()
         try? file?.close()
         file = nil
+        forensicJournal?.close()
+        forensicJournal = nil
+        breadcrumbJournal?.close()
+        breadcrumbJournal = nil
+        nativeSampler = nil
+        coreSnapshotReader = nil
+        forensicSessionTimeUTC = nil
+        forensicSourceCommit = nil
         replaceManagedCrashMarkerFD(with: -1)
         sessionDirectory = nil
     }
@@ -714,6 +868,8 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
 
     private func makeExportSnapshot() throws -> [URL] {
         try file?.synchronize()
+        try forensicJournal?.synchronize()
+        try breadcrumbJournal?.synchronize()
         synchronizeManagedCrashMarker()
         guard let latest = sessionDirectory ?? sessionDirectories().first else {
             throw ExportError.noSessions
@@ -726,7 +882,9 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         try fileManager.createDirectory(at: exportDirectory, withIntermediateDirectories: true)
 
         var exported: [URL] = []
-        for name in ["session.json", "managed-crash-entry.jsonl", "memory-previous.jsonl", "memory.jsonl"] {
+        for name in ["session.json", "managed-crash-entry.jsonl", "memory-previous.jsonl", "memory.jsonl",
+                     "memory-forensics-previous.jsonl", "memory-forensics.jsonl",
+                     "memory-breadcrumbs-previous.jsonl", "memory-breadcrumbs.jsonl"] {
             let source = latest.appendingPathComponent(name)
             if fileManager.fileExists(atPath: source.path) {
                 let destination = exportDirectory.appendingPathComponent(name)
@@ -766,3 +924,6 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         return commit.isEmpty || commit.contains("$(") ? nil : commit
     }
 }
+
+@_silgen_name("GetMemoryForensicSnapshot")
+nonisolated private func get_memory_forensic_snapshot(_ output: UnsafeMutablePointer<UInt8>, _ capacity: Int32) -> Int32

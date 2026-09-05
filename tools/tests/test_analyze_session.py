@@ -283,6 +283,203 @@ class SessionAnalysisTests(unittest.TestCase):
         self.assertEqual("unknown", row["version"])
         self.assertIn("Minimum observed headroom: unknown", (out / "analysis.md").read_text(encoding="utf-8"))
 
+    def test_inactive_regular_samples_are_post_stop_without_counting_events_as_samples(self):
+        report = self.analyze([self.sample(0, core_active=True), self.sample(2),
+            dict(event="main_returned", elapsed_seconds=3, core_active=False),
+            self.sample(4, core_active=False), dict(event="post_stop_sample", elapsed_seconds=6)])
+        self.assertEqual(2, report["summary"]["memory_samples"])
+        self.assertEqual(2, report["summary"]["post_stop_samples"])
+        self.assertEqual("stop_or_core_inactive_observed", report["forensic_evidence"]["assessment"])
+
+    def test_low_active_tail_is_pressure_evidence_but_never_proves_system_termination(self):
+        report = self.analyze([self.sample(0, core_active=True, os_proc_available_memory_bytes=100 * analyzer.MIB),
+            self.sample(2, core_active=True, os_proc_available_memory_bytes=14 * analyzer.MIB)])
+        evidence = report["forensic_evidence"]
+        self.assertEqual("memory_limit_pressure_at_active_recording_end", evidence["assessment"])
+        self.assertEqual("unconfirmed_no_matching_system_crash_evidence", evidence["system_termination"])
+        self.assertEqual(2, evidence["last_memory_sample"]["session_seconds"])
+
+    def test_recovery_unknown_headroom_stale_sample_and_stop_do_not_inherit_old_pressure(self):
+        low = self.sample(0, core_active=True, os_proc_available_memory_bytes=0)
+        for tail, core, expected in (
+            ([self.sample(2, core_active=True, os_proc_available_memory_bytes=500 * analyzer.MIB)], None, "recording_end_cause_unknown"),
+            ([self.sample(2, core_active=True)], None, "recording_end_cause_unknown"),
+            ([], [self.line(0, "buffers_issued=1"), self.line(20, "buffers_issued=2")], "last_memory_observation_precedes_core_coverage"),
+            ([dict(event="stop_requested", elapsed_seconds=1)], None, "stop_or_core_inactive_observed"),
+        ):
+            with self.subTest(expected=expected, tail=tail):
+                report = self.analyze([low] + tail, core_records=core)
+                self.assertEqual(expected, report["forensic_evidence"]["assessment"])
+
+    def test_missing_core_activity_is_not_assumed_active_at_low_headroom(self):
+        report = self.analyze([self.sample(2, os_proc_available_memory_bytes=0)])
+        self.assertEqual("low_headroom_observed_core_activity_unknown", report["forensic_evidence"]["assessment"])
+
+    def test_presentation_plateau_requires_prior_frames_and_excludes_stop_and_recovery(self):
+        core = [self.line(t, f"total_presented={frames}", "Presentation telemetry")
+            for t, frames in ((0, 0), (10, 0), (20, 10), (30, 10), (40, 10), (50, 20))]
+        report = self.analyze(core_records=core)
+        periods = report["forensic_evidence"]["presentation"]["zero_progress_periods"]
+        self.assertEqual(1, len(periods))
+        self.assertEqual((20, 40, 20), tuple(periods[0][key] for key in ("start_seconds", "end_seconds", "duration_seconds")))
+        report = self.analyze([dict(event="stop_requested", elapsed_seconds=25)], core_records=core)
+        self.assertIsNone(report["forensic_evidence"]["presentation"]["longest_zero_progress_seconds"])
+
+    def test_sparse_counter_plateau_does_not_certify_unobserved_stall(self):
+        report = self.analyze(core_records=[self.line(t, "total_presented=10", "Presentation telemetry") for t in (0, 50)])
+        self.assertIsNone(report["forensic_evidence"]["presentation"]["longest_zero_progress_seconds"])
+
+    def test_nested_backend_metrics_and_quoted_guest_name_preserve_namespaces(self):
+        report = self.analyze(core_records=[self.line(0, "queue_pending=0, backend=[query_copies_recorded=10, counter=[retired=5]], tail=9"),
+            self.line(10, 'stall=1, pid=42, uid=5, host_name="worker, [buffer]=a", waiting_sync=True', "Guest stall thread v1")])
+        self.assertEqual(5, report["records"][0]["metrics"]["backend.counter.retired"])
+        self.assertEqual(9, report["records"][0]["metrics"]["tail"])
+        self.assertEqual("worker, [buffer]=a", report["records"][1]["metrics"]["host_name"])
+        self.assertEqual(1, report["forensic_evidence"]["diagnostic_event_counts"]["guest_stall_thread"])
+
+    def test_census_record_and_diagnostic_summary_limits_are_explicit(self):
+        payload = "created=100; " + "; ".join(f"bin=[key={index},created=1]" for index in range(100)) + "; census_cpu_ms=1"
+        report = self.analyze(core_records=[self.line(0, payload, "Texture format census v1")] +
+            [self.line(10, f"stall=1,pid=42,uid={index},waiting_sync=True", "Guest stall thread v1") for index in range(100)])
+        self.assertEqual(35, report["quality"]["omitted_census_records"])
+        self.assertEqual(65, len([r for r in report["records"] if r["stream"] == "texture_census_bin"]))
+        evidence = report["forensic_evidence"]
+        self.assertEqual(100, evidence["diagnostic_event_counts"]["guest_stall_thread"])
+        self.assertEqual(32, len(evidence["diagnostic_tail"]["guest_stall_thread"]))
+        out = self.root / "bounded-report"
+        analyzer.write_reports(report, out)
+        self.assertNotIn("texture_census_bin", (out / "forensic-summary.json").read_text(encoding="utf-8"))
+
+    def forensic_packet(self, seconds, core=None, **native):
+        return {"event": "memory_forensic_snapshot", "schema_version": 1, "native": {
+            "event": "sample", "time_utc": f"2026-09-05T06:00:{int(seconds):02d}Z", "elapsed_precise_seconds": seconds,
+            "source_commit": self.session["source_commit"], "session_time_utc": self.session["time_utc"],
+            "core_active": True, "forensic_core_snapshot_status": 100,
+            "forensic_core_snapshot_elapsed_precise_seconds": seconds + 0.01,
+            "forensic_core_snapshot_duration_ms": 0.5, **native}, "core": core}
+
+    def test_forensic_cached_rates_use_owner_capture_time_and_do_not_repeat_cached_samples(self):
+        packets = []
+        for seconds, capture, frames in ((1, 500, 10), (2, 500, 10), (3, 2500, 20)):
+            payload = {"schema_version": 1, "monotonic_ms": seconds * 1000,
+                "producer": {"observed": True, "captured_at_monotonic_ms": capture, "age_ms": seconds * 1000 - capture,
+                    "publish_failures": 0, "data": {"presentation": f"presented={frames}, enqueued={frames}",
+                        "scratch_purposes": [{"purpose": "Mirror", "created_bytes": frames * 100, "leased_bytes": 40}]}}}
+            packets.append(self.forensic_packet(seconds, payload))
+        report = self.analyze(forensic_paths=[self.memory(packets, "forensics.jsonl")])
+        owners = [r for r in report["records"] if r["stream"] == "forensic_producer"]
+        self.assertEqual(2, len(owners))
+        interval = next(r for r in report["intervals"] if r["stream"] == "forensic_producer")
+        self.assertEqual("core_monotonic", interval["clock"])
+        self.assertEqual((0.5, 2.5, 5), (interval["start_seconds"], interval["end_seconds"], interval["presented_fps"]))
+        self.assertEqual("unknown", interval["phase_end"])
+        self.assertAlmostEqual(0.51, owners[0]["estimated_capture_session_seconds"])
+        self.assertEqual(2, report["quality"]["reused_cached_forensic_snapshots"])
+        scratch = next(r for r in report["intervals"] if r["stream"] == "forensic_scratch_purpose")
+        self.assertEqual(500, scratch["rates"]["created_bytes"]["per_second"])
+        self.assertIsNone(scratch["rates"]["created_bytes"]["per_frame"])
+
+    def test_inner_buffer_cache_timestamp_not_outer_publication_controls_rates(self):
+        packets = []
+        for seconds, sampled, count in ((1, 400, 1), (2, 400, 1), (3, 2400, 5)):
+            cache = {"sampled_at_monotonic_ms": sampled, "cached_logical_bytes": 400,
+                "cumulative": {"created": {"count": count, "logical_bytes": count * 100,
+                    "by_kind": {"physical": {"size_bucket_counts": [count, 0, 0, 0], "logical_bytes": count * 100}}}},
+                "recent_events": [{"logical_bytes": 100, "lifetime_id": count}]}
+            payload = {"schema_version": 1, "monotonic_ms": seconds * 1000,
+                "producer": {"observed": True, "captured_at_monotonic_ms": seconds * 1000 - 100,
+                    "data": {"physical_memories": [{"pid": 109, "buffer_cache": cache}]}}}
+            packets.append(self.forensic_packet(seconds, payload))
+        report = self.analyze(forensic_paths=[self.memory(packets, "forensics.jsonl")])
+        interval = next(r for r in report["intervals"] if r["stream"] == "forensic_buffer_cache")
+        self.assertEqual(2, interval["rates"]["cumulative.created.count"]["per_second"])
+        self.assertEqual(200, interval["rates"]["cumulative.created.logical_bytes"]["per_second"])
+        self.assertEqual(2, interval["rates"]["cumulative.created.by_kind.physical.size_bucket_counts.0"]["per_second"])
+        self.assertNotIn("cached_logical_bytes", interval["rates"])
+        self.assertNotIn("recent_events", interval["rates"])
+
+    def test_forensic_rotation_duplicate_and_truncated_tail_are_reported(self):
+        packet = self.forensic_packet(1, {"schema_version": 1, "monotonic_ms": 1000, "managed": {"allocated_bytes_total": 100}})
+        one = self.memory([packet], "forensic-previous.jsonl")
+        two = self.memory([packet, self.forensic_packet(2)], "forensic.jsonl", '{"event":')
+        report = self.analyze(forensic_paths=[two, one])
+        self.assertEqual(2, report["forensic_evidence"]["forensic_packets"]["observed"])
+        self.assertEqual(1, report["quality"]["duplicate_forensic_records"])
+        self.assertFalse(report["quality"]["invalid_forensic_records"][0]["newline_terminated"])
+        self.assertEqual(1, len([r for r in report["records"] if r["stream"] == "forensic_managed"]))
+
+    def test_forensic_other_source_session_and_wall_anchor_are_rejected(self):
+        for changed in ({"source_commit": "b" * 40}, {"session_time_utc": "2026-09-04T06:00:00Z"}, {"elapsed_precise_seconds": 40}):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "Forensic"):
+                self.analyze(forensic_paths=[self.memory([self.forensic_packet(1, **changed)], "forensic.jsonl")])
+
+    def test_unavailable_failed_and_unobserved_core_are_unknown_not_zero(self):
+        packets = [self.forensic_packet(index, {"schema_version": 1, "monotonic_ms": index * 1000,
+            "producer": {"observed": False}}, forensic_core_snapshot_status=status)
+            for index, status in enumerate((-1, -2, -3, -4, -5, 100), 1)]
+        report = self.analyze(forensic_paths=[self.memory(packets, "forensic.jsonl")])
+        status = report["forensic_evidence"]["forensic_packets"]["status_counts"]
+        self.assertEqual({"available": 1, "unavailable_or_busy": 2, "failed_or_invalid": 3}, status)
+        self.assertFalse(any(r["stream"] == "forensic_producer" for r in report["records"]))
+        self.assertIsNone(report["summary"]["presented_fps"]["weighted_mean"])
+
+    def test_forensic_native_unavailable_placeholders_and_missing_cached_timestamp_stay_unknown(self):
+        payload = {"schema_version": 1, "monotonic_ms": 1000, "renderer": {"base": {"backend": {
+            "observed": True, "captured_at_monotonic_ms": 900,
+            "data": {"buffers": {"status": "not_sampled", "cumulative": {"created": {"count": 0}}}}}}}}
+        packet = self.forensic_packet(1, payload, jit_cache_available=False, jit_cache_used_bytes=0,
+            task_vm_limit_bytes_remaining_available=False, task_vm_limit_bytes_remaining=0)
+        report = self.analyze(forensic_paths=[self.memory([packet], "forensic.jsonl")])
+        native = next(r for r in report["records"] if r["stream"] == "forensic_native")
+        self.assertIsNone(native["metrics"]["jit_cache_used_bytes"])
+        self.assertIsNone(native["metrics"]["task_vm_limit_bytes_remaining"])
+        self.assertFalse(any(r["stream"] == "forensic_buffer_lifecycle" for r in report["records"]))
+        self.assertTrue(any(r["reason"] == "missing_capture_time" for r in report["quality"]["invalid_forensic_records"]))
+
+    def test_rotated_breadcrumbs_order_phases_by_precise_phase_time(self):
+        base = {**self.forensic_packet(2)["native"], "event": "memory_forensic_phase", "schema_version": 1}
+        before = dict(base, phase="before_core_snapshot", phase_elapsed_precise_seconds=2.01)
+        complete = dict(base, phase="sample_complete", phase_elapsed_precise_seconds=2.02)
+        report = self.analyze(breadcrumb_paths=[self.memory([complete], "breadcrumbs.jsonl"), self.memory([before], "breadcrumbs-previous.jsonl")])
+        self.assertTrue(report["forensic_evidence"]["breadcrumbs"]["last_sample_complete_recorded"])
+
+    def test_breadcrumb_latest_kernel_sample_survives_missing_complete_packet_without_cause_claim(self):
+        breadcrumb = {**self.forensic_packet(4)["native"], "event": "memory_forensic_phase", "schema_version": 1,
+            "phase": "before_core_snapshot", "phase_elapsed_precise_seconds": 4.05,
+            "os_proc_available_memory_bytes": 14 * analyzer.MIB}
+        report = self.analyze([self.sample(2, core_active=True, os_proc_available_memory_bytes=100 * analyzer.MIB)],
+            breadcrumb_paths=[self.memory([breadcrumb], "breadcrumbs.jsonl")])
+        evidence = report["forensic_evidence"]
+        self.assertEqual("memory_limit_pressure_at_active_recording_end", evidence["assessment"])
+        self.assertEqual("forensic_breadcrumb", evidence["last_memory_sample"]["stream"])
+        self.assertFalse(evidence["breadcrumbs"]["last_sample_complete_recorded"])
+        self.assertIn("not the cause", evidence["breadcrumbs"]["note"])
+
+    def test_precise_adaptive_samples_and_cumulative_compression_have_real_rates(self):
+        records = [self.sample(0, elapsed_precise_seconds=0.1, task_vm_compressed_lifetime_bytes=100,
+            task_vm_compressed_bytes=50, effective_sample_interval_seconds=2),
+            self.sample(1, elapsed_precise_seconds=1.2, task_vm_compressed_lifetime_bytes=210,
+                task_vm_compressed_bytes=60, effective_sample_interval_seconds=1)]
+        report = self.analyze(records)
+        self.assertAlmostEqual(100, report["intervals"][0]["rates"]["task_vm_compressed_lifetime_bytes"]["per_second"])
+        self.assertNotIn("task_vm_compressed_bytes", report["intervals"][0]["rates"])
+        self.assertNotIn("task_vm_compressed_lifetime_bytes", {r["metric"] for r in report["phase_slopes"]})
+
+    def test_forensic_oversized_record_arrays_and_conflicting_cache_are_visible(self):
+        payload = {"schema_version": 1, "monotonic_ms": 1000,
+            "producer": {"observed": True, "captured_at_monotonic_ms": 500,
+                "data": {"sequence": 1, "scratch_purposes": [{"purpose": str(index)} for index in range(100)]}}}
+        first = self.forensic_packet(1, payload)
+        second = json.loads(json.dumps(first))
+        second["native"]["elapsed_precise_seconds"] = 2
+        second["core"]["monotonic_ms"] = 2000
+        second["core"]["producer"]["data"]["sequence"] = 2
+        path = self.memory([first, second], "forensic.jsonl", '"' + "a" * analyzer.MAX_CORE_MESSAGE_CHARS + '"\n')
+        report = self.analyze(forensic_paths=[path])
+        self.assertGreaterEqual(report["quality"]["bounded_forensic_values"], 72)
+        self.assertEqual(1, report["quality"]["conflicting_cached_forensic_snapshots"])
+        self.assertEqual("record_size_limit", report["quality"]["invalid_forensic_records"][-1]["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()

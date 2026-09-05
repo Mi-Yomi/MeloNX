@@ -24,7 +24,7 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 flushStorage?.Dispose();
 
-                flushStorage = _gd.BufferManager.Create(_gd, size);
+                flushStorage = _gd.BufferManager.Create(_gd, size, purpose: BufferAllocationPurpose.Readback);
                 _flushStorage = flushStorage;
             }
 

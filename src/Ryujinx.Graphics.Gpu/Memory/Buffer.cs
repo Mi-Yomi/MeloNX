@@ -19,6 +19,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
     /// </summary>
     class Buffer : INonOverlappingRange<Buffer>, ISyncActionHandler, IDisposable
     {
+        internal long DiagnosticId { get; } = BufferCacheDiagnostics.NextId();
         private const ulong GranularBufferThreshold = 4096;
 
         private readonly GpuContext _context;

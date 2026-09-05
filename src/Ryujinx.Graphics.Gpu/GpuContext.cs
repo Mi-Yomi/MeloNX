@@ -20,7 +20,7 @@ namespace Ryujinx.Graphics.Gpu
     /// <summary>
     /// GPU emulation context.
     /// </summary>
-    public sealed class GpuContext : IDisposable
+    public sealed partial class GpuContext : IDisposable
     {
         private const int NsToTicksFractionNumerator = 384;
         private const int NsToTicksFractionDenominator = 625;
@@ -170,7 +170,10 @@ namespace Ryujinx.Graphics.Gpu
         /// </summary>
         public bool ReportMemoryPressure(ulong availableMemoryBytes, int severity, int source)
         {
-            return _memoryPressureMailbox.Report(availableMemoryBytes, severity, source);
+            Interlocked.Increment(ref _forensicPressureReports);
+            bool accepted = _memoryPressureMailbox.Report(availableMemoryBytes, severity, source);
+            if (accepted) Interlocked.Increment(ref _forensicPressureAccepted);
+            return accepted;
         }
 
         /// <summary>
@@ -420,6 +423,7 @@ namespace Ryujinx.Graphics.Gpu
 
             if (OperatingSystem.IsIOS() && (SequenceNumber & 1023) == 0)
             {
+                PublishMemoryForensics();
                 long now = Environment.TickCount64;
                 if (now - _lastOwnerSampleMilliseconds >= 10_000)
                 {
@@ -452,6 +456,7 @@ namespace Ryujinx.Graphics.Gpu
 
             if (_memoryPressureMailbox.TryConsume(out MemoryPressureRequest request))
             {
+                Interlocked.Increment(ref _forensicPressureProcessed);
                 long observedAt = Environment.TickCount64;
                 foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
                 {
@@ -460,6 +465,7 @@ namespace Ryujinx.Graphics.Gpu
 
                 if (request.Severity != MemoryPressureSeverity.Observe)
                 {
+                    _forensicPressureStage.Set("cache_eviction");
                     Stopwatch stopwatch = Stopwatch.StartNew();
                     ulong bufferBefore = 0;
                     ulong bufferAfter = 0;
@@ -508,10 +514,12 @@ namespace Ryujinx.Graphics.Gpu
                     // This is deliberately after logical cache eviction. ThreadedRenderer turns it
                     // into a synchronous backend barrier, so queued disposals and completed Vulkan
                     // dependencies are physically released before the game can enqueue more work.
+                    _forensicPressureStage.Set("backend_trim_barrier");
                     Renderer.TrimMemory(
                         request.Severity == MemoryPressureSeverity.Critical,
                         request.AvailableMemoryBytes);
 
+                    _forensicPressureStage.Set("complete");
                     stopwatch.Stop();
                     Logger.Warning?.Print(
                         LogClass.Gpu,

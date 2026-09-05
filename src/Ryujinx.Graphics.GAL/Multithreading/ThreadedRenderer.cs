@@ -286,6 +286,23 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             return _spanPool.Insert(data);
         }
 
+        public void WriteMemoryForensicState(System.Text.Json.Utf8JsonWriter writer, long now)
+        {
+            writer.WriteStartObject();
+            writer.WriteNumber("queue_pending", Volatile.Read(ref _commandCount));
+            writer.WriteNumber("active_command_id", Volatile.Read(ref _activeCommand));
+            writer.WriteNumber("commands_completed", Interlocked.Read(ref _commandsCompleted));
+            writer.WriteNumber("idle_services", Interlocked.Read(ref _idleServices));
+            writer.WriteNumber("background_buffer_copies", Interlocked.Read(ref _backgroundBufferCopies));
+            writer.WriteNumber("producer", Volatile.Read(ref _producerPtr));
+            writer.WriteNumber("consumer", Volatile.Read(ref _consumerPtr));
+            writer.WriteNumber("ref_producer", Volatile.Read(ref _refProducerPtr));
+            writer.WriteNumber("ref_consumer", Volatile.Read(ref _refConsumerPtr));
+            writer.WritePropertyName("base");
+            _baseRenderer.WriteMemoryForensicState(writer, now);
+            writer.WriteEndObject();
+        }
+
         private TableRef<T> Ref<T>(T reference)
         {
             return new TableRef<T>(this, reference);

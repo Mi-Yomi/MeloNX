@@ -403,6 +403,24 @@ namespace Ryujinx.Library
             }
         }
 
+        // Swift owns the destination for the duration of the call. Negative results contain no JSON.
+        [UnmanagedCallersOnly(EntryPoint = "GetMemoryForensicSnapshot")]
+        public static unsafe int GetMemoryForensicSnapshot(byte* output, int capacity)
+        {
+            if (output == null || capacity <= 0 || capacity > Ryujinx.Common.Diagnostics.BoundedDiagnosticJson.MaximumCapacity)
+                return Ryujinx.Common.Diagnostics.BoundedDiagnosticJson.TooSmall;
+            try
+            {
+                GpuContext context = Volatile.Read(ref _activeMemoryPressureContext);
+                return context == null ? Ryujinx.Common.Diagnostics.BoundedDiagnosticJson.Unavailable
+                    : context.CopyMemoryForensicSnapshot(new Span<byte>(output, capacity));
+            }
+            catch
+            {
+                return Ryujinx.Common.Diagnostics.BoundedDiagnosticJson.Failed;
+            }
+        }
+
         [UnmanagedCallersOnly(EntryPoint = "report_memory_pressure")]
         public static int ReportMemoryPressure(ulong availableMemoryBytes, int severity, int source)
         {

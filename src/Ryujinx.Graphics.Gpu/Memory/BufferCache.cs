@@ -36,6 +36,12 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
         private readonly GpuContext _context;
         private readonly PhysicalMemory _physicalMemory;
+        private readonly BufferCacheDiagnostics _diagnostics = new();
+
+        internal void PublishDiagnosticSnapshot() => _diagnostics.Publish(CachedBytes, Capacity, EffectiveCapacity);
+        internal string GetDiagnosticSnapshot() => _diagnostics.GetSnapshot();
+        internal ReadOnlyMemory<byte> GetDiagnosticSnapshotUtf8() => _diagnostics.GetSnapshotUtf8();
+        internal long DiagnosticPublishFailures => _diagnostics.PublishFailures;
 
         /// <remarks>
         /// Only modified from the GPU thread. Must lock for add/remove.
@@ -135,9 +141,10 @@ namespace Ryujinx.Graphics.Gpu.Memory
             }
         }
 
-        private void AddBuffer(Buffer buffer)
+        private void AddBuffer(Buffer buffer, bool merged = false)
         {
             _buffers.Add(buffer);
+            _diagnostics.Created(buffer.DiagnosticId, buffer.Address, buffer.Size, merged);
             buffer.MarkUsed(_context.SequenceNumber);
             _evictionPolicy.Add(buffer);
 
@@ -148,6 +155,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         {
             if (buffer.CacheNode != null)
             {
+                _diagnostics.Record(BufferCacheEvent.MergeRemoved, 0, buffer.DiagnosticId, buffer.Size);
                 _evictionPolicy.Remove(buffer);
                 buffer.SignalCacheRemoved();
                 _pruneCaches = true;
@@ -176,6 +184,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private void AddMultiRangeBuffer(MultiRangeBuffer buffer)
         {
             _multiRangeBuffers.Add(buffer);
+            _diagnostics.Record(BufferCacheEvent.Created, buffer.IsSparse ? 2 : 1, buffer.DiagnosticId, buffer.CacheSize);
             buffer.MarkUsed(_context.SequenceNumber);
             _multiRangeEvictionPolicy.Add(buffer);
 
@@ -184,6 +193,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
         private void RemoveMultiRangeBuffer(MultiRangeBuffer buffer)
         {
+            _diagnostics.Record(BufferCacheEvent.VirtualRebuildRemoved, buffer.IsSparse ? 2 : 1, buffer.DiagnosticId, buffer.CacheSize);
             _multiRangeBuffers.Remove(buffer);
             _multiRangeEvictionPolicy.Remove(buffer);
             buffer.Dispose();
@@ -230,6 +240,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         [MethodImpl(MethodImplOptions.NoInlining)]
         private void TrimOverCapacity(ulong capacity, ulong physicalBytes)
         {
+            bool pressure = capacity < Capacity;
             ulong virtualBytes;
             bool virtualBuffersEvicted = false;
 
@@ -244,6 +255,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
                     buffer =>
                     {
                         _multiRangeBuffers.Remove(buffer);
+                        _diagnostics.Record(pressure ? BufferCacheEvent.PressureEvicted : BufferCacheEvent.CapacityEvicted,
+                            buffer.IsSparse ? 2 : 1, buffer.DiagnosticId, buffer.CacheSize);
                         buffer.Dispose();
                     });
             }
@@ -257,6 +270,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 buffer =>
                 {
                     _buffers.Remove(buffer);
+                    _diagnostics.Evicted(buffer.DiagnosticId, buffer.Address, buffer.Size, pressure);
                     buffer.SignalCacheRemoved();
                     buffer.Dispose();
                 });
@@ -280,6 +294,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
                     buffer =>
                     {
                         _multiRangeBuffers.Remove(buffer);
+                        _diagnostics.Record(pressure ? BufferCacheEvent.PressureEvicted : BufferCacheEvent.CapacityEvicted,
+                            buffer.IsSparse ? 2 : 1, buffer.DiagnosticId, buffer.CacheSize);
                         buffer.Dispose();
                     });
 
@@ -291,6 +307,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
                     buffer =>
                     {
                         _buffers.Remove(buffer);
+                        _diagnostics.Evicted(buffer.DiagnosticId, buffer.Address, buffer.Size, pressure);
                         buffer.SignalCacheRemoved();
                         buffer.Dispose();
                     });
@@ -787,16 +804,19 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
                     ulong newSize = endAddress - address;
 
-                    AddBuffer(CreateBufferAligned(address, newSize, stage, anySparseCompatible, overlapsArray));
+                    _diagnostics.Lookup(false);
+                    AddBuffer(CreateBufferAligned(address, newSize, stage, anySparseCompatible, overlapsArray), merged: true);
                 }
                 else
                 {
+                    _diagnostics.Lookup(true);
                     Touch(overlaps[0]);
                 }
             }
             else
             {
                 // No overlap, just create a new buffer.
+                _diagnostics.Lookup(false);
                 AddBuffer(new(_context, _physicalMemory, address, size, stage, sparseCompatible: false, []));
             }
         }
@@ -854,16 +874,19 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
                     RemoveBuffers(overlapsArray);
 
-                    AddBuffer(CreateBufferAligned(address, newSize, stage, sparseAligned, overlapsArray));
+                    _diagnostics.Lookup(false);
+                    AddBuffer(CreateBufferAligned(address, newSize, stage, sparseAligned, overlapsArray), merged: true);
                 }
                 else
                 {
+                    _diagnostics.Lookup(true);
                     Touch(overlaps[0]);
                 }
             }
             else
             {
                 // No overlap, just create a new buffer.
+                _diagnostics.Lookup(false);
                 AddBuffer(new(_context, _physicalMemory, address, size, stage, sparseAligned, []));
             }
         }
@@ -1305,6 +1328,8 @@ namespace Ryujinx.Graphics.Gpu.Memory
         /// <param name="buffer">The buffer that has changed handle</param>
         public void BufferBackingChanged(Buffer buffer)
         {
+            _diagnostics.Record(buffer.BackingState.IsDeviceLocal ? BufferCacheEvent.BackingToDevice : BufferCacheEvent.BackingToHost,
+                0, buffer.DiagnosticId, buffer.Size);
             Touch(buffer);
             NotifyBuffersModified?.Invoke();
 
@@ -1369,11 +1394,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
             {
                 foreach (MultiRangeBuffer buffer in _multiRangeBuffers)
                 {
+                    _diagnostics.Record(BufferCacheEvent.ShutdownRemoved, buffer.IsSparse ? 2 : 1, buffer.DiagnosticId, buffer.CacheSize);
                     buffer.Dispose();
                 }
 
                 foreach (Buffer buffer in _buffers)
                 {
+                    _diagnostics.Record(BufferCacheEvent.ShutdownRemoved, 0, buffer.DiagnosticId, buffer.Size);
                     buffer.Dispose();
                 }
 

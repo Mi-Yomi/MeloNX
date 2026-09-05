@@ -9,6 +9,7 @@ using System;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace Ryujinx.Tests.Graphics
 {
@@ -75,6 +76,30 @@ namespace Ryujinx.Tests.Graphics
             for (int i = 0; i < 20000; i++) fixture.Cache.TrimToCapacity();
             long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
             Assert.That(allocated, Is.Zero, "An under-budget cache must not construct eviction delegates per GPU sequence");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ForensicsDistinguishesCapacityFromPressureRecreationOnActualCache(bool pressure)
+        {
+            using CacheFixture fixture = new();
+            BufferRange first = fixture.Read(0);
+            fixture.NextSequence();
+            if (pressure) fixture.Cache.LatchPressureCapacity(0);
+            else fixture.Cache.ConfigureMemoryBudget(0, true);
+            fixture.Cache.TrimToCapacity();
+            Assert.That(fixture.Backend.Buffers.ContainsKey(first.Handle), Is.False);
+            fixture.Read(0);
+            fixture.Cache.PublishDiagnosticSnapshot();
+            using JsonDocument document = JsonDocument.Parse(fixture.Cache.GetDiagnosticSnapshot());
+            JsonElement totals = document.RootElement.GetProperty("cumulative");
+            string reason = pressure ? "pressure" : "capacity";
+            Assert.That(totals.GetProperty(reason + "_evicted").GetProperty("count").GetInt64(), Is.EqualTo(1));
+            Assert.That(totals.GetProperty("recreated_after_" + reason).GetProperty("count").GetInt64(), Is.EqualTo(1));
+            JsonElement relatedEvent = document.RootElement.GetProperty("recent_events").EnumerateArray()
+                .Single(item => item.GetProperty("reason").GetString() == "recreated_after_" + reason);
+            Assert.That(relatedEvent.GetProperty("lifetime_id").GetInt64(),
+                Is.Not.EqualTo(relatedEvent.GetProperty("related_lifetime_id").GetInt64()));
         }
 
         private sealed class CacheFixture : IDisposable

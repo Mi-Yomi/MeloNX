@@ -23,10 +23,16 @@ import sys
 
 
 MIB = 1024 * 1024
+# Producer census is at most 64 keys plus overflow. Bounds also apply to
+# malformed/imported logs; an omitted record is reported, never treated as zero.
+MAX_CORE_MESSAGE_CHARS = 128 * 1024
+MAX_CENSUS_BINS = 65
+MAX_CONVERSIONS = 32
+MAX_FORENSIC_EVENTS = 32
 CORE_LINE = re.compile(
     r"^(?P<wall>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?) "
     r"MeloNX\[(?P<pid>\d+):(?P<tid>\d+)\].*?"
-    r"(?P<elapsed>\d+:\d\d:\d\d\.\d+) \|[A-Z]\| (?P<body>.*)$"
+    r"(?P<elapsed>\d+:\d\d:\d\d\.\d+) \|(?P<level>[A-Z])\| (?P<body>.*)$"
 )
 CORE_CONTINUATION = re.compile(
     r"^(?P<wall>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?) "
@@ -47,6 +53,9 @@ PREFIXES = {
     "Texture format census": "texture_census",
     "Render timing telemetry": "render_timing",
     "CPU timing": "cpu_timing",
+    "GPU frame stall": "frame_stall",
+    "Guest stall threads": "guest_stall_snapshot",
+    "Guest stall thread": "guest_stall_thread",
 }
 # The schema is deliberately explicit: a handle ID, ring position, gauge, interval
 # delta and cumulative counter are not interchangeable. Unknown fields are kept.
@@ -59,6 +68,7 @@ COUNTERS = {
         "buffers_created", "buffers_reused", "buffers_deleted",
         "buffer_upload_bytes", "buffer_readback_bytes",
         "buffer_evictions", "buffer_recreations_after_eviction",
+        "commands_completed", "idle_services", "backend.query_copies_recorded", "backend.idle_submissions",
     },
     "presentation": {"total_enqueued", "total_presented", "total_dropped"},
     "native": {"managed_allocated_bytes_total", "managed_allocated_bytes", "gc_gen0_count", "gc_gen1_count", "gc_gen2_count",
@@ -68,13 +78,30 @@ COUNTERS = {
     "texture_census_bin": {"created", "released"},
     "texture_conversion": {"calls", "failed", "source_bytes", "output_bytes", "cpu_ms"},
 }
+COUNTERS["gpu"].update("backend.counter_" + str(index) + suffix for index in range(3) for suffix in ("_retired", "_timeouts"))
+COUNTERS["memory"] = {"task_vm_decompressions_count", "task_vm_compressed_lifetime_bytes",
+    "forensic_unavailable_packets", "forensic_snapshot_failures", "forensic_write_failures",
+    "forensic_breadcrumb_sync_count", "forensic_breadcrumb_sync_duration_ms", "forensic_packet_sync_count", "forensic_packet_sync_duration_ms"}
+COUNTERS["forensic_native"] = COUNTERS["memory"]
+COUNTERS["forensic_managed"] = {"allocated_bytes_total", "gen0_collections", "gen1_collections", "gen2_collections"}
+COUNTERS["forensic_renderer"] = {"commands_completed", "idle_services", "background_buffer_copies"}
+COUNTERS["forensic_pressure"] = {"reports", "accepted", "processed"}
+COUNTERS["forensic_buffer_cache"] = {"creation_lookup_hits", "creation_lookup_misses", "events_total", "events_contention_dropped", "events_sampled_total"}
+COUNTERS["forensic_buffer_lifecycle"] = {"events_total", "events_contention_dropped", "events_sampled_total"}
+COUNTERS["forensic_cache_status"] = {"publish_failures"}
+COUNTERS["forensic_producer"] = {"presentation.enqueued", "presentation.presented", "presentation.dropped"}
+COUNTERS["forensic_backend"] = {"progress.query_copies_recorded", "progress.idle_submissions"} | {
+    "progress.counter_" + str(index) + suffix for index in range(3) for suffix in ("_retired", "_timeouts")}
+COUNTERS["forensic_backend"].add("buffer_diagnostic_publish_failures")
+COUNTERS["forensic_guest"] = {"buffer_diagnostic_publish_failures"}
 COUNTERS["cpu_timing"] = {stage + suffix for stage in (
     "GuestFifoProcess", "GalQueueBackpressure", "GalInvokeWait", "GalFrameWait", "ShaderModuleCompile",
     "GalExternalInterruptWait", "CommandBufferSubmit", "FenceWait", "PresentCpu", "SwapchainAcquire", "QueuePresent", "DiagnosticSnapshot",
 ) for suffix in ("_calls", "_us")}
 for _stream in ("scratch_pool", "scratch_purpose"):
     COUNTERS[_stream] = {"rents", "reuses", "created_arrays", "created_bytes", "discarded_arrays", "discarded_bytes"}
-FRAME_COUNTERS = {"gpu": "presentation.presented", "presentation": "total_presented"}
+COUNTERS["forensic_scratch_purpose"] = COUNTERS["scratch_purpose"]
+FRAME_COUNTERS = {"gpu": "presentation.presented", "presentation": "total_presented", "forensic_producer": "presentation.presented"}
 GAUGES = {
     "gpu": {"buffers_mapped", "buffers_in_flight", "queue_pending", "deferred_actions", "physical_memories",
         "presentation.queued", "presentation.frames_available"},
@@ -109,6 +136,9 @@ def iso_time(value):
 
 def scalar(value):
     value = value.strip().rstrip(".")
+    if value.startswith('"') and value.endswith('"'):
+        # Names may contain commas, '=' or bracket characters. They remain data.
+        return value[1:-1]
     if value.lower() in ("true", "false"):
         return value.lower() == "true"
     if value.lower() in ("null", "unknown", "unavailable"):
@@ -123,24 +153,53 @@ def scalar(value):
             return value
 
 
-def key_values(payload):
-    """Flatten bracketed named fields, retaining their namespace (views != storage)."""
+def key_values(payload, depth=0):
+    """Bounded bracket/quote-aware fields; repeated census bins use another parser."""
     result = {}
-    for match in re.finditer(r"([A-Za-z_][\w.]*)=(\[[^\]]*\]|[^,]+)", payload):
-        key, value = match.groups()
-        if value.startswith("[") and "=" in value:
-            result.update({key + "." + k: v for k, v in key_values(value[1:-1]).items()})
+    if depth >= 6:
+        return result
+    # A regex ending at the first ']' flattens nested backend/counter snapshots
+    # into the wrong namespace. Split only outside brackets and quoted values.
+    fields, start, brackets, quoted = [], 0, 0, False
+    for index, character in enumerate(payload):
+        if character == '"' and (index == 0 or payload[index - 1] != "\\"):
+            quoted = not quoted
+        elif not quoted:
+            if character == "[":
+                brackets += 1
+            elif character == "]":
+                brackets = max(0, brackets - 1)
+            elif character == "," and brackets == 0:
+                fields.append(payload[start:index])
+                start = index + 1
+                if len(fields) >= 256:
+                    break
+    else:
+        fields.append(payload[start:])
+    for field in fields:
+        match = re.fullmatch(r"\s*([A-Za-z_][\w.]*)=(.*)\s*", field, re.DOTALL)
+        if not match:
+            continue
+        key, value = match[1], match[2].strip().rstrip(".")
+        if value.startswith("[") and value.endswith("]") and "=" in value:
+            result.update({key + "." + k: v for k, v in key_values(value[1:-1], depth + 1).items()})
         else:
             result[key] = scalar(value)
     return result
 
 
-def census_records(payload):
+def census_records(payload, quality=None):
     """Repeated lifetime bins are separate series, never overwrite or sum aliases."""
     result = []
     dimension_keys = ("guest", "host_gal", "fallback", "target", "guest_width", "guest_height",
         "host_width", "host_height", "depth", "layers", "levels", "samples", "role", "key")
+    counts = {"bin": 0, "conversion": 0}
     for match in re.finditer(r";\s*(bin|conversion)=\[([^\]]*)\]", payload):
+        counts[match[1]] += 1
+        if counts[match[1]] > (MAX_CENSUS_BINS if match[1] == "bin" else MAX_CONVERSIONS):
+            if quality is not None:
+                quality["omitted_census_records"] += 1
+            continue
         fields = key_values(match[2])
         keys = dimension_keys if match[1] == "bin" else ("fallback",)
         dimensions = {k: fields[k] for k in keys if k in fields}
@@ -159,6 +218,18 @@ def census_records(payload):
 def read_json(path):
     with Path(path).open(encoding="utf-8-sig") as stream:
         return json.load(stream, parse_constant=lambda value: None)
+
+
+def memory_metrics(data):
+    metrics = {key: value for key, value in data.items() if key not in {"time_utc", "elapsed_seconds", "event"}}
+    # Placeholders are identical in memory.jsonl and the forensic native copy.
+    if data.get("jit_cache_available") is False:
+        for key in metrics:
+            if key.startswith("jit_cache_") and key != "jit_cache_available":
+                metrics[key] = None
+    if data.get("task_vm_limit_bytes_remaining_available") is False:
+        metrics["task_vm_limit_bytes_remaining"] = None
+    return metrics
 
 
 def read_memory(paths, session, quality):
@@ -184,6 +255,8 @@ def read_memory(paths, session, quality):
                         raise ValueError("Memory segments contain a different session: " + key)
             if data.get("source_commit") and session.get("source_commit") and data["source_commit"] != session["source_commit"]:
                 raise ValueError("Memory record source_commit differs from session")
+            if data.get("session_time_utc") and data["session_time_utc"] != session.get("time_utc"):
+                raise ValueError("Memory record belongs to a different session")
             identity = json.dumps(data, sort_keys=True, separators=(",", ":"))
             if identity in seen:
                 quality["duplicate_memory_records"] += 1
@@ -191,23 +264,217 @@ def read_memory(paths, session, quality):
             seen.add(identity)
             wall = iso_time(data.get("time_utc"))
             elapsed = data.get("elapsed_seconds")
-            time = (wall - start).total_seconds() if wall and start else elapsed if numeric(elapsed) else None
+            precise = data.get("elapsed_precise_seconds")
+            time = precise if numeric(precise) else (wall - start).total_seconds() if wall and start else elapsed if numeric(elapsed) else None
             if numeric(time) and numeric(previous_time) and time < previous_time:
                 quality["out_of_order_memory_records"] += 1
             if numeric(time):
                 previous_time = time
             # JIT's zero placeholder when its source is unavailable is not a measurement.
-            metrics = {k: v for k, v in data.items() if k not in {"time_utc", "elapsed_seconds", "event"}}
-            if data.get("jit_cache_available") is False:
-                for key in metrics:
-                    if key.startswith("jit_cache_") and key != "jit_cache_available":
-                        metrics[key] = None
-            if data.get("task_vm_limit_bytes_remaining_available") is False:
-                metrics["task_vm_limit_bytes_remaining"] = None
+            metrics = memory_metrics(data)
             records.append({"stream": "memory", "event": data.get("event"), "segment": segment,
                 "line": index + 1, "raw_time": data.get("time_utc"), "raw_elapsed_seconds": elapsed,
                 "session_seconds": time, "metrics": metrics})
     return sorted(records, key=lambda r: r["session_seconds"] if numeric(r["session_seconds"]) else -math.inf)
+
+
+def bounded_json(value, budget, quality, depth=0):
+    """Keep supplied scalar meanings; bound malformed JSON nesting and collections."""
+    if budget[0] <= 0 or depth > 16:
+        quality["bounded_forensic_values"] += 1
+        return None
+    budget[0] -= 1
+    if isinstance(value, dict):
+        if len(value) > 128:
+            quality["bounded_forensic_values"] += len(value) - 128
+        return {str(key)[:128]: bounded_json(item, budget, quality, depth + 1) for key, item in list(value.items())[:128]}
+    if isinstance(value, list):
+        if len(value) > 64:
+            quality["bounded_forensic_values"] += len(value) - 64
+        return [bounded_json(item, budget, quality, depth + 1) for item in value[:64]]
+    if isinstance(value, str) and len(value) > 4096:
+        quality["bounded_forensic_values"] += 1
+        return value[:4096]
+    return value
+
+
+def flatten_json(value, prefix=""):
+    """Known structured snapshots; arrays of events remain illustrative data."""
+    result = {}
+    for key, item in value.items():
+        path = prefix + key
+        if isinstance(item, dict):
+            result.update(flatten_json(item, path + "."))
+        elif isinstance(item, list) and key == "size_bucket_counts":
+            for index, count in enumerate(item[:4]):
+                result[path + "." + str(index)] = count
+        else:
+            result[path] = item
+    return result
+
+
+def read_forensic_jsonl(paths, session, quality, breadcrumb=False):
+    rows, seen = [], set()
+    start = iso_time(session.get("time_utc"))
+    event = "memory_forensic_phase" if breadcrumb else "memory_forensic_snapshot"
+    kind = "breadcrumbs" if breadcrumb else "forensics"
+    for segment, path in enumerate(paths):
+        with Path(path).open(encoding="utf-8-sig") as source:
+            line_number = 0
+            while True:
+                line = source.readline(MAX_CORE_MESSAGE_CHARS + 1)
+                if not line:
+                    break
+                line_number += 1
+                if len(line) > MAX_CORE_MESSAGE_CHARS:
+                    while line and not line.endswith("\n"):
+                        line = source.readline(MAX_CORE_MESSAGE_CHARS + 1)
+                    quality["invalid_forensic_records"].append({"kind": kind, "segment": segment, "line": line_number, "reason": "record_size_limit"})
+                    continue
+                if not line.strip():
+                    continue
+                try:
+                    data = json.loads(line, parse_constant=lambda value: None)
+                    if not isinstance(data, dict) or data.get("event") != event or data.get("schema_version") != 1:
+                        raise ValueError("unexpected forensic envelope schema/event")
+                    native = data if breadcrumb else data.get("native")
+                    if not isinstance(native, dict):
+                        raise ValueError("missing native object")
+                except (ValueError, RecursionError) as error:
+                    quality["invalid_forensic_records"].append({"kind": kind, "segment": segment, "line": line_number,
+                        "reason": str(error)[:160], "newline_terminated": line.endswith("\n")})
+                    continue
+                for item in (data, native):
+                    if item.get("source_commit") and session.get("source_commit") and item["source_commit"] != session["source_commit"]:
+                        raise ValueError("Forensic record source_commit differs from session")
+                    if item.get("session_time_utc") and item["session_time_utc"] != session.get("time_utc"):
+                        raise ValueError("Forensic record belongs to a different session")
+                if not session.get("source_commit") or not (data.get("source_commit") or native.get("source_commit")):
+                    quality["unverified_forensic_source_records"] += 1
+                elapsed = native.get("elapsed_precise_seconds")
+                wall = iso_time(native.get("time_utc"))
+                if start and wall and numeric(elapsed):
+                    # Legacy timestamps have second precision; tolerate rounding,
+                    # not a different boot/session with the same counter values.
+                    if abs((wall - start).total_seconds() - elapsed) > 2:
+                        raise ValueError("Forensic wall/elapsed anchor differs from session")
+                elif not (data.get("session_time_utc") == session.get("time_utc") and session.get("time_utc")):
+                    quality["invalid_forensic_records"].append({"kind": kind, "segment": segment, "line": line_number, "reason": "unverifiable_session_anchor"})
+                    continue
+                digest = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                if digest in seen:
+                    quality["duplicate_forensic_records"] += 1
+                    continue
+                seen.add(digest)
+                data = bounded_json(data, [12000], quality)
+                native = data if breadcrumb else data["native"]
+                if not isinstance(native, dict):
+                    quality["invalid_forensic_records"].append({"kind": kind, "segment": segment, "line": line_number, "reason": "native_payload_exceeded_bounds"})
+                    continue
+                time = elapsed if numeric(elapsed) else (wall - start).total_seconds() if wall and start else None
+                record = {"stream": "forensic_breadcrumb" if breadcrumb else "forensic_native", "event": event,
+                    "segment": segment, "line": line_number, "raw_time": native.get("time_utc"),
+                    "raw_elapsed_seconds": native.get("elapsed_seconds"), "session_seconds": time,
+                    "dimensions": {}, "metrics": memory_metrics(native)}
+                if not breadcrumb:
+                    record["event"] = native.get("event", event)
+                    record["core_payload"] = data.get("core")
+                rows.append(record)
+    return sorted(rows, key=lambda row: (row["session_seconds"] if numeric(row["session_seconds"]) else -math.inf,
+        row["metrics"]["phase_elapsed_precise_seconds"] if numeric(row["metrics"].get("phase_elapsed_precise_seconds")) else 0))
+
+
+def forensic_core_records(packets, quality):
+    output, cached_seen = [], {}
+    for packet in packets:
+        payload = packet.pop("core_payload", None)
+        status = packet["metrics"].get("forensic_core_snapshot_status")
+        packet["core_payload_accepted"] = False
+        if not isinstance(payload, dict):
+            if numeric(status) and status > 0:
+                quality["invalid_forensic_records"].append({"kind": "core", "segment": packet["segment"], "line": packet["line"], "reason": "missing_core_payload_despite_positive_status"})
+            continue
+        if not numeric(status) or status <= 0 or payload.get("schema_version") != 1 or not numeric(payload.get("monotonic_ms")):
+            quality["invalid_forensic_records"].append({"kind": "core", "segment": packet["segment"], "line": packet["line"], "reason": "unavailable_or_invalid_core_payload"})
+            continue
+        packet["core_payload_accepted"] = True
+        now = payload["monotonic_ms"]
+        anchor = packet["metrics"].get("forensic_core_snapshot_elapsed_precise_seconds")
+        def emit(stream, values, dimensions=None, captured=None, cached=False):
+            if not isinstance(values, dict):
+                return
+            if cached and not numeric(captured):
+                quality["invalid_forensic_records"].append({"kind": stream, "line": packet["line"], "reason": "missing_capture_time"})
+                return
+            captured = now if captured is None else captured
+            if not numeric(captured) or captured > now:
+                quality["invalid_forensic_records"].append({"kind": stream, "line": packet["line"], "reason": "invalid_future_or_missing_capture_time"})
+                return
+            metrics = flatten_json(values)
+            dims = dimensions or {}
+            if cached:
+                key = (stream, json.dumps(dims, sort_keys=True), captured)
+                digest = hashlib.sha256(json.dumps(metrics, sort_keys=True).encode()).hexdigest()
+                if key in cached_seen:
+                    quality["reused_cached_forensic_snapshots"] += 1
+                    if cached_seen[key] != digest:
+                        quality["conflicting_cached_forensic_snapshots"] += 1
+                    return
+                cached_seen[key] = digest
+            # Rates use exact C# monotonic deltas, never packet arrival cadence.
+            # Swift/Core call boundaries are not the same instant: retain the
+            # alignment estimate with its uncertainty instead of guessing phases.
+            record = {key: packet.get(key) for key in ("line", "segment", "raw_time", "raw_elapsed_seconds")}
+            record.update(stream=stream, event="forensic_snapshot", metrics=metrics, dimensions=dims,
+                session_seconds=None, counter_seconds=captured / 1000, interval_clock="core_monotonic",
+                packet_session_seconds=packet["session_seconds"], captured_at_monotonic_ms=captured,
+                capture_age_at_packet_ms=now - captured,
+                estimated_capture_session_seconds=anchor - (now - captured) / 1000 if numeric(anchor) else None,
+                anchor_uncertainty_ms=packet["metrics"].get("forensic_core_snapshot_duration_ms"))
+            output.append(record)
+        for key in ("managed", "pressure"):
+            emit("forensic_" + key, payload.get(key))
+        renderer = payload.get("renderer")
+        renderer = renderer if isinstance(renderer, dict) else {}
+        emit("forensic_renderer", {key: value for key, value in renderer.items() if key not in ("base", "backend", "trim_stage")})
+        base = renderer.get("base", renderer)
+        base = base if isinstance(base, dict) else {}
+        emit("forensic_trim_stage", base.get("trim_stage"))
+        for name, cache in (("producer", payload.get("producer")), ("backend", base.get("backend"))):
+            if not isinstance(cache, dict):
+                continue
+            emit("forensic_cache_status", {key: value for key, value in cache.items() if key != "data"}, {"owner": name})
+            captured = cache.get("captured_at_monotonic_ms")
+            data = cache.get("data")
+            if cache.get("observed") is not True or not isinstance(data, dict) or not numeric(captured):
+                continue
+            skip = {"physical_memories", "scratch_purposes", "buffers"}
+            metrics = {key: value for key, value in data.items() if key not in skip}
+            for key in ("presentation", "progress"):
+                if isinstance(metrics.get(key), str):
+                    metrics[key] = key_values(metrics[key])
+            emit("forensic_" + name, metrics, captured=captured, cached=True)
+            if name == "producer":
+                memories = data.get("physical_memories")
+                for memory in (memories if isinstance(memories, list) else [])[:4]:
+                    if not isinstance(memory, dict):
+                        continue
+                    dimensions = {"pid": memory.get("pid")}
+                    guest = key_values(memory["guest_owners"]) if isinstance(memory.get("guest_owners"), str) else {}
+                    guest["texture_cache_bytes"] = memory.get("texture_cache_bytes")
+                    guest["buffer_diagnostic_publish_failures"] = memory.get("buffer_diagnostic_publish_failures")
+                    emit("forensic_guest", guest, dimensions, captured, True)
+                    buffer = memory.get("buffer_cache")
+                    if isinstance(buffer, dict):
+                        emit("forensic_buffer_cache", buffer, dimensions, buffer.get("sampled_at_monotonic_ms"), True)
+                purposes = data.get("scratch_purposes")
+                for purpose in (purposes if isinstance(purposes, list) else []):
+                    if isinstance(purpose, dict):
+                        emit("forensic_scratch_purpose", purpose, {"purpose": purpose.get("purpose")}, captured, True)
+            elif isinstance(data.get("buffers"), dict):
+                buffer = data["buffers"]
+                emit("forensic_buffer_lifecycle", buffer, captured=buffer.get("sampled_at_monotonic_ms"), cached=True)
+    return output
 
 
 def parse_offset(value):
@@ -235,7 +502,9 @@ def logical_core_lines(lines, quality):
         if match:
             key = (match["pid"], match["tid"])
             pending.pop(key, None)
-            logical.append([index + 1, line])
+            if len(line) > MAX_CORE_MESSAGE_CHARS:
+                quality["bounded_core_messages"] += 1
+            logical.append([index + 1, line[:MAX_CORE_MESSAGE_CHARS]])
             if re.search(r": Texture format census(?: v\d+)?: ", match["body"]) and "; census_cpu_ms=" not in line:
                 pending[key] = (len(logical) - 1, dt.datetime.fromisoformat(match["wall"]))
             continue
@@ -249,10 +518,14 @@ def logical_core_lines(lines, quality):
                 if not 0 <= elapsed <= 0.1:
                     pending.pop(key)
                     continue
-                logical[slot][1] += continuation["payload"]
+                remaining = MAX_CORE_MESSAGE_CHARS - len(logical[slot][1])
+                if len(continuation["payload"]) > remaining:
+                    quality["bounded_core_messages"] += 1
+                    pending.pop(key)
+                logical[slot][1] += continuation["payload"][:remaining]
                 quality["core_continuations_joined"] += 1
                 if "; census_cpu_ms=" in continuation["payload"]:
-                    pending.pop(key)
+                    pending.pop(key, None)
     return logical
 
 
@@ -292,7 +565,7 @@ def read_core(path, session, quality, offset=None, pid=None):
         last_elapsed = elapsed
         # Guest log content is data, never a telemetry/scene instruction.
         body = match["body"]
-        if "Guest Log:" in body or " Guest " in body and "Guest memory owners" not in body:
+        if "Guest Log:" in body:
             continue
         for prefix, stream in PREFIXES.items():
             found = re.search(r": " + re.escape(prefix) + r"(?: v\d+)?: (.*)$", body)
@@ -311,9 +584,10 @@ def read_core(path, session, quality, offset=None, pid=None):
                     record["message_complete"] = complete
                     if not complete:
                         quality["incomplete_census_records"].append({"line": line, "session_seconds": time})
-                    records.extend(dict(record, **part) for part in census_records(found[1]))
+                    records.extend(dict(record, **part) for part in census_records(found[1], quality))
                 else:
-                    keys = ("type", "purpose") if stream == "scratch_purpose" else ("pid",) if stream == "guest" else ()
+                    keys = (("type", "purpose") if stream == "scratch_purpose" else ("pid",) if stream == "guest"
+                        else ("pid", "uid") if stream == "guest_stall_thread" else ())
                     record["dimensions"] = {key: record["metrics"].get(key) for key in keys}
                     records.append(record)
                 break
@@ -328,7 +602,10 @@ def read_core(path, session, quality, offset=None, pid=None):
 def metric_kind(stream, key, extra_counters=()):
     if key in COUNTERS.get(stream, set()) or stream + "." + key in extra_counters:
         return "cumulative_counter"
-    if stream == "memory" or key in GAUGES.get(stream, set()) or key.endswith(("_bytes_per_second", "_bytes", "_mib", "_owners")):
+    if stream in ("forensic_buffer_cache", "forensic_buffer_lifecycle") and key.startswith("cumulative."):
+        if key.endswith((".count", ".logical_bytes")) or re.search(r"\.size_bucket_counts\.[0-3]$", key):
+            return "cumulative_counter"
+    if stream in ("memory", "forensic_native", "forensic_breadcrumb") or key in GAUGES.get(stream, set()) or key.endswith(("_bytes_per_second", "_bytes", "_mib", "_owners")):
         return "gauge"
     if key.startswith("interval_") or key.endswith("_delta"):
         return "interval_delta"
@@ -350,6 +627,8 @@ def phase_start_at(time, phases):
 
 
 def time_of(record):
+    if numeric(record.get("counter_seconds")):
+        return record["counter_seconds"]
     value = record.get("session_seconds")
     return value if numeric(value) else record.get("core_wall_seconds")
 
@@ -373,8 +652,9 @@ def intervals(records, phases, quality, extra_counters=(), expected_interval=Non
             duration = time_of(current) - time_of(previous)
             if duration <= 0:
                 continue
-            periodic = stream in ("memory", "gpu", "guest", "native", "presentation", "cpu_timing", "scratch", "scratch_pool", "scratch_purpose")
-            gap = periodic and cadence is not None and duration > max(cadence * 2.5, cadence + 2)
+            periodic = stream in ("memory", "gpu", "guest", "native", "presentation", "cpu_timing", "scratch", "scratch_pool", "scratch_purpose", "forensic_native", "forensic_managed", "forensic_renderer")
+            current_cadence = current["metrics"].get("effective_sample_interval_seconds", cadence)
+            gap = periodic and numeric(current_cadence) and duration > max(current_cadence * 2.5, current_cadence + 2)
             if gap:
                 quality["gaps"].append({"stream": stream, "start": time_of(previous), "end": time_of(current), "seconds": duration})
             prior, now = previous["metrics"], current["metrics"]
@@ -396,9 +676,11 @@ def intervals(records, phases, quality, extra_counters=(), expected_interval=Non
             if rates:
                 output.append({"stream": stream, "start_seconds": time_of(previous), "end_seconds": time_of(current),
                     "dimensions": json.loads(dimensions),
-                    "clock": "session" if numeric(current.get("session_seconds")) else "core_wall_relative",
+                    "clock": current.get("interval_clock", "session" if numeric(current.get("session_seconds")) else "core_wall_relative"),
                     "raw_start_time": previous["raw_time"], "raw_end_time": current["raw_time"],
+                    "end_packet_session_seconds": current.get("packet_session_seconds"),
                     "duration_seconds": duration, "spans_gap": gap, "frame_delta": frame_delta,
+                    "frame_counter_start": prior.get(frame_key), "frame_counter_end": now.get(frame_key),
                     "presented_fps": frame_delta / duration if frame_delta is not None else None,
                     "phase_start": phase_at(previous.get("session_seconds"), phases),
                     "phase_end": phase_at(current.get("session_seconds"), phases), "rates": rates})
@@ -411,6 +693,136 @@ def extrema(records, key, maximum=True):
         return None
     record = (max if maximum else min)(candidates, key=lambda r: r["metrics"][key])
     return {"value": record["metrics"][key], "session_seconds": record["session_seconds"], "raw_time": record["raw_time"]}
+
+
+STOP_EVENTS = {"stop_requested", "core_returned", "main_returned"}
+
+
+def post_stop_sample(record):
+    return record["event"] == "post_stop_sample" or (
+        record["event"] == "sample" and record["metrics"].get("core_active") is False)
+
+
+def evidence_reference(record, keys=()):
+    if record is None:
+        return None
+    return {**{key: record.get(key) for key in ("stream", "event", "line", "segment", "session_seconds", "raw_time")},
+        "metrics": {key: record["metrics"].get(key) for key in keys}}
+
+
+def forensic_evidence(memory, core, interval_rows, clock, packets=(), breadcrumbs=()):
+    """Describe the end of a recording, never invent the reason the process ended.
+
+    No scene is inferred. A completed stop prevents the low-headroom observation
+    from being described as an unexplained active end. A stale earlier minimum
+    cannot replace the last observation. Counter plateaus are bounded intervals,
+    not proof of a deadlock or of the producer/backend responsible for one.
+    """
+    stop_records = [r for r in memory if r["event"] in STOP_EVENTS]
+    # Breadcrumbs can preserve the newest cheap kernel sample when the full
+    # diagnostic packet was never written. Prefer the complete copy at equal time.
+    periodic = [r for r in memory if r["event"] in ("sample", "post_stop_sample")]
+    periodic += list(packets) + list(breadcrumbs)
+    periodic.sort(key=lambda r: (r["session_seconds"] if numeric(r["session_seconds"]) else -math.inf,
+        {"forensic_breadcrumb": 0, "memory": 1, "forensic_native": 2}.get(r["stream"], 0)))
+    by_sample = {}
+    for record in periodic:
+        by_sample[record["session_seconds"]] = record
+    periodic = list(by_sample.values())
+    last = periodic[-1] if periodic else None
+    stop_times = [r["session_seconds"] for r in stop_records if numeric(r["session_seconds"])]
+    stop_times += [r["session_seconds"] for r in periodic if r["metrics"].get("core_active") is False and numeric(r["session_seconds"])]
+    stop_at = min(stop_times) if stop_times else None
+    memory_keys = ("core_active", "phys_footprint_bytes", "process_phys_footprint_peak_bytes",
+        "os_proc_available_memory_bytes", "task_vm_limit_bytes_remaining", "task_vm_compressed_bytes",
+        "task_vm_internal_bytes", "thermal_state_raw")
+    headroom = last["metrics"].get("os_proc_available_memory_bytes") if last else None
+    low = numeric(headroom) and 0 <= headroom <= 64 * MIB
+    core_end = (clock.get("core_interval_seconds") or [None, None])[1]
+    last_time = last.get("session_seconds") if last else None
+    stale = numeric(core_end) and numeric(last_time) and core_end - last_time > 10
+    if stop_records or any(post_stop_sample(r) or r["metrics"].get("core_active") is False for r in periodic):
+        assessment = "stop_or_core_inactive_observed"
+    elif last is None:
+        assessment = "memory_observation_unavailable"
+    elif low and last["metrics"].get("core_active") is True and not stale:
+        assessment = "memory_limit_pressure_at_active_recording_end"
+    elif stale:
+        assessment = "last_memory_observation_precedes_core_coverage"
+    elif low:
+        assessment = "low_headroom_observed_core_activity_unknown"
+    else:
+        assessment = "recording_end_cause_unknown"
+
+    source = next((stream for stream in ("presentation", "gpu", "forensic_producer")
+        if any(r["stream"] == stream and numeric(r["presented_fps"]) for r in interval_rows)), "gpu")
+    presentation = sorted((r for r in interval_rows if r["stream"] == source), key=lambda r: r["start_seconds"])
+    plateaus, current = [], None
+    for interval in presentation:
+        # Producer reports every 10 s. A sparse log with only two points must
+        # not silently establish its own 10-minute cadence and certify a stall.
+        valid = (interval["frame_delta"] == 0 and numeric(interval["frame_counter_start"])
+            and interval["frame_counter_start"] > 0 and not interval["spans_gap"]
+            and interval["duration_seconds"] <= 30
+            and not (numeric(stop_at) and (
+                interval["clock"] == "session" and interval["end_seconds"] > stop_at
+                or interval["clock"] == "core_wall_relative"
+                or interval["clock"] == "core_monotonic" and (
+                    not numeric(interval.get("end_packet_session_seconds")) or interval["end_packet_session_seconds"] > stop_at))))
+        if not valid:
+            current = None
+            continue
+        if current and current["clock"] == interval["clock"] and current["end_seconds"] == interval["start_seconds"]:
+            current["end_seconds"] = interval["end_seconds"]
+            current["duration_seconds"] += interval["duration_seconds"]
+            current["intervals"] += 1
+        else:
+            current = {key: interval[key] for key in ("clock", "start_seconds", "end_seconds", "duration_seconds")}
+            current.update(intervals=1, presented_counter=interval["frame_counter_start"])
+            plateaus.append(current)
+    plateaus = [r for r in plateaus if r["duration_seconds"] >= 10]
+    diagnostic_streams = {"frame_stall", "guest_stall_snapshot", "guest_stall_thread"}
+    diagnostics = [r for r in core if r["stream"] in diagnostic_streams]
+    diagnostic_counts = {stream: sum(r["stream"] == stream for r in diagnostics) for stream in sorted(diagnostic_streams)}
+    tail = {stream: [{**evidence_reference(r), "metrics": r["metrics"]} for r in diagnostics if r["stream"] == stream][-MAX_FORENSIC_EVENTS:]
+        for stream in sorted(diagnostic_streams)}
+    owner_last = {}
+    for record in core:
+        if record["stream"].startswith("forensic_"):
+            key = (record["stream"], json.dumps(record.get("dimensions", {}), sort_keys=True))
+            owner_last[key] = record
+    owner_tail = []
+    for record in list(owner_last.values())[:64]:
+        metrics = {key: value[-8:] if key == "recent_events" and isinstance(value, list) else value for key, value in record["metrics"].items()}
+        owner_tail.append({**evidence_reference(record), "dimensions": record.get("dimensions", {}), "metrics": metrics,
+            **{key: record.get(key) for key in ("packet_session_seconds", "captured_at_monotonic_ms", "capture_age_at_packet_ms", "estimated_capture_session_seconds", "anchor_uncertainty_ms")}})
+    last_breadcrumb = breadcrumbs[-1] if breadcrumbs else None
+    packet_counts = {}
+    for packet in packets:
+        status = packet["metrics"].get("forensic_core_snapshot_status")
+        state = ("available" if packet.get("core_payload_accepted") else "positive_status_missing_or_invalid_payload") if numeric(status) and status > 0 else "unavailable_or_busy" if status in (-1, -3) else "failed_or_invalid" if status in (-2, -4, -5) else "unknown"
+        packet_counts[state] = packet_counts.get(state, 0) + 1
+    return {"assessment": assessment, "system_termination": "unconfirmed_no_matching_system_crash_evidence",
+        "policy": {"low_headroom_bytes": 64 * MIB, "memory_stale_after_seconds": 10,
+            "plateau_min_seconds": 10, "plateau_max_single_interval_seconds": 30, "diagnostic_tail_per_stream": MAX_FORENSIC_EVENTS},
+        "last_memory_sample": evidence_reference(last, memory_keys),
+        "memory_tail": [evidence_reference(r, memory_keys) for r in periodic[-8:]],
+        "stop_event_counts": {event: sum(r["event"] == event for r in stop_records) for event in sorted(STOP_EVENTS)},
+        "stop_events_tail": [evidence_reference(r) for r in stop_records[-MAX_FORENSIC_EVENTS:]],
+        "presentation": {"source": source if presentation else None, "zero_progress_periods": plateaus[-MAX_FORENSIC_EVENTS:],
+            "zero_progress_periods_observed": len(plateaus),
+            "longest_zero_progress_seconds": max((r["duration_seconds"] for r in plateaus), default=None),
+            "last_interval": {key: presentation[-1][key] for key in ("clock", "start_seconds", "end_seconds", "presented_fps", "frame_delta", "spans_gap")} if presentation else None,
+            "note": "Counter plateau is observed non-presentation, not an inferred deadlock or scene; unobserved time and post-stop intervals are excluded."},
+        "diagnostic_event_counts": diagnostic_counts, "diagnostic_tail": tail,
+        "forensic_packets": {"observed": len(packets), "status_counts": packet_counts,
+            "last_native": evidence_reference(packets[-1], tuple(packets[-1]["metrics"])) if packets else None,
+            "last_owner_snapshots": owner_tail,
+            "note": "Cached owners retain their own capture times; repeated cached payloads never create new rates. Core monotonic rates are not assigned guessed scene phases."},
+        "breadcrumbs": {"observed": len(breadcrumbs), "last": evidence_reference(last_breadcrumb, tuple(last_breadcrumb["metrics"])) if last_breadcrumb else None,
+            "last_sample_complete_recorded": last_breadcrumb["metrics"].get("phase") == "sample_complete" if last_breadcrumb else None,
+            "note": "An unfinished sampling phase locates the last persisted breadcrumb, not the cause of a crash or evidence that its following operation failed."},
+        "note": "Low active-end headroom is consistent with a process memory limit. File end is not proof of termination; Jetsam requires matching system evidence."}
 
 
 def slopes(records, phases):
@@ -441,12 +853,17 @@ def slopes(records, phases):
     return results
 
 
-def analyze(session, memory_paths, core_path=None, phases=(), offset=None, pid=None, extra_counters=()):
+def analyze(session, memory_paths, core_path=None, phases=(), offset=None, pid=None, extra_counters=(), forensic_paths=(), breadcrumb_paths=()):
     quality = {"invalid_memory_lines": [], "duplicate_memory_records": 0, "duplicate_core_records": 0,
         "out_of_order_memory_records": 0, "core_timer_resets": 0, "counter_resets": [], "gaps": []}
-    quality.update(core_continuations_joined=0, incomplete_census_records=[])
+    quality.update(core_continuations_joined=0, incomplete_census_records=[], bounded_core_messages=0, omitted_census_records=0)
+    quality.update(invalid_forensic_records=[], duplicate_forensic_records=0, bounded_forensic_values=0,
+        reused_cached_forensic_snapshots=0, conflicting_cached_forensic_snapshots=0, unverified_forensic_source_records=0)
     memory = read_memory(memory_paths, session, quality)
     core, clock = read_core(core_path, session, quality, offset, pid)
+    packets = read_forensic_jsonl(forensic_paths, session, quality)
+    breadcrumbs = read_forensic_jsonl(breadcrumb_paths, session, quality, breadcrumb=True)
+    core += forensic_core_records(packets, quality)
     markers = [{"name": name, "session_seconds": time, "source": "manual_cli"} for name, time in phases]
     for record in memory:
         if record["event"] in ("scene_marker", "phase_marker") and numeric(record["session_seconds"]):
@@ -456,17 +873,19 @@ def analyze(session, memory_paths, core_path=None, phases=(), offset=None, pid=N
         if record["event"] in ("stop_requested", "core_returned", "main_returned") and numeric(record["session_seconds"]):
             markers.append({"name": record["event"], "session_seconds": record["session_seconds"], "source": "runtime_event"})
     markers.sort(key=lambda marker: marker["session_seconds"])
-    all_records = memory + core
+    all_records = memory + core + packets + breadcrumbs
     for record in all_records:
         record["phase"] = phase_at(record["session_seconds"], markers)
     # Session metadata isn't a sampled memory record and must not distort cadence.
-    sampled = [r for r in memory if r["event"] == "sample"]
+    sampled = [r for r in memory if r["event"] == "sample" and not post_stop_sample(r)]
     periodic_memory = [r for r in memory if r["event"] in ("sample", "post_stop_sample")]
     measured_memory = [r for r in memory if r["event"] != "session_start"]
-    interval_rows = intervals(periodic_memory + core, markers, quality, extra_counters, session.get("sample_interval_seconds"))
+    interval_rows = intervals(periodic_memory + core + packets, markers, quality, extra_counters, session.get("sample_interval_seconds"))
     present = [r for r in interval_rows if r["stream"] == "presentation" and numeric(r["presented_fps"])]
     if not present:
         present = [r for r in interval_rows if r["stream"] == "gpu" and numeric(r["presented_fps"])]
+    if not present:
+        present = [r for r in interval_rows if r["stream"] == "forensic_producer" and numeric(r["presented_fps"])]
     gc_records = [r for r in core if r["stream"] == "trim" and r["metrics"].get("managed_gc") is True]
     gc_durations = [r["metrics"]["managed_gc_duration_us"] / 1000 for r in gc_records if numeric(r["metrics"].get("managed_gc_duration_us"))]
     coverage = {}
@@ -485,10 +904,12 @@ def analyze(session, memory_paths, core_path=None, phases=(), offset=None, pid=N
             "settings": {k: session.get(k) for k in SETTINGS}, "runtime_settings": [r["metrics"] for r in core if r["stream"] == "runtime_settings"],
             "resolution_observations": [r for r in core if r["stream"] in ("first_presentation", "swapchain")],
             "inputs": [{"kind": kind, "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()} for kind, path in
-                [("memory_segment", p) for p in memory_paths] + ([("core_log", core_path)] if core_path else [])]},
+                [("memory_segment", p) for p in memory_paths] + ([("core_log", core_path)] if core_path else [])
+                + [("forensic_segment", p) for p in forensic_paths] + [("breadcrumb_segment", p) for p in breadcrumb_paths]]},
         "clock": clock, "coverage_seconds": coverage, "quality": quality, "metric_schema": schema, "phases": markers,
+        "forensic_evidence": forensic_evidence(memory or packets, core, interval_rows, clock, packets, breadcrumbs),
         "summary": {"memory_records": len(memory), "memory_samples": len(sampled),
-            "post_stop_samples": sum(r["event"] == "post_stop_sample" for r in memory),
+            "post_stop_samples": sum(post_stop_sample(r) for r in memory),
             "peak_footprint_bytes": extrema(memory, "phys_footprint_bytes"),
             "min_headroom_bytes": extrema(memory, "os_proc_available_memory_bytes", False),
             "jit_used_high_water_bytes": extrema(memory, "jit_cache_used_bytes"),
@@ -507,7 +928,7 @@ def analyze(session, memory_paths, core_path=None, phases=(), offset=None, pid=N
             "Per-frame resource rates use a frame counter in the SAME snapshot; otherwise unknown.",
             "A low final headroom is consistent with a memory limit; this report cannot prove Jetsam without matching system evidence.",
             "Core coverage end is not core termination. OS post-stop observations remain separate from renderer coverage."],
-        "records": all_records, "intervals": interval_rows, "phase_slopes": slopes(measured_memory + core, markers),
+        "records": all_records, "intervals": interval_rows, "phase_slopes": slopes(measured_memory + core + packets, markers),
     }
 
 
@@ -521,6 +942,9 @@ def write_reports(report, out):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "analysis.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
+    (out / "forensic-summary.json").write_text(json.dumps({"provenance": report["provenance"],
+        "quality": report["quality"], "forensic_evidence": report["forensic_evidence"]},
+        ensure_ascii=False, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     provenance = report["provenance"]
     context = {"source_commit": provenance["source_commit"], "version": provenance["version"],
         "resolution_scale": provenance["settings"]["resolution_scale"], "settings": provenance["settings"]}
@@ -555,6 +979,10 @@ def write_reports(report, out):
         f"- Forced GC: `{printable(summary['forced_gc'])}`.",
         f"- Thermal states observed: {printable(summary['thermal_states_observed'])}.",
         f"- Input quality: `{printable(report['quality'])}`.", "",
+        f"Recording-end evidence: `{report['forensic_evidence']['assessment']}`. System termination is unconfirmed without matching system evidence.",
+        f"Observed longest presentation plateau: {printable(report['forensic_evidence']['presentation']['longest_zero_progress_seconds'])} seconds. No scene or deadlock cause is inferred.",
+        f"Active/unknown-activity periodic samples: {summary['memory_samples']}; post-stop/inactive periodic samples: {summary['post_stop_samples']}.", "",
+        "The bounded forensic-summary.json contains end-of-recording evidence and diagnostic tails, without texture census bins.", "",
         "Resource rates (per second/per frame), owner gauges and phase slopes are in CSV/JSON. Unknown schema fields are retained without guessed counter semantics.", ""]
     lines += ["- " + note for note in report["limitations"]]
     (out / "analysis.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -567,6 +995,8 @@ def main(argv=None):
     parser.add_argument("--core-log", type=Path)
     parser.add_argument("--core-utc-offset", help="Explicit local core wall-clock offset, e.g. +05:00; negative: --core-utc-offset=-04:00")
     parser.add_argument("--core-pid", type=int)
+    parser.add_argument("--forensics", nargs="+", default=[], type=Path, help="Optional memory-forensics JSONL current/previous segments")
+    parser.add_argument("--breadcrumbs", nargs="+", default=[], type=Path, help="Optional memory-breadcrumbs JSONL current/previous segments")
     parser.add_argument("--phase", action="append", default=[], metavar="NAME=SECONDS", help="Manual session elapsed marker, e.g. train=400, therapy=500, franklin=600")
     parser.add_argument("--counter", action="append", default=[], metavar="STREAM.METRIC", help="Explicit cumulative semantics for a new telemetry field; never declare a gauge")
     parser.add_argument("--out", required=True, type=Path)
@@ -579,7 +1009,7 @@ def main(argv=None):
             if not name or not numeric(seconds) or seconds < 0:
                 raise ValueError("Invalid phase marker: " + marker)
             phases.append((name, seconds))
-        report = analyze(read_json(args.session), args.memory, args.core_log, phases, args.core_utc_offset, args.core_pid, args.counter)
+        report = analyze(read_json(args.session), args.memory, args.core_log, phases, args.core_utc_offset, args.core_pid, args.counter, args.forensics, args.breadcrumbs)
         write_reports(report, args.out)
     except (OSError, ValueError) as error:
         parser.exit(2, "Analysis failed: " + str(error) + "\n")

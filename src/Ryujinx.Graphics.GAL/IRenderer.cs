@@ -85,6 +85,9 @@ namespace Ryujinx.Graphics.GAL
         /// </summary>
         string GetDiagnosticSnapshot() => "backend_progress=unavailable";
 
+        /// <summary>Sampler-safe: cached JSON and atomic scalars only. Never wait for GPU work.</summary>
+        void WriteMemoryForensicState(System.Text.Json.Utf8JsonWriter writer, long now) => writer.WriteNullValue();
+
         ICounterEvent ReportCounter(CounterType type, EventHandler<ulong> resultHandler, float divisor, bool hostReserved);
 
         void ResetCounter(CounterType type);

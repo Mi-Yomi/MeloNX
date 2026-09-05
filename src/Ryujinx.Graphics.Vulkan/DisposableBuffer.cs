@@ -25,6 +25,7 @@ namespace Ryujinx.Graphics.Vulkan
             try
             {
                 _api.DestroyBuffer(_device, Value, Span<AllocationCallbacks>.Empty);
+                _owner?.RecordNativeDestroyed();
             }
             finally
             {

@@ -14,6 +14,10 @@ namespace Ryujinx.Graphics.Vulkan
     {
         private static long _nextStorageIdentity;
         internal long StorageIdentity { get; } = Interlocked.Increment(ref _nextStorageIdentity);
+        private readonly BufferLifecycleDiagnostics _diagnostics;
+        private readonly BufferAllocationPurpose _diagnosticPurpose;
+        private int _diagnosticDisposeRequested;
+        private int _diagnosticNativeDestroyed;
         private const int MaxUpdateBufferSize = 0x10000;
 
         private const int SetCountThreshold = 100;
@@ -61,7 +65,8 @@ namespace Ryujinx.Graphics.Vulkan
 
         private Action _decrementReferenceCount;
 
-        public BufferHolder(VulkanRenderer gd, Device device, VkBuffer buffer, MemoryAllocation allocation, int size, BufferAllocationType type, BufferAllocationType currentType)
+        public BufferHolder(VulkanRenderer gd, Device device, VkBuffer buffer, MemoryAllocation allocation, int size, BufferAllocationType type, BufferAllocationType currentType,
+            BufferLifecycleDiagnostics diagnostics = null, BufferAllocationPurpose purpose = BufferAllocationPurpose.General)
         {
             _gd = gd;
             _device = device;
@@ -80,9 +85,13 @@ namespace Ryujinx.Graphics.Vulkan
             _useMirrors = gd.IsTBDR;
             
             _decrementReferenceCount = _buffer.DecrementReferenceCount;
+            _diagnostics = diagnostics;
+            _diagnosticPurpose = purpose;
+            _diagnostics?.Created(StorageIdentity, Size, purpose);
         }
 
-        public BufferHolder(VulkanRenderer gd, Device device, VkBuffer buffer, Auto<MemoryAllocation> allocation, int size, BufferAllocationType type, BufferAllocationType currentType, int offset)
+        public BufferHolder(VulkanRenderer gd, Device device, VkBuffer buffer, Auto<MemoryAllocation> allocation, int size, BufferAllocationType type, BufferAllocationType currentType, int offset,
+            BufferLifecycleDiagnostics diagnostics = null)
         {
             _gd = gd;
             _device = device;
@@ -99,9 +108,13 @@ namespace Ryujinx.Graphics.Vulkan
             _activeType = currentType;
 
             _flushLock = new ReaderWriterLockSlim();
+            _diagnostics = diagnostics;
+            _diagnosticPurpose = BufferAllocationPurpose.Imported;
+            _diagnostics?.Created(StorageIdentity, Size, _diagnosticPurpose);
         }
 
-        public BufferHolder(VulkanRenderer gd, Device device, VkBuffer buffer, int size, Auto<MemoryAllocation>[] storageAllocations)
+        public BufferHolder(VulkanRenderer gd, Device device, VkBuffer buffer, int size, Auto<MemoryAllocation>[] storageAllocations,
+            BufferLifecycleDiagnostics diagnostics = null)
         {
             _gd = gd;
             _device = device;
@@ -114,6 +127,15 @@ namespace Ryujinx.Graphics.Vulkan
             _activeType = BufferAllocationType.Sparse;
 
             _flushLock = new ReaderWriterLockSlim();
+            _diagnostics = diagnostics;
+            _diagnosticPurpose = BufferAllocationPurpose.SparseAlias;
+            _diagnostics?.Created(StorageIdentity, Size, _diagnosticPurpose);
+        }
+
+        internal void RecordNativeDestroyed()
+        {
+            if (_diagnostics != null && Interlocked.Exchange(ref _diagnosticNativeDestroyed, 1) == 0)
+                _diagnostics.NativeDestroyed(StorageIdentity, Size, _diagnosticPurpose);
         }
 
         public unsafe Auto<DisposableBufferView> CreateView(VkFormat format, int offset, int size, Action invalidateView)
@@ -623,7 +645,7 @@ namespace Ryujinx.Graphics.Vulkan
                     if (!_gd.BufferManager.StagingBuffer.TryPushData(cbs.Value, endRenderPass, this, offset, data))
                     {
                         // Need to do a slow upload.
-                        BufferHolder srcHolder = _gd.BufferManager.Create(_gd, dataSize, baseType: BufferAllocationType.HostMapped);
+                        BufferHolder srcHolder = _gd.BufferManager.Create(_gd, dataSize, baseType: BufferAllocationType.HostMapped, purpose: BufferAllocationPurpose.Transient);
                         UploadTransientBuffer(_gd, cbs.Value, endRenderPass, srcHolder, this, offset, data[..dataSize]);
                     }
 
@@ -849,7 +871,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (!_cachedConvertedBuffers.TryGetValue(offset, size, key, out BufferHolder holder))
             {
-                holder = _gd.BufferManager.Create(_gd, (size * 2 + 3) & ~3, baseType: BufferAllocationType.DeviceLocal);
+                holder = _gd.BufferManager.Create(_gd, (size * 2 + 3) & ~3, baseType: BufferAllocationType.DeviceLocal, purpose: BufferAllocationPurpose.Conversion);
 
                 _gd.PipelineInternal.EndRenderPass();
                 _gd.HelperShader.ConvertI8ToI16(_gd, cbs, this, holder, offset, size);
@@ -875,7 +897,7 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 int alignedStride = (stride + (alignment - 1)) & -alignment;
 
-                holder = _gd.BufferManager.Create(_gd, (size / stride) * alignedStride, baseType: BufferAllocationType.DeviceLocal);
+                holder = _gd.BufferManager.Create(_gd, (size / stride) * alignedStride, baseType: BufferAllocationType.DeviceLocal, purpose: BufferAllocationPurpose.Conversion);
 
                 _gd.PipelineInternal.EndRenderPass();
                 _gd.HelperShader.ChangeStride(_gd, cbs, this, holder, offset, size, stride, alignedStride);
@@ -905,7 +927,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                 int convertedCount = pattern.GetConvertedCount(indexCount);
 
-                holder = _gd.BufferManager.Create(_gd, convertedCount * 4, baseType: BufferAllocationType.DeviceLocal);
+                holder = _gd.BufferManager.Create(_gd, convertedCount * 4, baseType: BufferAllocationType.DeviceLocal, purpose: BufferAllocationPurpose.Conversion);
 
                 _gd.PipelineInternal.EndRenderPass();
                 _gd.HelperShader.ConvertIndexBuffer(_gd, cbs, this, holder, pattern, indexSize, offset, indexCount);
@@ -944,11 +966,14 @@ namespace Ryujinx.Graphics.Vulkan
         /// </summary>
         public void TrimPressureCaches()
         {
+            _diagnostics?.PressureTrim(StorageIdentity, Size, _diagnosticPurpose);
             _cachedConvertedBuffers.Clear();
         }
 
         public void Dispose()
         {
+            if (_diagnostics != null && Interlocked.Exchange(ref _diagnosticDisposeRequested, 1) == 0)
+                _diagnostics.DisposeRequested(StorageIdentity, Size, _diagnosticPurpose);
             _gd.PipelineInternal?.FlushCommandsIfWeightExceeding(_buffer, (ulong)Size);
 
             _buffer.Dispose();

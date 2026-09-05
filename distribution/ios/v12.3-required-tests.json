@@ -1,0 +1,1160 @@
+{
+  "baseline_source": "5225f045e86d0ef56a447ca0e76d8ad84aea6fc5",
+  "targeted": {
+    "Ryujinx.Tests.Cpu.GuestThreadMetadataTests.BusyProcessThreadListIsSkippedWithoutWaitingForItsOwner": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.GuestThreadMetadataTests.SnapshotCapturesManagedWaitMetadataAndSanitizesExistingHostName": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.GuestThreadMetadataTests.SnapshotIsBoundedAndDoesNotNeedKernelOrGuestMemory": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMappingInitializationTests.CrossPartitionUnmapPreservesLiveViewsAndDiscardsOnlyWholeHostPages(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMappingInitializationTests.CrossPartitionUnmapPreservesLiveViewsAndDiscardsOnlyWholeHostPages(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMappingInitializationTests.ReallocatedHeapPagesAreZeroAndLiveNeighboursArePreserved(16384UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMappingInitializationTests.ReallocatedHeapPagesAreZeroAndLiveNeighboursArePreserved(4096UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMemoryAllocatorTests.AlignmentUsesTheActualAllocationOffset": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMemoryAllocatorTests.AllocationSpanningReusedPrefixAndFreshTailClearsOnlyPrefix": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMemoryAllocatorTests.FailedAllocationDoesNotAdvanceInitializationHistory": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMemoryAllocatorTests.FreedRangeRequiresClearingWhenReused": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMemoryAllocatorTests.FreshTailDoesNotRequireClearing": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMemoryAllocatorTests.PartialBlockFreeRequestsDiscardButWholeBlockFreeDoesNot": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Cpu.PrivateMemoryOwnershipTests.FreeAndDisposeRestoreProcessOwnershipBaseline": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.CriticalPressureTrimSkipsReferencedEntryAndRetainsMostRecentTexture": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.DescriptorlessAddPreservesExistingDescriptorLookup": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.ExplicitRemovalReleasesOnlyTheShortCacheReference": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NewDescriptorlessEntryExpiresAfterTwoTicks": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalCapacityEvictionBypassesGpuDirtyOldestForOneCleanRelease": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionAlternativeIsSafeAndCanOnlyDeferOldestOnce(False,False,False,False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionAlternativeIsSafeAndCanOnlyDeferOldestOnce(False,True,False,False,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionAlternativeIsSafeAndCanOnlyDeferOldestOnce(False,True,False,True,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionAlternativeIsSafeAndCanOnlyDeferOldestOnce(False,True,True,True,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionAlternativeIsSafeAndCanOnlyDeferOldestOnce(True,True,False,False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionOnlyClassifiesGpuOnlyDirtyDataAsReadback(False,False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionOnlyClassifiesGpuOnlyDirtyDataAsReadback(False,True,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionOnlyClassifiesGpuOnlyDirtyDataAsReadback(True,False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.NormalEvictionOnlyClassifiesGpuOnlyDirtyDataAsReadback(True,True,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.OversizedMostRecentTextureRetainsItsCacheReferenceUntilExplicitRemoval": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.PressureTrimEvictsCleanOldestTextureAndReleasesHostStorage": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.PressureTrimPolicyOnlyEvictsUnreferencedTexturesWithoutRequiredReadback(False,False,False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.PressureTrimPolicyOnlyEvictsUnreferencedTexturesWithoutRequiredReadback(False,True,False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.PressureTrimPolicyOnlyEvictsUnreferencedTexturesWithoutRequiredReadback(True,False,False,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.PressureTrimPolicyOnlyEvictsUnreferencedTexturesWithoutRequiredReadback(True,False,True,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.PressureTrimPolicyOnlyEvictsUnreferencedTexturesWithoutRequiredReadback(True,True,False,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.PressureTrimPolicyOnlyEvictsUnreferencedTexturesWithoutRequiredReadback(True,True,True,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.PressureTrimSkipsTextureWithAnotherOwner": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoDeleteCacheTests.RepeatedAddDoesNotReplaceOrExtendExistingEntry": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoLifetimeTests.ConcurrentBorrowedReferenceRetirementDestroysResourcesExactlyOnce": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoLifetimeTests.OwnerDisposalRetainsUploadDataUntilLastCommandBufferReferenceRetires": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoLifetimeTests.StaleBindingReadsReturnEmptyWithoutCallingMirrorOrResurrectingResource": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoLifetimeTests.ThrowingFirstDependencyDoesNotPreventRemainingDependencyRelease": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.AutoLifetimeTests.ThrowingNativeDisposalStillReleasesEveryChildAndPreservesFirstError": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.ConcurrentPurposeTotalsReconcileAfterOutstandingJobsReturn": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.ConcurrentRentReturnAndTrimPreserveLiveDataAndAccounting": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.CountAndByteBudgetChargeActualElementSizeAndClearReferences": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.DuplicatePagesRespectBothBudgetsAndTrimPreservesLeasedData(12288,16,3)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.DuplicatePagesRespectBothBudgetsAndTrimPreservesLeasedData(65536,3,3)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.InvalidPurposeDoesNotMutatePoolAndEmptyRentCreatesNoArray": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.LargeOneOffAndDuplicateSizesDoNotRemainRetained": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.ManyDistinctTextureSizesCannotGrowIdlePoolWithoutLimit": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.MemoryOwnerDisposeIsIdempotentAndDisposedAccessIsRejected": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.PurposeAccountingFollowsActualCapacityAcrossReuseAndTrim": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.PurposeSurvivesOwnershipTransferAndDoubleDispose": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.RepeatedSparsePageBurstsReuseEveryReturnedPage": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.ReusesClosestFitButNeverLeasesOneArrayToTwoOwners": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.SmallPageIsDiscardedWhenOnlyLargeArraysFillTheBudget": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.SparsePageBurstsCannotEvictWarmLargeConversionArrays(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.SparsePageBurstsCannotEvictWarmLargeConversionArrays(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BoundedScratchPoolTests.TrimDoesNotReclaimArrayHeldByAnInFlightOwner": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheGrowthTests.NecessaryOverlapInsideGrowthIsMergedAndKeepsNeighbourBytes": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheGrowthTests.TailGrowthDoesNotAbsorbAnUnneededNeighbourOrInvalidateItsHandle": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheGrowthTests.TailGrowthIsAnchoredToExistingStorageAndPreservesData(2097152,3145728)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheGrowthTests.TailGrowthIsAnchoredToExistingStorageAndPreservesData(65536,98304)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheStabilityTests.BelowBudgetSequenceMaintenanceDoesNotAllocate": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheStabilityTests.EmergencyStillEvictsCleanStorageAndReuploadsCorrectGuestBytes(256UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheStabilityTests.EmergencyStillEvictsCleanStorageAndReuploadsCorrectGuestBytes(512UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheStabilityTests.FittingWorkingSetSurvivesReportedProloguePressureWithoutReuploads(1229UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheStabilityTests.FittingWorkingSetSurvivesReportedProloguePressureWithoutReuploads(969UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheStabilityTests.ForensicsDistinguishesCapacityFromPressureRecreationOnActualCache(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferCacheStabilityTests.ForensicsDistinguishesCapacityFromPressureRecreationOnActualCache(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.ChangedOrCollidingGuestRangesDoNotInventRecreationEvidence": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.ConcurrentRetirementCountersAreCompleteEvenWhenSamplesAreDropped": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.HotEventAccountingAllocatesNothingAndHistoryIsBounded": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.NativeRetirementWaitsForActualCommandDependencyAndDoesNotCountAliasAsOwnedBytes": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.SaturatedSnapshotsFitPerOwnerExportLimitAndCachedReadsAllocateNothing": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.SizeBucketsKeepBoundaryAllocationsSeparate(1048576,2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.SizeBucketsKeepBoundaryAllocationsSeparate(1048577,3)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.SizeBucketsKeepBoundaryAllocationsSeparate(4096,0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.SizeBucketsKeepBoundaryAllocationsSeparate(4097,1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.SizeBucketsKeepBoundaryAllocationsSeparate(65536,1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferForensicsTests.SizeBucketsKeepBoundaryAllocationsSeparate(65537,2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.ClearMirrorsNormalizesWholeSizeAndOversizedBindingBeforeSparseUpload(-1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.ClearMirrorsNormalizesWholeSizeAndOversizedBindingBeforeSparseUpload(int.MaxValue)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.InvalidOrEmptyBindingDoesNotConsumePendingBytes(-1,16)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.InvalidOrEmptyBindingDoesNotConsumePendingBytes(0,-2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.InvalidOrEmptyBindingDoesNotConsumePendingBytes(0,0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.InvalidOrEmptyBindingDoesNotConsumePendingBytes(256,-1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.NestedDisposalScopesDoNotFlushWhenInnerUploadReturns": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.SlowUploadEndsPassAndRetainsSourceWithoutFlushingCallerSubmission": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferPendingUploadTests.SlowUploadFailureReleasesUnsubmittedSourceOnce": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.BoundsNormalizeUsingRemainingLengthWithoutOverflow(100,23,-1,77)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.BoundsNormalizeUsingRemainingLengthWithoutOverflow(100,23,101,77)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.BoundsNormalizeUsingRemainingLengthWithoutOverflow(100,23,12,12)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.BoundsNormalizeUsingRemainingLengthWithoutOverflow(int.MaxValue,2147483645,-1,2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.BoundsNormalizeUsingRemainingLengthWithoutOverflow(int.MaxValue,2147483645,int.MaxValue,2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.ClearingOneCommandKeepsOtherCommandsReadAndWriteDependencies": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidNormalizationDoesNotChangeCallersSize(-1,0,1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidNormalizationDoesNotChangeCallersSize(0,0,-1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidNormalizationDoesNotChangeCallersSize(10,-1,1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidNormalizationDoesNotChangeCallersSize(10,1,-2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidNormalizationDoesNotChangeCallersSize(10,1,0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidNormalizationDoesNotChangeCallersSize(10,10,-1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidRangesDoNotMutateTrackingOrOverlapAnyAccess(-1,1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidRangesDoNotMutateTrackingOrOverlapAnyAccess(0,-2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidRangesDoNotMutateTrackingOrOverlapAnyAccess(0,int.MinValue)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidRangesDoNotMutateTrackingOrOverlapAnyAccess(1,0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidRangesDoNotMutateTrackingOrOverlapAnyAccess(20497,-1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidRangesDoNotMutateTrackingOrOverlapAnyAccess(20498,10)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.InvalidRangesDoNotMutateTrackingOrOverlapAnyAccess(int.MaxValue,int.MaxValue)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.OversizedRequestIsClampedWithoutWrappingOrTouchingNextCommand(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.OversizedRequestIsClampedWithoutWrappingOrTouchingNextCommand(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.WholeSizeQueryFindsUsageInLastPageRatherThanOnlyFirstPage": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.WholeSizeTracksEveryRemainingPageInRequestedAccessPlane(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferUsageBitmapTests.WholeSizeTracksEveryRemainingPageInRequestedAccessPlane(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferViewStorageIdentityTests.ChangedRangeRecreatesNativeView(0,32)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferViewStorageIdentityTests.ChangedRangeRecreatesNativeView(16,64)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferViewStorageIdentityTests.FailedNativeCreationCanRetryWithoutLeakingAView": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferViewStorageIdentityTests.RecycledListAndNativeHandlesStillInvalidateOldStorage": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferViewStorageIdentityTests.RemovedStorageDropsViewAndDoesNotRecreateIt": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.BufferViewStorageIdentityTests.UnrelatedAllocationsKeepNativeViewAndSubmissionKeepsItAlive": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheByRangeTests.ClearToleratesEntryDisposalReenteringTheCache": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheByRangeTests.DependencyForAbsentOwnerDoesNotCreatePhantomRanges": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheByRangeTests.MissingLookupsDoNotRetainAnEmptyRangePerGuestAddress": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheByRangeTests.MissingRemovalDoesNotAllocateOrDisposeLiveEntries": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.AliasReleaseStopsAfterMeetingBudgetDeficit": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.AppleSiliconMacKeepsScaledUnifiedBudgets": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.AppleUnifiedBudgetsKeepFixedIosPressureLimit(16UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.AppleUnifiedBudgetsKeepFixedIosPressureLimit(4UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.AppleUnifiedBudgetsKeepFixedIosPressureLimit(8UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.CleanPhysicalStorageSelectsItsOnlySparseAlias": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.CopyChunkAddsOffsetsForMappedRanges": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.CopyChunkPreservesUnmappedSentinelBeforeOffsetArithmetic": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.CurrentSequenceResourcesSurviveCompositeOperation": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.DirtyPhysicalStorageDoesNotReleaseSparseAlias": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.NextSequenceEvictsOldestUntilUnderBudget": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.OutstandingOwnerIsSkippedWithoutBlockingLaterCandidate": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.RemovalAndClearReleaseTrackingExactlyOnce": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.RendererCapabilityRefreshAppliesFourGiBAppleUnifiedBudgets": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.SharedStorageRequiresEveryAliasToBeReleasable": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.TouchKeepsRecentlyUsedEntryResident": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CacheEvictionPolicyTests.UnrelatedSparseAliasIsNotReleased": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ConditionalRenderingFallbackTests.ThreadedDecisionWaitsForBackendAndDoesNotReserveOnProducer(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ConditionalRenderingFallbackTests.ThreadedDecisionWaitsForBackendAndDoesNotReserveOnProducer(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.EmptyCacheAndNonoverlappingRangesAreSafe": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.EmptyRangeNeverInvalidatesCounters(ulong.MaxValue)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.EmptyRangeNeverInvalidatesCounters(ulong.MinValue)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.LowestAddressEventIsFoundAndFlushedIncludingAfterReplacement": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.MissingAddressDiffersFromCachedImmediatePayload": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.RangeAtAddressLimitDoesNotWrapToLowAddresses(1UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.RangeAtAddressLimitDoesNotWrapToLowAddresses(64UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.UnmapBeyondLastEntryRemovesCountersAndAllowsFreshMappingAtSameAddress": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.CounterCacheTests.UnmapEndBetweenEntriesInvalidatesOnlyCoveredCallbacks": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.DescriptorPoolSizingTests.DescriptorRangesOfSameTypeAreAggregatedForEverySetInPool": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.DescriptorPoolSizingTests.DistinctDescriptorTypesAreEachSizedForEverySetInPool": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.DescriptorPoolSizingTests.FirstDescriptorRangeIsSizedForEverySetInPool": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ExecutionTimingTests.ActualThreadedReadbackRecordsWaitAndPreservesData": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ExecutionTimingTests.RepeatedMeasurementDoesNotAllocateOrRetainOperationObjects": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ExecutionTimingTests.ScopeRecordsExceptionsAndConcurrentCompletions": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferCreationTests.FailedCreationReleasesOnlyItsOwnPreparationOfSharedHostRange": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferCreationTests.FailedNativeBindingDestroysBufferBeforeReturningPreparedImport(ErrorMemoryMapFailed)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferCreationTests.FailedNativeBindingDestroysBufferBeforeReturningPreparedImport(ErrorOutOfDeviceMemory)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferCreationTests.FailedNativeCreationReturnsPreparedImportWithoutDestroyingInvalidOutput(ErrorFeatureNotPresent)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferCreationTests.FailedNativeCreationReturnsPreparedImportWithoutDestroyingInvalidOutput(ErrorOutOfDeviceMemory)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferCreationTests.MissingPreparationDoesNotCreateAnUnownedNativeBuffer": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferCreationTests.SuccessfulImportedBufferKeepsMemoryUntilItsLastCommandReferenceRetires": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.InvalidRequirementsRejectImportAndReleaseSuccessfulProbeExactlyOnce(8192UL,4096UL,uint.MinValue)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.InvalidRequirementsRejectImportAndReleaseSuccessfulProbeExactlyOnce(8192UL,ulong.MinValue,5)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.InvalidRequirementsRejectImportAndReleaseSuccessfulProbeExactlyOnce(ulong.MinValue,4096UL,5)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.InvalidSizeNeverReachesNativeCreate(-1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.InvalidSizeNeverReachesNativeCreate(0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.MissingExtensionSkipsEveryNativeCall": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.ProbeAndRuntimeCreateUseTheSameExternalHostBufferContract(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.ProbeAndRuntimeCreateUseTheSameExternalHostBufferContract(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.ResourceFailuresPropagateInsteadOfPretendingImportsAreUnsupported(ErrorDeviceLost)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.ResourceFailuresPropagateInsteadOfPretendingImportsAreUnsupported(ErrorOutOfDeviceMemory)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.ResourceFailuresPropagateInsteadOfPretendingImportsAreUnsupported(ErrorOutOfHostMemory)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.UnsupportedCreationReturnsFalseWithoutQueryingOrDestroyingInvalidBuffer(ErrorExtensionNotPresent)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.UnsupportedCreationReturnsFalseWithoutQueryingOrDestroyingInvalidBuffer(ErrorFeatureNotPresent)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostImportedBufferSupportTests.UnsupportedCreationReturnsFalseWithoutQueryingOrDestroyingInvalidBuffer(ErrorFormatNotSupported)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostMemoryAllocatorLifetimeTests.FinalNativeReleaseRemovesRegistryAndAllowsFreshImportAtSameHostPointer": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostMemoryAllocatorLifetimeTests.OverlappingPreparedRangesShareOneImportUntilEveryOwnerReleases": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.HostMemoryAllocatorLifetimeTests.RetiringOneDeviceMemoryDoesNotRemoveOtherLiveHostMappings": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.CapacityFailureDoesNotTouchCallerMemoryAndNextPacketRecovers": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.CompetingCaptureReturnsBusyWhileFirstWriterIsPaused": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.CoreSnapshotDistinguishesUnobservedOwnersAndSurvivesOwnerTeardown": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.FailedPublisherKeepsOldTimestampAndIncrementsFailureCount": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.IncompleteWriterCannotExposeUnterminatedJson": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.OversizedWriterIsCappedAndDoesNotPoisonNextSample": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.PausedProducerDoesNotBlockCachedReadOrMakeItLookFresh": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.RecursiveCaptureIsRejectedWithoutCorruptingOuterWriter": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.RendererForensicsDoesNotAcquireBufferMapLock": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.TwoLargeUtf8OwnerPacketsFitCombinedAbiCapacity": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryForensicSnapshotTests.WriterExceptionCannotCrossBoundaryOrExposePartialJson": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.AcceptsConcurrentReportsWithoutLosingTheStrongestRequest": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CalculatesTemporaryBufferTarget(256UL,1,256UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CalculatesTemporaryBufferTarget(256UL,2,256UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CalculatesTemporaryBufferTarget(257UL,1,257UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CalculatesTemporaryTextureTarget(256UL,1,128UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CalculatesTemporaryTextureTarget(256UL,2,ulong.MinValue)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CalculatesTemporaryTextureTarget(257UL,1,128UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CoalescesStrongestSeveritySourcesAndLowestAvailableMemory": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CriticalPressureSelectsStagedPersistentBufferCapacity(1UL,16UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CriticalPressureSelectsStagedPersistentBufferCapacity(256UL,16UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.CriticalPressureSelectsStagedPersistentBufferCapacity(257UL,32UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.LowPressureDoesNotLatchPersistentBufferCapacity": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.LowerConfiguredCapacityPermanentlyTightensLatchedCapacity": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.NewPersistentCapacityStartsUnlatched": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.PersistentCapacityCanOnlyTightenAndConfigurationDoesNotResetIt": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RejectsUnknownAbiValues(-1,1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RejectsUnknownAbiValues(1,0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RejectsUnknownAbiValues(1,3)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RejectsUnknownAbiValues(3,1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RepeatedCriticalSamplesNeverEmptyHotSet(1024UL,128UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RepeatedCriticalSamplesNeverEmptyHotSet(1229UL,128UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RepeatedCriticalSamplesNeverEmptyHotSet(133UL,32UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RepeatedCriticalSamplesNeverEmptyHotSet(256UL,32UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RepeatedCriticalSamplesNeverEmptyHotSet(512UL,64UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.RepeatedCriticalSamplesNeverEmptyHotSet(ulong.MinValue,32UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.StopAcceptingRejectsNewReportsAndDropsPendingRequest": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureMailboxTests.UIKitWarningWithProcessHeadroomDoesNotLatch": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureRecoveryTests.EmergencyRecoversOneTierAndNeverExceedsConfiguration": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureRecoveryTests.HealthyObservationsRecoverOnlyAfterTwentyContinuousSeconds": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureRecoveryTests.InterruptedHealthyPeriodDoesNotRecover(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureRecoveryTests.InterruptedHealthyPeriodDoesNotRecover(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureRecoveryTests.ObservationCannotHideQueuedCriticalAndLatestObservationWinsOtherwise": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureRecoveryTests.ObservationNeverSelectsEvictionOrPersistentReduction(1000UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureRecoveryTests.ObservationNeverSelectsEvictionOrPersistentReduction(128UL)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MemoryPressureRecoveryTests.ObservationNeverSelectsEvictionOrPersistentReduction(ulong.MinValue)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.BackendThreadingAutoUsesDedicatedRendererThread(False,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.BackendThreadingAutoUsesDedicatedRendererThread(True,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.ConfigurationPrefixMatchesBundledMoltenVkAbi": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.IosDoesNotUseDriverPipelineCache(False,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.IosDoesNotUseDriverPipelineCache(True,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.IosMemoryProfileUsesMoltenVkAbiValues": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.IosUsesEightMainCommandBuffers(False,False,16)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.IosUsesEightMainCommandBuffers(False,True,8)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.IosUsesEightMainCommandBuffers(True,False,2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.IosUsesEightMainCommandBuffers(True,True,2)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.MoltenVkAndRendererUseTheSameIosCommandBufferLimit": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.MoltenVkPrimitiveRestartAlwaysMatchesMetal(False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.MoltenVkPrimitiveRestartAlwaysMatchesMetal(False,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.MoltenVkPrimitiveRestartAlwaysMatchesMetal(True,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.MoltenVkPrimitiveRestartAlwaysMatchesMetal(True,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.NativeVulkanPrimitiveRestartFollowsGuestAndTopology(False,False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.NativeVulkanPrimitiveRestartFollowsGuestAndTopology(False,True,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.NativeVulkanPrimitiveRestartFollowsGuestAndTopology(True,False,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.MoltenVKConfigurationTests.NativeVulkanPrimitiveRestartFollowsGuestAndTopology(True,True,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PageTableReclamationTests.EmptyValueTypeLeafIsReleased": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PageTableReclamationTests.LiveNeighbourPreventsPrematureReclamation": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PageTableReclamationTests.NativeIntegerLeafCanBeReclaimedAndRemapped": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PageTableReclamationTests.SparseStreamingUnmapsDoNotRetainEmptyLeaves": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.DenseUploadUsesAtMostSixtyFourKiBPerSubmission": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.EmptyOperationsDoNotSplitDirtyRangesOrUpload": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.FailedPageRentalLeavesPreviousUpdateUnchangedAndReturnsNewPages": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.FailedSubmissionRestoresOnlyFailedAndUnsubmittedBatches": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.InvalidAndFailedBatchRentalsLeaveDirtyDataRetryable": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.NativeDestructionReturnsPendingPagesOnlyAfterFinalSubmissionReference": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.NestedRemovalDoesNotReplayFutureRangeOrReturnActivePages": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.NestedUploadConsumesFutureRangeExactlyOnce": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.NestedWritePreservesCallbackSnapshotAndNewDirtyBytes": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.OverwriteAndPartialRemovalKeepOtherBytesAndReturnCleanPages": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.RepeatedMirrorReadsDoNotAllocateRangeSnapshots": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.PendingBufferDataTests.TinyUpdateNearTwoGiBLimitRentsOnlyTouchedPages": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.ActualBc1DecodeRecordsBytesAndSurvivesTextureDisposal": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.ActualTextureCreationFailedViewAndDisposalBalanceCensus": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.BackgroundAuxiliaryCreationAndOwnerSnapshotHaveCoherentLifetimes": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.ConverterTotalsSurviveStorageReleaseAndIncludeFailure": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.FailedAuxiliaryCopyDoesNotReportAnUnissuedReleaseDuringCleanup": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.FallbackReasonsDistinguishFamilyGateFrom3DGateAndRecompression": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.OverflowPreservesLifetimeTotalsWithoutUnboundedKeys": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.ViewKeyPreservesHostDimensionsLayersAndSignedFormat": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.ViewsNeverDuplicateStorageAndReleaseIsIdempotent": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureFormatCensusTests.WarmCensusUpdatesAndObservedUsageAllocateNothing": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureGroupLifecycleTests.FlushBufferUnmapThenDisposeDeletesOnceAndRejectsLateCopy(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureGroupLifecycleTests.FlushBufferUnmapThenDisposeDeletesOnceAndRejectsLateCopy(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureGroupLifecycleTests.PostDisposeSyncAndSignalActionsAreNoOps": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureGroupLifecycleTests.RejectedHostMappingSelectsOrdinaryReadbackBeforeCopyAndKeepsZeroStride": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureGroupLifecycleTests.TextureDisposesGroupBeforeReleasingHostTexture": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.TextureGroupLifecycleTests.TextureGroupDisposeIsIdempotent": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedAvailabilityWaitTests.PublicationBeforeWaitNeedsNoRetainedEventSignal(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedAvailabilityWaitTests.PublicationBeforeWaitNeedsNoRetainedEventSignal(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedAvailabilityWaitTests.ReadyIdentifierWakesEveryWaiterWhileOtherIdentifierRemainsPending(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedAvailabilityWaitTests.ReadyIdentifierWakesEveryWaiterWhileOtherIdentifierRemainsPending(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedAvailabilityWaitTests.SyncDisposalWakesPendingWaitersWithoutReportingAvailability": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedAvailabilityWaitTests.UnrelatedPublicationsCannotCompleteUnpublishedIdentifier(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedAvailabilityWaitTests.UnrelatedPublicationsCannotCompleteUnpublishedIdentifier(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedReadbackTests.ExternalReadbackDoesNotBecomeSecondQueueProducer(0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedReadbackTests.ExternalReadbackDoesNotBecomeSecondQueueProducer(24000)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedReadbackTests.FailedReadbackInterruptWakesCallerAndDoesNotPoisonNextInterrupt": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedRendererIdleTests.IdleServiceCannotInterleaveWithACommandOrRunOnTheProducer": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedRendererIdleTests.IdleServiceUnblocksProducerWithoutAnotherCommandOnBackendOwnerThread": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedRendererShutdownTests.LateDeletesDrainBeforeBackendDisposalOnOwnerThread(0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedRendererShutdownTests.LateDeletesDrainBeforeBackendDisposalOnOwnerThread(12000)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedRendererShutdownTests.LateDeletesDrainBeforeBackendDisposalOnOwnerThread(64)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedTextureLifetimeTests.CopyQueuedBeforeReleaseAndDeleteSeesLiveTextureAndBuffer(1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.ThreadedTextureLifetimeTests.CopyQueuedBeforeReleaseAndDeleteSeesLiveTextureAndBuffer(24000)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VirtualBufferCopyTests.CopiesOnlyTheModifiedIntersection(0,4096,0,65536)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VirtualBufferCopyTests.CopiesOnlyTheModifiedIntersection(32768,4096,0,65536)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VirtualBufferCopyTests.CopiesOnlyTheModifiedIntersection(61440,4096,0,65536)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VirtualBufferCopyTests.CopiesOnlyTheModifiedIntersection(61440,4096,63488,2048)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanMemoryTrimPolicyTests.DescriptorRetirementStartsBeforeEmergencyWithoutResettingPipelines": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanMemoryTrimPolicyTests.DesktopBehaviorRemainsTiedToHeavyTrimCadence": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanMemoryTrimPolicyTests.EmergencyHeadroomUsesShorterIntervalsAndLowerHeapThreshold": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanMemoryTrimPolicyTests.EmergencyStillAllowsFullReclamation": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanMemoryTrimPolicyTests.FirstCriticalRequestWithHeadroomPreservesCompiledPipelines": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanMemoryTrimPolicyTests.LowPressureDoesNotRunExpensiveIosWork": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanMemoryTrimPolicyTests.NormalCriticalRequestsThrottleDescriptorAndManagedWork": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanMemoryTrimPolicyTests.NormalManagedCollectionRequiresUsefulHeapSize": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.ConsumerRetainsTimedOutHeadBeforeProcessingLaterReadyResult": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.DisposalCancelsUnavailableResultWithoutCallbackOrShutdownWait": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.ExplicitDisposeDoesNotBlockBackendOrRecycleQueryDuringConsumerRead": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.IdleCannotSubmitCapturedCommandBufferInsideDisposalScope": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.IdleSubmitsDeferredDisposalWeightOnceWithoutQuery": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.NonBlockingResultRejectsIncomplete64BitWrite(-4294967298L,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.NonBlockingResultRejectsIncomplete64BitWrite(-8589934589L,False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.NonBlockingResultRejectsIncomplete64BitWrite(0L,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.NonBlockingResultRejectsIncomplete64BitWrite(4294967299L,True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.PoolResetSerializesAgainstConsumerReturningQuery": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.QueuedCopyIsRecordedBeforeBeginQueryResetsPoolOutsidePass": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.QueuedCopyWithoutActivePassIsRecordedBeforeFlushSubmit": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.ReportOutsideRenderPassCopiesBeforeQueryResetAndIdleSubmission": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.TimeoutDoesNotPublishOrRetireAndLaterResultCompletesExactlyOnce": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Graphics.VulkanQueryProgressTests.UnsupportedNativeConditionalRenderingFlushesQueryAndUsesCpuResult": [
+      "Passed"
+    ]
+  },
+  "memory": {
+    "Ryujinx.Tests.Memory.DualMappedJitAllocatorTests.DisposalAttemptsBothMappingsEvenIfTheFirstOperationThrows": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.DualMappedJitAllocatorTests.FailedInitialMappingDoesNotReleaseAnInvalidAddress(-1)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.DualMappedJitAllocatorTests.FailedInitialMappingDoesNotReleaseAnInvalidAddress(null)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.DualMappedJitAllocatorTests.ProtectionFailureReleasesBothMappings": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.DualMappedJitAllocatorTests.RemapFailureReleasesTheOriginalMapping": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.DualMappedJitAllocatorTests.SuccessfulMappingsAreReleasedExactlyOnce(0,131072)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.DualMappedJitAllocatorTests.SuccessfulMappingsAreReleasedExactlyOnce(65536,0)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.DualMappedJitAllocatorTests.SuccessfulMappingsAreReleasedExactlyOnce(65536,131072)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.DirtyRegionOrdering(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.DirtyRegionOrdering(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.DisposeMultiHandles(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.DisposeMultiHandles(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.InheritHandles": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.PreciseAction": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.SequenceNumber(False)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.SequenceNumber(True)": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.MultiRegionTrackingTests.SmartRegionTracking": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.Tests.Test_Alias": [
+      "Passed",
+      "NotExecuted"
+    ],
+    "Ryujinx.Tests.Memory.Tests.Test_AliasMapLeak": [
+      "Passed",
+      "NotExecuted"
+    ],
+    "Ryujinx.Tests.Memory.Tests.Test_AliasRandom": [
+      "Passed",
+      "NotExecuted"
+    ],
+    "Ryujinx.Tests.Memory.Tests.Test_Read": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.Tests.Test_Write": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.TrackingTests.DisposeHandles": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.TrackingTests.Multithreading": [
+      "Passed",
+      "NotExecuted"
+    ],
+    "Ryujinx.Tests.Memory.TrackingTests.OverlappingRegions": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.TrackingTests.PreciseAction": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.TrackingTests.ReadActionThreadConsumption": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.TrackingTests.ReadAndWriteProtection": [
+      "Passed"
+    ],
+    "Ryujinx.Tests.Memory.TrackingTests.SingleRegion": [
+      "Passed"
+    ]
+  },
+  "python": [
+    "test_analyze_session.SessionAnalysisTests.test_actual_interval_fps_not_target_and_no_fake_frame_percentiles",
+    "test_analyze_session.SessionAnalysisTests.test_breadcrumb_latest_kernel_sample_survives_missing_complete_packet_without_cause_claim",
+    "test_analyze_session.SessionAnalysisTests.test_census_continuation_allows_millisecond_rollover_during_write",
+    "test_analyze_session.SessionAnalysisTests.test_census_continuation_rejects_distant_wall_or_other_pid_and_thread",
+    "test_analyze_session.SessionAnalysisTests.test_census_record_and_diagnostic_summary_limits_are_explicit",
+    "test_analyze_session.SessionAnalysisTests.test_counter_reset_is_unknown_not_negative_throughput",
+    "test_analyze_session.SessionAnalysisTests.test_csv_json_markdown_include_provenance_and_unknowns",
+    "test_analyze_session.SessionAnalysisTests.test_cumulative_creation_is_rate_not_resident_and_normalizes_aligned_frames",
+    "test_analyze_session.SessionAnalysisTests.test_different_session_sha_is_rejected",
+    "test_analyze_session.SessionAnalysisTests.test_duplicate_core_telemetry_not_counted_as_extra_event",
+    "test_analyze_session.SessionAnalysisTests.test_event_driven_trim_interval_is_not_a_missing_periodic_sample",
+    "test_analyze_session.SessionAnalysisTests.test_explicit_core_offset_aligns_truncated_log",
+    "test_analyze_session.SessionAnalysisTests.test_explicit_markers_and_stop_events_preserved",
+    "test_analyze_session.SessionAnalysisTests.test_forensic_cached_rates_use_owner_capture_time_and_do_not_repeat_cached_samples",
+    "test_analyze_session.SessionAnalysisTests.test_forensic_native_unavailable_placeholders_and_missing_cached_timestamp_stay_unknown",
+    "test_analyze_session.SessionAnalysisTests.test_forensic_other_source_session_and_wall_anchor_are_rejected",
+    "test_analyze_session.SessionAnalysisTests.test_forensic_oversized_record_arrays_and_conflicting_cache_are_visible",
+    "test_analyze_session.SessionAnalysisTests.test_forensic_rotation_duplicate_and_truncated_tail_are_reported",
+    "test_analyze_session.SessionAnalysisTests.test_gc_duration_and_unknown_duration_counts_are_separate",
+    "test_analyze_session.SessionAnalysisTests.test_inactive_regular_samples_are_post_stop_without_counting_events_as_samples",
+    "test_analyze_session.SessionAnalysisTests.test_inner_buffer_cache_timestamp_not_outer_publication_controls_rates",
+    "test_analyze_session.SessionAnalysisTests.test_interleaved_full_message_does_not_steal_other_thread_census",
+    "test_analyze_session.SessionAnalysisTests.test_invalid_middle_record_is_visible_not_a_truncated_tail",
+    "test_analyze_session.SessionAnalysisTests.test_low_active_tail_is_pressure_evidence_but_never_proves_system_termination",
+    "test_analyze_session.SessionAnalysisTests.test_main_returned_and_actual_post_stop_samples_have_separate_slope",
+    "test_analyze_session.SessionAnalysisTests.test_manual_markers_control_slopes_not_fixed_scene_seconds",
+    "test_analyze_session.SessionAnalysisTests.test_memory_gaps_and_out_of_order_are_reported",
+    "test_analyze_session.SessionAnalysisTests.test_missing_core_activity_is_not_assumed_active_at_low_headroom",
+    "test_analyze_session.SessionAnalysisTests.test_missing_counter_endpoint_does_not_skip_to_older_sample",
+    "test_analyze_session.SessionAnalysisTests.test_missing_metrics_and_unavailable_jit_are_unknown",
+    "test_analyze_session.SessionAnalysisTests.test_multiple_core_processes_require_selection",
+    "test_analyze_session.SessionAnalysisTests.test_nested_backend_metrics_and_quoted_guest_name_preserve_namespaces",
+    "test_analyze_session.SessionAnalysisTests.test_no_cross_stream_per_frame_or_post_core_extrapolation",
+    "test_analyze_session.SessionAnalysisTests.test_nslog_census_continuations_restore_split_fields_and_conversion",
+    "test_analyze_session.SessionAnalysisTests.test_numeric_timing_is_cpu_and_unknown_gpu_remains_unknown",
+    "test_analyze_session.SessionAnalysisTests.test_precise_adaptive_samples_and_cumulative_compression_have_real_rates",
+    "test_analyze_session.SessionAnalysisTests.test_presentation_alias_series_not_combined_twice",
+    "test_analyze_session.SessionAnalysisTests.test_presentation_plateau_requires_prior_frames_and_excludes_stop_and_recovery",
+    "test_analyze_session.SessionAnalysisTests.test_real_zero_is_valid_and_nan_is_not",
+    "test_analyze_session.SessionAnalysisTests.test_recovery_unknown_headroom_stale_sample_and_stop_do_not_inherit_old_pressure",
+    "test_analyze_session.SessionAnalysisTests.test_repeated_phase_names_do_not_merge_different_visits",
+    "test_analyze_session.SessionAnalysisTests.test_rotated_breadcrumbs_order_phases_by_precise_phase_time",
+    "test_analyze_session.SessionAnalysisTests.test_rotation_deduplicates_only_equal_records_and_tolerates_truncated_tail",
+    "test_analyze_session.SessionAnalysisTests.test_scratch_purpose_counters_do_not_cross_categories",
+    "test_analyze_session.SessionAnalysisTests.test_sparse_counter_plateau_does_not_certify_unobserved_stall",
+    "test_analyze_session.SessionAnalysisTests.test_texture_census_preserves_distinct_bins_views_and_conversion_counters",
+    "test_analyze_session.SessionAnalysisTests.test_truncated_core_does_not_guess_clock_alignment",
+    "test_analyze_session.SessionAnalysisTests.test_unavailable_failed_and_unobserved_core_are_unknown_not_zero",
+    "test_analyze_session.SessionAnalysisTests.test_unknown_fields_preserved_without_guessing_counter_semantics",
+    "test_analyze_session.SessionAnalysisTests.test_wall_clock_handles_startup_timer_reset",
+    "test_host_import_probe.HostImportProbeTests.test_accepts_reproduced_control_and_complete_roundtrip",
+    "test_host_import_probe.HostImportProbeTests.test_actual_process_exit_and_missing_report_are_recorded",
+    "test_host_import_probe.HostImportProbeTests.test_actual_process_timeout_is_bounded_and_stale_report_rejected",
+    "test_host_import_probe.HostImportProbeTests.test_unavailable_or_incomplete_gpu_validation_is_not_success",
+    "test_macho_validation.MachoValidationTests.test_accepts_thin_ios_dylib_with_expected_identity_and_uuid",
+    "test_macho_validation.MachoValidationTests.test_rejects_build_directory_or_unbundled_dependency",
+    "test_macho_validation.MachoValidationTests.test_rejects_simulator_macos_or_wrong_minimum_os",
+    "test_macho_validation.MachoValidationTests.test_rejects_static_executable_or_wrong_install_name",
+    "test_macho_validation.MachoValidationTests.test_rejects_wrong_architecture_or_arm64e",
+    "test_macho_validation.MachoValidationTests.test_truncated_or_invalid_load_commands_fail_closed",
+    "test_moltenvk_artifact.MoltenVKArtifactTests.test_complete_source_locked_artifact_is_accepted",
+    "test_moltenvk_artifact.MoltenVKArtifactTests.test_corrupted_driver_is_rejected",
+    "test_moltenvk_artifact.MoltenVKArtifactTests.test_incomplete_sources_or_license_are_rejected",
+    "test_moltenvk_artifact.MoltenVKArtifactTests.test_missing_or_skipped_native_import_evidence_is_rejected",
+    "test_moltenvk_artifact.MoltenVKArtifactTests.test_native_execution_and_source_claims_must_match_hashed_artifacts",
+    "test_moltenvk_artifact.MoltenVKArtifactTests.test_parent_escape_is_rejected",
+    "test_moltenvk_artifact.MoltenVKArtifactTests.test_wrong_commit_abi_platform_or_patch_is_rejected",
+    "test_source_lock.SourcePatchLockTests.test_dependent_patches_apply_reverse_and_verify_in_order",
+    "test_source_lock.SourcePatchLockTests.test_failed_later_patch_rolls_back_completed_prefix",
+    "test_source_lock.SourcePatchLockTests.test_locked_patch_hash_rejects_tampering",
+    "test_source_lock.SourcePatchLockTests.test_whole_tree_validation_detects_extra_edits_and_restores_patches",
+    "test_verify_test_results.ReleaseGateTests.test_missing_suite_cannot_pass_with_one_success",
+    "test_verify_test_results.ReleaseGateTests.test_new_failures_or_skips_cannot_hide_outside_required_set",
+    "test_verify_test_results.ReleaseGateTests.test_only_explicit_historical_not_run_is_allowed",
+    "test_verify_test_results.ReleaseGateTests.test_random_values_may_change_but_all_cases_must_execute",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_aborted_summary_cannot_pass_with_completed_test_records",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_duplicate_result_fails",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_failure_counters_fail_even_if_result_records_pass",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_missing_counters_fail",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_missing_or_empty_result_records_fail",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_nonpassing_records_cannot_hide_behind_success_counters",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_reports_historical_not_executed_from_records_despite_zero_summary_counter",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_result_without_definition_fails",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_run_level_error_cannot_hide_behind_passing_records",
+    "test_verify_test_results_trx.TrxReleaseGateTests.test_total_mismatch_fails"
+  ],
+  "memory_case_groups": {
+    "Ryujinx.Tests.Memory.TrackingTests.PageAlignment": 64
+  }
+}

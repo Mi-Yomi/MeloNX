@@ -10,6 +10,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
     /// </summary>
     class MultiRangeBuffer : IMultiRangeItem, IDisposable
     {
+        internal long DiagnosticId { get; } = BufferCacheDiagnostics.NextId();
         private readonly GpuContext _context;
 
         /// <summary>

@@ -52,7 +52,7 @@ namespace Ryujinx.Graphics.Vulkan
         public StagingBuffer(VulkanRenderer gd, BufferManager bufferManager)
         {
             _gd = gd;
-            Handle = bufferManager.CreateWithHandle(gd, BufferSize, out _buffer);
+            Handle = bufferManager.CreateWithHandle(gd, BufferSize, out _buffer, purpose: BufferAllocationPurpose.Staging);
             _pendingCopies = new Queue<PendingCopy>();
             _freeSize = BufferSize;
             _resourceAlignment = (int)gd.Capabilities.MinResourceAlignment;
