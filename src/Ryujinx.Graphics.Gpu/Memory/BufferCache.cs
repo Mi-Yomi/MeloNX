@@ -759,11 +759,17 @@ namespace Ryujinx.Graphics.Gpu.Memory
                         // Try to grow the buffer by 1.5x of its current size.
                         // This improves performance in the cases where the buffer is resized often by small amounts.
                         ulong existingSize = overlaps[0].Size;
-                        ulong growthSize = (existingSize + Math.Min(existingSize >> 1, MaxDynamicGrowthSize)) & ~BufferAlignmentMask;
+                        ulong growthBytes = Math.Min(existingSize >> 1, MaxDynamicGrowthSize) & ~BufferAlignmentMask;
 
-                        size = Math.Max(size, growthSize);
-                        endAddress = address + size;
+                        // Anchor the extension to existing storage. Using the request's tail address
+                        // here adds the existing prefix a second time and can absorb unrelated neighbours.
+                        // Speculative growth may be skipped at the address limit; the requested end remains valid.
+                        if (overlaps[0].EndAddress <= ulong.MaxValue - growthBytes)
+                        {
+                            endAddress = Math.Max(endAddress, overlaps[0].EndAddress + growthBytes);
+                        }
 
+                        size = endAddress - address;
                         overlaps = _buffers.FindOverlapsAsSpan(address, size);
                     }
 
