@@ -5,6 +5,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
 {
     enum MemoryPressureSeverity
     {
+        Observe = 0, // ABI: headroom sample only; never schedules a renderer trim.
         Low = 1,
         Critical = 2,
     }
@@ -28,9 +29,14 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
         public static ulong CalculateBufferTarget(ulong configuredCapacity, MemoryPressureSeverity severity, ulong availableMemoryBytes)
         {
-            // Keep the pressure-sized hot set. A temporary zero target otherwise empties even
-            // the retained 64/32 MiB working set at EVERY critical sample, forcing reuploads.
-            return severity == MemoryPressureSeverity.Critical && availableMemoryBytes <= EmergencyAvailableMemory
+            // A system warning is not evidence that this small cache exhausted the process.
+            // v9's 1-GiB latch turned a fitting working set into per-draw reallocation churn.
+            if (severity == MemoryPressureSeverity.Observe || availableMemoryBytes > 512 * MiB)
+            {
+                return configuredCapacity;
+            }
+
+            return availableMemoryBytes <= EmergencyAvailableMemory
                 ? configuredCapacity / 4
                 : configuredCapacity / 2;
         }
@@ -40,7 +46,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             MemoryPressureSeverity severity,
             ulong availableMemoryBytes)
         {
-            if (severity != MemoryPressureSeverity.Critical || availableMemoryBytes > 1024 * MiB)
+            if (severity != MemoryPressureSeverity.Critical || availableMemoryBytes > 512 * MiB)
             {
                 return null;
             }
@@ -59,18 +65,57 @@ namespace Ryujinx.Graphics.Gpu.Memory
     }
 
     /// <summary>
-    /// Tracks a configured cache budget and an optional session-long pressure ceiling.
-    /// The pressure ceiling can only decrease and is reset by constructing a new cache.
+    /// Tracks a pressure ceiling with conservative, sampled recovery. Mutated only by the GPU producer.
+    /// A brief healthy spike or a gap in observations cannot restore a larger working set.
     /// </summary>
-    sealed class MonotonicMemoryPressureCapacity
+    sealed class RecoverableMemoryPressureCapacity
     {
         private ulong _pressureCapacity = ulong.MaxValue;
+        private long _healthySince = -1;
+        private long _lastObservation = -1;
+        internal const long RecoveryMilliseconds = 20_000;
+        internal const long MaximumObservationGapMilliseconds = 5_000;
+
+        public bool ObserveHeadroom(ulong availableMemoryBytes, long nowMilliseconds)
+        {
+            ulong recoveryThreshold = EffectiveCapacity < ConfiguredCapacity / 2
+                ? 512UL * 1024 * 1024
+                : 768UL * 1024 * 1024;
+
+            bool continuous = _lastObservation >= 0 && nowMilliseconds >= _lastObservation &&
+                nowMilliseconds - _lastObservation <= MaximumObservationGapMilliseconds;
+            _lastObservation = nowMilliseconds;
+
+            if (!IsLatched || availableMemoryBytes < recoveryThreshold)
+            {
+                _healthySince = -1;
+                return false;
+            }
+
+            if (!continuous || _healthySince < 0)
+            {
+                _healthySince = nowMilliseconds;
+                return false;
+            }
+
+            if (nowMilliseconds - _healthySince < RecoveryMilliseconds)
+            {
+                return false;
+            }
+
+            // Recover one tier at a time; never exceed the user's configured capacity.
+            _pressureCapacity = EffectiveCapacity < ConfiguredCapacity / 2
+                ? ConfiguredCapacity / 2
+                : ulong.MaxValue;
+            _healthySince = -1;
+            return true;
+        }
 
         public ulong ConfiguredCapacity { get; private set; }
         public ulong EffectiveCapacity => Math.Min(ConfiguredCapacity, _pressureCapacity);
         public bool IsLatched => _pressureCapacity != ulong.MaxValue;
 
-        public MonotonicMemoryPressureCapacity(ulong configuredCapacity)
+        public RecoverableMemoryPressureCapacity(ulong configuredCapacity)
         {
             ConfiguredCapacity = configuredCapacity;
         }
@@ -81,6 +126,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         public void Configure(ulong configuredCapacity)
         {
             ConfiguredCapacity = configuredCapacity;
+            _healthySince = -1;
 
             if (IsLatched)
             {
@@ -89,7 +135,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
-        /// Lowers the session-long pressure ceiling if the supplied value is more restrictive.
+        /// Lowers the pressure ceiling if the supplied value is more restrictive.
         /// </summary>
         /// <returns>True if the pressure ceiling changed</returns>
         public bool Latch(ulong pressureCapacity)
@@ -101,6 +147,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             }
 
             _pressureCapacity = newCapacity;
+            _healthySince = -1;
             return true;
         }
     }
@@ -135,14 +182,14 @@ namespace Ryujinx.Graphics.Gpu.Memory
                 MemoryPressureSeverity reportedSeverity = (MemoryPressureSeverity)severity;
                 MemoryPressureSource reportedSource = (MemoryPressureSource)source;
 
-                if (!_pending)
+                if (!_pending || _severity == MemoryPressureSeverity.Observe)
                 {
                     _pending = true;
                     _severity = reportedSeverity;
                     _sources = reportedSource;
                     _availableMemoryBytes = availableMemoryBytes;
                 }
-                else
+                else if (reportedSeverity != MemoryPressureSeverity.Observe)
                 {
                     _severity = (MemoryPressureSeverity)Math.Max((int)_severity, severity);
                     _sources |= reportedSource;

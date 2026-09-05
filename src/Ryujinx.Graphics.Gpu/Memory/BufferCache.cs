@@ -45,7 +45,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private readonly MultiRangeList<MultiRangeBuffer> _multiRangeBuffers;
         private readonly CacheEvictionPolicy<Buffer> _evictionPolicy;
         private readonly CacheEvictionPolicy<MultiRangeBuffer> _multiRangeEvictionPolicy;
-        private readonly MonotonicMemoryPressureCapacity _memoryPressureCapacity;
+        private readonly RecoverableMemoryPressureCapacity _memoryPressureCapacity;
         private bool _memoryBudgetConfigured;
         private bool _isAppleUnifiedMemory;
 
@@ -116,14 +116,23 @@ namespace Ryujinx.Graphics.Gpu.Memory
         }
 
         /// <summary>
-        /// Lowers the cache ceiling for the remainder of this cache's lifetime. This is called only
-        /// from the GPU thread after a critical host-memory pressure report has been consumed.
+        /// Lowers the cache ceiling after measured process pressure. Recovery requires a sustained
+        /// series of healthy observations on the GPU thread.
         /// </summary>
         /// <param name="capacity">New maximum number of evictable cache bytes</param>
         /// <returns>True if the effective pressure ceiling changed</returns>
         internal bool LatchPressureCapacity(ulong capacity)
         {
             return _memoryPressureCapacity.Latch(capacity);
+        }
+
+        internal void ObserveMemoryHeadroom(ulong availableMemoryBytes, long nowMilliseconds)
+        {
+            if (_memoryPressureCapacity.ObserveHeadroom(availableMemoryBytes, nowMilliseconds))
+            {
+                Logger.Info?.Print(LogClass.Gpu,
+                    $"Buffer cache recovered: effective={EffectiveCapacity / MiB} MiB, available={availableMemoryBytes / MiB} MiB, continuous_healthy_ms=20000.");
+            }
         }
 
         private void AddBuffer(Buffer buffer)
@@ -191,7 +200,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
 
         /// <summary>
         /// Evicts clean least-recently-used buffers until the effective memory budget is met.
-        /// A session-long pressure ceiling can make this stricter than the configured budget.
+        /// A recoverable pressure ceiling can make this stricter than the configured budget.
         /// Buffers used by the current GPU sequence and buffers with outstanding data ownership are retained.
         /// </summary>
         internal void TrimToCapacity()
@@ -209,9 +218,22 @@ namespace Ryujinx.Graphics.Gpu.Memory
             ulong virtualBytes = _multiRangeEvictionPolicy.CachedBytes;
             bool overCapacity = physicalBytes > capacity || virtualBytes > capacity - physicalBytes;
 
+            if (!overCapacity)
+            {
+                return;
+            }
+
+            TrimOverCapacity(capacity, physicalBytes);
+        }
+
+        // Keep the common, below-budget path out of the eviction closure/alias allocation path.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        private void TrimOverCapacity(ulong capacity, ulong physicalBytes)
+        {
+            ulong virtualBytes;
             bool virtualBuffersEvicted = false;
 
-            if (overCapacity)
+            if (physicalBytes > capacity || _multiRangeEvictionPolicy.CachedBytes > capacity - physicalBytes)
             {
                 ulong virtualCapacity = physicalBytes < capacity ? capacity - physicalBytes : 0;
 

@@ -431,81 +431,90 @@ namespace Ryujinx.Graphics.Gpu
 
             if (_memoryPressureMailbox.TryConsume(out MemoryPressureRequest request))
             {
-                Stopwatch stopwatch = Stopwatch.StartNew();
-                ulong bufferBefore = 0;
-                ulong bufferAfter = 0;
-                ulong bufferTarget = 0;
-                ulong bufferConfiguredCapacity = 0;
-                ulong bufferEffectiveCapacity = 0;
-                ulong textureBefore = 0;
-                ulong textureAfter = 0;
-                ulong textureTarget = 0;
-                int textureEntries = 0;
-                ulong textureLargestEntryBytes = 0;
-                ulong textureNormalEvictions = 0;
-                ulong textureNormalEvictedBytes = 0;
-                ulong textureNormalReadbackEvictions = 0;
-                ulong textureNormalCleanBypasses = 0;
-                int textureEvicted = 0;
-                int textureSkippedReferenced = 0;
-                int textureSkippedModified = 0;
-                ulong textureRetainedByDisabledEvictionBytes = 0;
-                bool texturePressureEvictionEnabled = false;
-
+                long observedAt = Environment.TickCount64;
                 foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
                 {
-                    var result = physicalMemory.TrimForMemoryPressure(request.Severity, request.AvailableMemoryBytes);
-                    bufferBefore += result.BufferBefore;
-                    bufferAfter += result.BufferAfter;
-                    bufferTarget += result.BufferTarget;
-                    bufferConfiguredCapacity += result.BufferConfiguredCapacity;
-                    bufferEffectiveCapacity += result.BufferEffectiveCapacity;
-                    textureBefore += result.TextureBefore;
-                    textureAfter += result.TextureAfter;
-                    textureTarget += result.TextureTarget;
-                    textureEntries += result.TextureEntries;
-                    textureLargestEntryBytes = Math.Max(textureLargestEntryBytes, result.TextureLargestEntryBytes);
-                    textureNormalEvictions += result.TextureNormalEvictions;
-                    textureNormalEvictedBytes += result.TextureNormalEvictedBytes;
-                    textureNormalReadbackEvictions += result.TextureNormalReadbackEvictions;
-                    textureNormalCleanBypasses += result.TextureNormalCleanBypasses;
-                    textureEvicted += result.TextureEvicted;
-                    textureSkippedReferenced += result.TextureSkippedReferenced;
-                    textureSkippedModified += result.TextureSkippedModified;
-                    textureRetainedByDisabledEvictionBytes += result.TextureRetainedByDisabledEvictionBytes;
-                    texturePressureEvictionEnabled |= result.TexturePressureEvictionEnabled;
+                    physicalMemory.BufferCache.ObserveMemoryHeadroom(request.AvailableMemoryBytes, observedAt);
                 }
 
-                // This is deliberately after logical cache eviction. ThreadedRenderer turns it
-                // into a synchronous backend barrier, so queued disposals and completed Vulkan
-                // dependencies are physically released before the game can enqueue more work.
-                Renderer.TrimMemory(
-                    request.Severity == MemoryPressureSeverity.Critical,
-                    request.AvailableMemoryBytes);
+                if (request.Severity != MemoryPressureSeverity.Observe)
+                {
+                    Stopwatch stopwatch = Stopwatch.StartNew();
+                    ulong bufferBefore = 0;
+                    ulong bufferAfter = 0;
+                    ulong bufferTarget = 0;
+                    ulong bufferConfiguredCapacity = 0;
+                    ulong bufferEffectiveCapacity = 0;
+                    ulong textureBefore = 0;
+                    ulong textureAfter = 0;
+                    ulong textureTarget = 0;
+                    int textureEntries = 0;
+                    ulong textureLargestEntryBytes = 0;
+                    ulong textureNormalEvictions = 0;
+                    ulong textureNormalEvictedBytes = 0;
+                    ulong textureNormalReadbackEvictions = 0;
+                    ulong textureNormalCleanBypasses = 0;
+                    int textureEvicted = 0;
+                    int textureSkippedReferenced = 0;
+                    int textureSkippedModified = 0;
+                    ulong textureRetainedByDisabledEvictionBytes = 0;
+                    bool texturePressureEvictionEnabled = false;
 
-                stopwatch.Stop();
-                Logger.Warning?.Print(
-                    LogClass.Gpu,
-                    $"Memory pressure cache trim: severity={request.Severity}, sources={request.Sources}, " +
-                    $"available={request.AvailableMemoryBytes / (1024 * 1024)} MiB, sequence={SequenceNumber}, " +
-                    $"buffer_before={bufferBefore / (1024 * 1024)} MiB, buffer_after={bufferAfter / (1024 * 1024)} MiB, " +
-                    $"buffer_target={bufferTarget / (1024 * 1024)} MiB, " +
-                    $"buffer_configured_capacity={bufferConfiguredCapacity / (1024 * 1024)} MiB, " +
-                    $"buffer_effective_capacity={bufferEffectiveCapacity / (1024 * 1024)} MiB, " +
-                    $"texture_tracked={textureBefore / (1024 * 1024)} MiB, " +
-                    $"texture_before={textureBefore / (1024 * 1024)} MiB, texture_after={textureAfter / (1024 * 1024)} MiB, " +
-                    $"texture_entries={textureEntries}, texture_largest_entry={textureLargestEntryBytes / (1024 * 1024)} MiB, " +
-                    $"texture_normal_evictions={textureNormalEvictions}, " +
-                    $"texture_normal_evicted={textureNormalEvictedBytes / (1024 * 1024)} MiB, " +
-                    $"texture_normal_readback_evictions={textureNormalReadbackEvictions}, " +
-                    $"texture_normal_clean_bypasses={textureNormalCleanBypasses}, " +
-                    $"texture_target={textureTarget / (1024 * 1024)} MiB, texture_evicted={textureEvicted}, " +
-                    $"texture_pressure_eviction_enabled={texturePressureEvictionEnabled}, " +
-                    $"texture_skipped_referenced={textureSkippedReferenced}, texture_skipped_modified={textureSkippedModified}, " +
-                    $"texture_retained_pressure_eviction_disabled={textureRetainedByDisabledEvictionBytes / (1024 * 1024)} MiB, " +
-                    $"deferred_actions={DeferredActions.Count}, " +
-                    $"duration_ms={stopwatch.Elapsed.TotalMilliseconds:F1}. " +
-                    "Reported byte counts are logical cache accounting; referenced and in-flight resources can remain retained.");
+                    foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)
+                    {
+                        var result = physicalMemory.TrimForMemoryPressure(request.Severity, request.AvailableMemoryBytes);
+                        bufferBefore += result.BufferBefore;
+                        bufferAfter += result.BufferAfter;
+                        bufferTarget += result.BufferTarget;
+                        bufferConfiguredCapacity += result.BufferConfiguredCapacity;
+                        bufferEffectiveCapacity += result.BufferEffectiveCapacity;
+                        textureBefore += result.TextureBefore;
+                        textureAfter += result.TextureAfter;
+                        textureTarget += result.TextureTarget;
+                        textureEntries += result.TextureEntries;
+                        textureLargestEntryBytes = Math.Max(textureLargestEntryBytes, result.TextureLargestEntryBytes);
+                        textureNormalEvictions += result.TextureNormalEvictions;
+                        textureNormalEvictedBytes += result.TextureNormalEvictedBytes;
+                        textureNormalReadbackEvictions += result.TextureNormalReadbackEvictions;
+                        textureNormalCleanBypasses += result.TextureNormalCleanBypasses;
+                        textureEvicted += result.TextureEvicted;
+                        textureSkippedReferenced += result.TextureSkippedReferenced;
+                        textureSkippedModified += result.TextureSkippedModified;
+                        textureRetainedByDisabledEvictionBytes += result.TextureRetainedByDisabledEvictionBytes;
+                        texturePressureEvictionEnabled |= result.TexturePressureEvictionEnabled;
+                    }
+
+                    // This is deliberately after logical cache eviction. ThreadedRenderer turns it
+                    // into a synchronous backend barrier, so queued disposals and completed Vulkan
+                    // dependencies are physically released before the game can enqueue more work.
+                    Renderer.TrimMemory(
+                        request.Severity == MemoryPressureSeverity.Critical,
+                        request.AvailableMemoryBytes);
+
+                    stopwatch.Stop();
+                    Logger.Warning?.Print(
+                        LogClass.Gpu,
+                        $"Memory pressure cache trim: severity={request.Severity}, sources={request.Sources}, " +
+                        $"available={request.AvailableMemoryBytes / (1024 * 1024)} MiB, sequence={SequenceNumber}, " +
+                        $"buffer_before={bufferBefore / (1024 * 1024)} MiB, buffer_after={bufferAfter / (1024 * 1024)} MiB, " +
+                        $"buffer_target={bufferTarget / (1024 * 1024)} MiB, " +
+                        $"buffer_configured_capacity={bufferConfiguredCapacity / (1024 * 1024)} MiB, " +
+                        $"buffer_effective_capacity={bufferEffectiveCapacity / (1024 * 1024)} MiB, " +
+                        $"texture_tracked={textureBefore / (1024 * 1024)} MiB, " +
+                        $"texture_before={textureBefore / (1024 * 1024)} MiB, texture_after={textureAfter / (1024 * 1024)} MiB, " +
+                        $"texture_entries={textureEntries}, texture_largest_entry={textureLargestEntryBytes / (1024 * 1024)} MiB, " +
+                        $"texture_normal_evictions={textureNormalEvictions}, " +
+                        $"texture_normal_evicted={textureNormalEvictedBytes / (1024 * 1024)} MiB, " +
+                        $"texture_normal_readback_evictions={textureNormalReadbackEvictions}, " +
+                        $"texture_normal_clean_bypasses={textureNormalCleanBypasses}, " +
+                        $"texture_target={textureTarget / (1024 * 1024)} MiB, texture_evicted={textureEvicted}, " +
+                        $"texture_pressure_eviction_enabled={texturePressureEvictionEnabled}, " +
+                        $"texture_skipped_referenced={textureSkippedReferenced}, texture_skipped_modified={textureSkippedModified}, " +
+                        $"texture_retained_pressure_eviction_disabled={textureRetainedByDisabledEvictionBytes / (1024 * 1024)} MiB, " +
+                        $"deferred_actions={DeferredActions.Count}, " +
+                        $"duration_ms={stopwatch.Elapsed.TotalMilliseconds:F1}. " +
+                        "Reported byte counts are logical cache accounting; referenced and in-flight resources can remain retained.");
+                }
             }
 
             foreach (PhysicalMemory physicalMemory in PhysicalMemoryRegistry.Values)

@@ -411,7 +411,7 @@ namespace Ryujinx.Library
                 GpuContext context = Volatile.Read(ref _activeMemoryPressureContext);
                 bool accepted = context?.ReportMemoryPressure(availableMemoryBytes, severity, source) == true;
 
-                if (accepted && DualMappedJitCacheDiagnostics.TryGetUsage(out DualMappedJitCacheUsage usage))
+                if (accepted && severity > 0 && DualMappedJitCacheDiagnostics.TryGetUsage(out DualMappedJitCacheUsage usage))
                 {
                     Logger.Warning?.Print(
                         LogClass.Cpu,

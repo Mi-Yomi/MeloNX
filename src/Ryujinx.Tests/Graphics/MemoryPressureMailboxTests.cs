@@ -27,7 +27,7 @@ namespace Ryujinx.Tests.Graphics
             Assert.That(mailbox.TryConsume(out _), Is.False);
         }
 
-        [TestCase(0, 1)]
+        [TestCase(-1, 1)]
         [TestCase(3, 1)]
         [TestCase(1, 0)]
         [TestCase(1, 3)]
@@ -73,9 +73,9 @@ namespace Ryujinx.Tests.Graphics
             });
         }
 
-        [TestCase(256UL, (int)MemoryPressureSeverity.Low, 128UL)]
-        [TestCase(257UL, (int)MemoryPressureSeverity.Low, 128UL)]
-        [TestCase(256UL, (int)MemoryPressureSeverity.Critical, 128UL)]
+        [TestCase(256UL, (int)MemoryPressureSeverity.Low, 256UL)]
+        [TestCase(257UL, (int)MemoryPressureSeverity.Low, 257UL)]
+        [TestCase(256UL, (int)MemoryPressureSeverity.Critical, 256UL)]
         public void CalculatesTemporaryBufferTarget(ulong capacity, int severity, ulong expected)
         {
             Assert.That(MemoryPressureTrimPolicy.CalculateBufferTarget(capacity, (MemoryPressureSeverity)severity, 1000 * MiB), Is.EqualTo(expected));
@@ -85,8 +85,8 @@ namespace Ryujinx.Tests.Graphics
         [TestCase(133UL, 32UL)]
         [TestCase(256UL, 32UL)]
         [TestCase(512UL, 64UL)]
-        [TestCase(1024UL, 64UL)]
-        [TestCase(1229UL, 64UL)]
+        [TestCase(1024UL, 128UL)]
+        [TestCase(1229UL, 128UL)]
         public void RepeatedCriticalSamplesNeverEmptyHotSet(ulong availableMiB, ulong expectedMiB)
         {
             for (int i = 0; i < 100; i++)
@@ -128,7 +128,7 @@ namespace Ryujinx.Tests.Graphics
         [Test]
         public void PersistentCapacityCanOnlyTightenAndConfigurationDoesNotResetIt()
         {
-            MonotonicMemoryPressureCapacity capacity = new(64 * MiB);
+            RecoverableMemoryPressureCapacity capacity = new(64 * MiB);
 
             Assert.Multiple(() =>
             {
@@ -158,7 +158,7 @@ namespace Ryujinx.Tests.Graphics
         [Test]
         public void LowerConfiguredCapacityPermanentlyTightensLatchedCapacity()
         {
-            MonotonicMemoryPressureCapacity capacity = new(64 * MiB);
+            RecoverableMemoryPressureCapacity capacity = new(64 * MiB);
             capacity.Latch(32 * MiB);
 
             capacity.Configure(16 * MiB);
@@ -170,10 +170,10 @@ namespace Ryujinx.Tests.Graphics
         [Test]
         public void NewPersistentCapacityStartsUnlatched()
         {
-            MonotonicMemoryPressureCapacity oldSession = new(64 * MiB);
+            RecoverableMemoryPressureCapacity oldSession = new(64 * MiB);
             oldSession.Latch(0);
 
-            MonotonicMemoryPressureCapacity newSession = new(64 * MiB);
+            RecoverableMemoryPressureCapacity newSession = new(64 * MiB);
 
             Assert.Multiple(() =>
             {

@@ -139,7 +139,7 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                 try openSegment()
 
                 var header: [String: Any] = [
-                    "schema_version": 5,
+                    "schema_version": 6,
                     "event": "session_start",
                     "time_utc": Self.timestamp(),
                     "device_model": metadata.model,
@@ -192,6 +192,10 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
                     "texture_eviction_counters_in_gpu_snapshot": true,
                     "ios_buffer_cache_limit_mib": 128,
                     "ios_buffer_cache_critical_limit_mib": 64,
+                    "buffer_cache_reduction_available_bytes": 512 * 1024 * 1024,
+                    "buffer_cache_recovery_available_bytes": 768 * 1024 * 1024,
+                    "buffer_cache_recovery_seconds": 20,
+                    "headroom_observation_only_abi": true,
                     "ios_buffer_cache_emergency_limit_mib": 32,
                     "ios_texture_cache_limit_mib": 128,
                     "ios_vulkan_command_buffers": 8,
@@ -547,6 +551,9 @@ nonisolated final class MemoryDiagnostics: @unchecked Sendable {
         }
 
         guard event == "sample" else { return nil }
+
+        // Observation-only ABI: updates recovery without scheduling GPU work.
+        _ = Ryujinx.reportMemoryPressure(availableBytes: availableMemory, severity: 0, source: 1)
 
         if availableMemory <= criticalAvailableMemory {
             lowSampleStreak = 0
