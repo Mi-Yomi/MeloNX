@@ -45,7 +45,7 @@ namespace Ryujinx.Tests.Graphics
         public IImageArray CreateImageArray(int size, bool isBuffer) => throw new NotSupportedException();
         public IProgram CreateProgram(ShaderSource[] shaders, ShaderInfo info) => throw new NotSupportedException();
         public ISampler CreateSampler(SamplerCreateInfo info) => throw new NotSupportedException();
-        public ITexture CreateTexture(TextureCreateInfo info) => throw new NotSupportedException();
+        public ITexture CreateTexture(TextureCreateInfo info) => new AuditTestTexture(this);
         public ITextureArray CreateTextureArray(int size, bool isBuffer) => throw new NotSupportedException();
         public bool PrepareHostMapping(nint address, ulong size) => throw new NotSupportedException();
         public void CreateSync(ulong id, bool strict) => throw new NotSupportedException();

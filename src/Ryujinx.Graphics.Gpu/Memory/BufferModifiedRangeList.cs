@@ -289,15 +289,20 @@ namespace Ryujinx.Graphics.Gpu.Memory
             BufferModifiedRange[] overlaps = FindOverlapsAsArray(address, size, out int length);
             Lock.ExitReadLock();
 
-            if (length != 0)
+            try
             {
                 for (int i = 0; i < length; i++)
                 {
                     BufferModifiedRange overlap = overlaps[i];
                     rangeAction(overlap.Address, overlap.Size);
                 }
-                
-                ArrayPool<BufferModifiedRange>.Shared.Return(overlaps);
+            }
+            finally
+            {
+                if (overlaps != null)
+                {
+                    ArrayPool<BufferModifiedRange>.Shared.Return(overlaps);
+                }
             }
         }
 

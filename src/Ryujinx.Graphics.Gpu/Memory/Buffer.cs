@@ -1,4 +1,5 @@
 using Ryujinx.Graphics.GAL;
+using Ryujinx.Graphics.GAL.Multithreading;
 using Ryujinx.Graphics.Gpu.Synchronization;
 using Ryujinx.Memory.Range;
 using Ryujinx.Memory.Tracking;
@@ -1055,7 +1056,15 @@ namespace Ryujinx.Graphics.Gpu.Memory
                             int physicalOffset = (int)(mAddress - Address);
                             int virtualOffset = virtualBuffer.Range.FindOffset(new(mAddress, mSize));
 
-                            _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
+                            if (_context.Renderer is ThreadedRenderer threaded)
+                            {
+                                threaded.CopyBufferForReadback(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
+                            }
+                            else
+                            {
+                                _context.Renderer.Pipeline.CopyBuffer(virtualBuffer.Handle, Handle, virtualOffset, physicalOffset, (int)mSize);
+                            }
+
                             virtualBuffer.GetData(storage.AsSpan().Slice((int)(mAddress - address), (int)mSize), virtualOffset, (int)mSize);
                         });
                     }

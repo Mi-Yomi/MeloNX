@@ -10,6 +10,7 @@ using Ryujinx.Graphics.GAL.Multithreading.Resources.Programs;
 using System;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 
@@ -53,7 +54,9 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
         private int _producerPtr;
         private int _lastProducedPtr;
-        private int _invokePtr;
+        private int _invokePtr = -1;
+        private ExceptionDispatchInfo _interruptFailure;
+        private long _backgroundBufferCopies;
 
         private int _refProducerPtr;
         private int _refConsumerPtr;
@@ -132,10 +135,21 @@ namespace Ryujinx.Graphics.GAL.Multithreading
 
                 if (Volatile.Read(ref _interruptAction) != null)
                 {
-                    _interruptAction();
-                    _interruptRun.Set();
-
-                    Interlocked.Exchange(ref _interruptAction, null);
+                    // The caller may hold guest range/lifetime locks. This interrupt must never
+                    // drain the emulation producer or call back into guest memory tracking.
+                    try
+                    {
+                        _interruptAction();
+                    }
+                    catch (Exception exception)
+                    {
+                        _interruptFailure = ExceptionDispatchInfo.Capture(exception);
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref _interruptAction, null);
+                        _interruptRun.Set();
+                    }
                 }
 
                 // The other thread can only increase the command count.
@@ -218,6 +232,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             var buffers = Buffers.GetDiagnostics();
 
             return $"queue_pending={Volatile.Read(ref _commandCount)}, consumer={Volatile.Read(ref _consumerPtr)}, " +
+                   $"background_buffer_copies={Interlocked.Read(ref _backgroundBufferCopies)}, " +
                    $"producer={Volatile.Read(ref _producerPtr)}, ref_consumer={Volatile.Read(ref _refConsumerPtr)}, " +
                    $"ref_producer={Volatile.Read(ref _refProducerPtr)}, buffers_issued={buffers.Issued}, " +
                    $"buffers_mapped={buffers.Mapped}, buffers_in_flight={buffers.InFlight}, buffer_map_misses={buffers.Misses}";
@@ -458,6 +473,39 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             }
         }
 
+        /// <summary>
+        /// Reconciles a completed virtual-buffer write during external CPU readback. The caller
+        /// has waited for the guest sync and holds both buffers alive. Unlike the normal pipeline
+        /// API, this path does not publish from a second producer into the SPSC GAL ring.
+        /// </summary>
+        public void CopyBufferForReadback(BufferHandle source, BufferHandle destination, int srcOffset, int dstOffset, int size)
+        {
+            if (IsGpuThread())
+            {
+                Pipeline.CopyBuffer(source, destination, srcOffset, dstOffset, size);
+                return;
+            }
+
+            // Wait for queued creations on the calling thread, NEVER inside an interrupt:
+            // the consumer cannot execute a CreateBuffer while it is running the interrupt.
+            Buffers.MapBufferBlocking(source);
+            Buffers.MapBufferBlocking(destination);
+
+            Interrupt(() =>
+            {
+                if (!Buffers.TryMapBuffer(source, out BufferHandle nativeSource) ||
+                    !Buffers.TryMapBuffer(destination, out BufferHandle nativeDestination))
+                {
+                    throw new InvalidOperationException("Readback reconciliation outlived its buffer mapping. " + GetDiagnosticSnapshot());
+                }
+
+                // Runs between backend commands, so pipeline, mirror invalidation, and native
+                // fence ownership all stay on their existing owner. No guest locks are acquired.
+                _baseRenderer.Pipeline.CopyBuffer(nativeSource, nativeDestination, srcOffset, dstOffset, size);
+                Interlocked.Increment(ref _backgroundBufferCopies);
+            });
+        }
+
         public unsafe Capabilities GetCapabilities()
         {
             ResultBox<Capabilities> box = new();
@@ -563,6 +611,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
             {
                 lock (_interruptLock)
                 {
+                    _interruptFailure = null;
                     while (Interlocked.CompareExchange(ref _interruptAction, action, null) != null)
                     {
                     }
@@ -570,6 +619,7 @@ namespace Ryujinx.Graphics.GAL.Multithreading
                     _galWorkAvailable.Set();
 
                     _interruptRun.WaitOne();
+                    _interruptFailure?.Throw();
                 }
             }
         }
