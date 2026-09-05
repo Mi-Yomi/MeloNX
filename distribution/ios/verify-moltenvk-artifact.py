@@ -1,10 +1,44 @@
 #!/usr/bin/env python3
 """Validate the rebuilt driver's source identity and every packaged payload."""
 import hashlib
+import importlib.util
 import json
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
+
+HOST_IMPORT_FIX = "c33ebc7e1ea491529477c795479ab414b335ab57"
+
+
+def verify_host_import_regression(folder, manifest, lock):
+    evidence = manifest.get("host_import_regression", {})
+    report_name = "host-import-regression/result.json"
+    if evidence != {"status": "passed", "report": report_name} or report_name not in manifest["files"]:
+        raise ValueError("Missing verified native host-import regression evidence")
+    result = json.loads((folder / report_name).read_text())
+    if (result.get("schema") != 1 or result.get("status") != "passed"
+            or result.get("platform") != "macOS arm64"
+            or result.get("source_commit") != lock["source"]["revision"]):
+        raise ValueError("Native host-import regression identity/status mismatch")
+    spec = importlib.util.spec_from_file_location("host_import_probe",
+        Path(__file__).resolve().parent / "moltenvk-backports/run_host_import_probe.py")
+    probe = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(probe)
+    commits = [patch["upstream_commit"] for patch in lock["patches"]]
+    hashes = []
+    for name in ("control", "candidate"):
+        entry = result.get(name, {})
+        dylib = f"host-import-regression/{name}/libMoltenVK.dylib"
+        expected = [commit for commit in commits if commit != HOST_IMPORT_FIX] if name == "control" else commits
+        if (entry.get("exit_code") != 0 or entry.get("dylib") != dylib
+                or entry.get("applied_upstream_commits") != expected
+                or dylib not in manifest["files"]
+                or entry.get("sha256") != manifest["files"][dylib]):
+            raise ValueError(f"Native {name} source/binary/execution mismatch")
+        probe.validate_report(entry.get("report", {}), name == "control")
+        hashes.append(entry["sha256"])
+    if hashes[0] == hashes[1]:
+        raise ValueError("Native control and candidate must be distinct binaries")
 
 
 def verify(folder, source_commit, expected_lock):
@@ -48,6 +82,8 @@ def verify(folder, source_commit, expected_lock):
     driver = folder / "libMoltenVK.dylib"
     if driver.stat().st_size != binary["bytes"] or files[driver.name] != binary["sha256"]:
         raise ValueError("Native binary size/hash mismatch")
+    if HOST_IMPORT_FIX in patches:
+        verify_host_import_regression(folder, manifest, lock)
     return manifest
 
 

@@ -1,4 +1,4 @@
-# MoltenVK 1.4.0 buffer-view lifetime backport
+# MoltenVK 1.4.0 lifetime and host-import backports
 
 This candidate preserves MoltenVK 1.4.0's descriptor implementation and applies
 the autorelease-pool part of upstream commit
@@ -6,7 +6,10 @@ the autorelease-pool part of upstream commit
 The baseline source is
 [45887054](https://github.com/KhronosGroup/MoltenVK/tree/458870543b9bcf6b0edd6f90aaa776707b310d96),
 with all seven upstream dependency revisions and the pre-generated SPIRV-Tools
-header archive locked in `source-lock.json`. No driver capability is forced.
+header archive locked in `source-lock.json`. It also applies the complete host
+external-memory validation fix from
+[c33ebc7e](https://github.com/KhronosGroup/MoltenVK/commit/c33ebc7e1ea491529477c795479ab414b335ab57).
+No driver capability is forced.
 
 `vkUpdateDescriptorSets` and `vkUpdateDescriptorSetWithTemplate` in this baseline
 do not establish an autorelease pool. With Metal argument buffers enabled,
@@ -25,7 +28,19 @@ ASTC formats, or alter copy behavior. Existing device logs establish memory
 pressure but do not quantify this pool's contribution. Device validation remains
 required; successful native compilation is not evidence of a GTA V crash fix.
 
-On Apple Silicon macOS with Xcode selected:
+MoltenVK 1.4.0 advertises `VK_EXT_external_memory_host` and already implements
+host pointer allocation and Metal buffers without copying. However, its
+`VkExternalMemoryBufferCreateInfo` validation rejects `HOST_ALLOCATION_BIT_EXT`
+before that backend can be used. MeloNX v12 reached this exact failure in
+`CreateHostImported` at 27.110 seconds. The second patch accepts the actual
+external-memory properties for buffers and images and preserves Metal heap
+support by adding its missing buffer property entry. It does not change public
+ABI, host-pointer ownership, the allocation backend, or descriptor tracking.
+Only two trailing-whitespace-only lines differ from the complete upstream diff.
+The opaque historical bundled binary's custom patch provenance is unknown;
+it must not be assumed equivalent to an unmodified upstream 1.4.0 build.
+
+On Apple Silicon macOS with Xcode selected and an available Metal device:
 
 ```sh
 bash distribution/ios/build-moltenvk.sh
@@ -53,6 +68,26 @@ configuration's supported size-prefix protocol is preserved; MeloNX continues
 to read back the effective settings at runtime. The ABI probe compiles but does
 not execute on the macOS runner, because the output targets a physical iPhone.
 
+Patched release builds additionally compile two macOS arm64 dylibs from the same
+locked source: the v12 control (only the lifetime patch) and candidate (both
+patches). `host_import_probe.mm` loads each in a separate process and calls the
+actual Vulkan entry points. The control must reproduce `VK_ERROR_FEATURE_NOT_PRESENT`
+from `vkCreateBuffer` with the host-allocation `pNext`. The candidate must import
+an aligned CPU allocation, bind it at a nonzero offset, perform two GPU copies
+in opposite directions with barriers and completed fences, compare all bytes,
+preserve bytes around the binding and retain CPU ownership after native objects
+are destroyed. The supervising process enforces a 60-second bound for each run.
+
+This gate requires real Metal availability. A headless runner returning no
+Metal device fails explicitly with exit 77; the build never converts that into
+a successful skip. Reports, both tested dylibs, stdout/stderr and exact source
+patch lists are in `host-import-regression/`; its `result.json` must report
+`passed` and is referenced by `build-manifest.json.host_import_regression`.
+The unpatched `baseline` override is marked `not_run_baseline` and is not a
+release candidate. A successful macOS import regression proves the shared
+native path; physical iPhone testing is still required for device-specific
+memory pressure and game compatibility.
+
 Artifacts contain the dylib, original dSYM, manifest and SHA-256 hashes,
 unmodified source archives for all eight repositories, applied patch, original
 license/notice files, native ABI probe, and build/validation logs. The source
@@ -68,9 +103,11 @@ memory samples, and this exact dSYM for any crash. The separate engine fix stops
 unchanged texture-buffer views being destroyed by unrelated buffer allocations;
 this native backport bounds temporary ObjC objects when a view is actually made.
 
-Licensing: MoltenVK and this adapted source patch are Apache-2.0; copyright of
+Licensing: MoltenVK and these upstream source patches are Apache-2.0; copyright of
 the original implementation belongs to its upstream authors. The originating
-change is authored by Evan Tang (CodeWeavers). `LICENSE.Apache-2.0.txt` is the
-unmodified upstream license. The modified source contains an explicit backport
-notice. Dependency notices are collected from each exact source revision into
+first change is authored by Evan Tang (CodeWeavers); the second by squidbus.
+`LICENSE.Apache-2.0.txt` is the unmodified upstream license. The first modified
+source contains an explicit adaptation notice; the second is a complete
+upstream backport with only trailing whitespace normalized, documented here.
+Dependency notices are collected from each exact source revision into
 the release artifact. The package also preserves MeloNX's own license notices.

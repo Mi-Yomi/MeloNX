@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pinned MoltenVK 1.4.0, optionally with the buffer-view autorelease fix.
+# Pinned MoltenVK 1.4.0 with lifetime and host-import validation backports.
 # Build on Apple Silicon macOS; never overwrites the tracked legacy binary.
 set -euo pipefail
 
@@ -40,8 +40,7 @@ STAGE=fetch-locked-dependencies
 # locally rather than downloading the full history of seven repositories.
 python3 "$BACKPORT_DIR/source_lock.py" "$SOURCE_ROOT" --fetch
 if [[ "$VARIANT" == patched ]]; then
-  git -C "$SOURCE_ROOT" apply --check "$BACKPORT_DIR/0001-buffer-view-autoreleasepool.patch"
-  git -C "$SOURCE_ROOT" apply "$BACKPORT_DIR/0001-buffer-view-autoreleasepool.patch"
+  python3 "$BACKPORT_DIR/source_lock.py" "$SOURCE_ROOT" --patches apply
 fi
 git -C "$SOURCE_ROOT" diff --check
 
@@ -49,9 +48,17 @@ STAGE=build-dependencies
 (
   cd "$SOURCE_ROOT"
   # No live revisions, global compiler defines, or prebuilt replacement dylibs.
-  ./fetchDependencies --ios --no-parallel-build
+  # The macOS build executes the same source's native host-import regression.
+  platforms=(--ios)
+  if [[ "$VARIANT" == patched ]]; then platforms+=(--macos); fi
+  ./fetchDependencies "${platforms[@]}" --no-parallel-build
 ) 2>&1 | tee "$OUTPUT_ROOT/logs/dependencies.log"
 python3 "$BACKPORT_DIR/source_lock.py" "$SOURCE_ROOT" > "$OUTPUT_ROOT/logs/dependency-revisions.txt"
+if [[ "$VARIANT" == patched ]]; then
+  python3 "$BACKPORT_DIR/source_lock.py" "$SOURCE_ROOT" --patches verify
+else
+  git -C "$SOURCE_ROOT" diff --exit-code HEAD
+fi
 
 STAGE=build-moltenvk
 xcodebuild build -project "$SOURCE_ROOT/MoltenVKPackaging.xcodeproj" \
@@ -149,18 +156,20 @@ if len(matches) != 1 or matches[0].upper() != binary['uuid']:
 PY
 ditto -c -k --sequesterRsrc --keepParent "$DSYM" "$OUTPUT_ROOT/libMoltenVK.dylib.dSYM.zip"
 
+STAGE=native-host-import-regression
+if [[ "$VARIANT" == patched ]]; then
+  bash "$BACKPORT_DIR/build_host_import_probe.sh" "$SOURCE_ROOT" "$WORK_ROOT" "$OUTPUT_ROOT"
+fi
+
 STAGE=archive-source-and-provenance
 python3 "$BACKPORT_DIR/source_lock.py" "$SOURCE_ROOT" --archive "$OUTPUT_ROOT/source-repositories"
 cp -R "$BACKPORT_DIR" "$OUTPUT_ROOT/backports"
 cp "$BACKPORT_DIR/source-lock.json" "$OUTPUT_ROOT/source-lock.json"
 git -C "$SOURCE_ROOT" diff --binary HEAD > "$OUTPUT_ROOT/applied-source.patch"
 if [[ "$VARIANT" == patched ]]; then
-  git -C "$SOURCE_ROOT" apply --reverse --check "$BACKPORT_DIR/0001-buffer-view-autoreleasepool.patch"
-  # Prove that the complete tracked tree is exactly baseline + this patch,
+  # Prove that the complete tracked tree is exactly baseline + locked patches,
   # including changes elsewhere inside the same file, not just its filename.
-  git -C "$SOURCE_ROOT" apply --reverse "$BACKPORT_DIR/0001-buffer-view-autoreleasepool.patch"
-  git -C "$SOURCE_ROOT" diff --exit-code HEAD
-  git -C "$SOURCE_ROOT" apply "$BACKPORT_DIR/0001-buffer-view-autoreleasepool.patch"
+  python3 "$BACKPORT_DIR/source_lock.py" "$SOURCE_ROOT" --patches verify
 else
   git -C "$SOURCE_ROOT" diff --exit-code HEAD
 fi
@@ -177,6 +186,8 @@ manifest = {
     'melonx_source_commit': subprocess.check_output(['git', '-C', repository, 'rev-parse', 'HEAD'], text=True).strip(),
     'created_utc': datetime.datetime.now(datetime.timezone.utc).isoformat(),
     'configuration_prefix_bytes': 152, 'runtime_device_test': 'required',
+    'host_import_regression': ({'status': 'passed', 'report': 'host-import-regression/result.json'}
+                               if variant == 'patched' else {'status': 'not_run_baseline'}),
     'xcode': (out / 'logs/xcode-version.txt').read_text().strip(),
     'iphoneos_sdk': (out / 'logs/iphoneos-sdk-version.txt').read_text().strip(),
     'clang': (out / 'logs/clang-version.txt').read_text().strip(),

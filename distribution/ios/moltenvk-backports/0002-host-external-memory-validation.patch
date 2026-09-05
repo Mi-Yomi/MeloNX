@@ -1,0 +1,107 @@
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm b/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm
+index 8678adbf..b78de2a2 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKBuffer.mm
+@@ -263,17 +263,15 @@ MVKBuffer::MVKBuffer(MVKDevice* device, const VkBufferCreateInfo* pCreateInfo) :
+ 
+ void MVKBuffer::initExternalMemory(VkExternalMemoryHandleTypeFlags handleTypes) {
+ 	if ( !handleTypes ) { return; }
+-	if (mvkIsOnlyAnyFlagEnabled(handleTypes, VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLBUFFER_BIT_EXT)) {
+-		_externalMemoryHandleTypes = handleTypes;
+-		auto& xmProps = getPhysicalDevice()->getExternalBufferProperties(VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLBUFFER_BIT_EXT);
+-		_requiresDedicatedMemoryAllocation = _requiresDedicatedMemoryAllocation || mvkIsAnyFlagEnabled(xmProps.externalMemoryFeatures, VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT);
+-	} else if (mvkIsOnlyAnyFlagEnabled(handleTypes, VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT)) {
+-		_externalMemoryHandleTypes = handleTypes;
+-		auto& xmProps = getPhysicalDevice()->getExternalBufferProperties(VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT);
+-		_requiresDedicatedMemoryAllocation = _requiresDedicatedMemoryAllocation || mvkIsAnyFlagEnabled(xmProps.externalMemoryFeatures, VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT);
+-	} else {
+-		setConfigurationResult(reportError(VK_ERROR_FEATURE_NOT_PRESENT, "vkCreateBuffer(): Only external memory handle type VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLBUFFER_BIT_EXT and VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT are supported."));
+-	}
++
++	auto& xmProps = getPhysicalDevice()->getExternalBufferProperties((VkExternalMemoryHandleTypeFlagBits)handleTypes);
++	if (xmProps.compatibleHandleTypes == 0) {
++		setConfigurationResult(reportError(VK_ERROR_FEATURE_NOT_PRESENT, "vkCreateBuffer(): Only Metal and host external memory handle types are supported."));
++		return;
++	}
++
++	_externalMemoryHandleTypes = handleTypes;
++	_requiresDedicatedMemoryAllocation = _requiresDedicatedMemoryAllocation || mvkIsAnyFlagEnabled(xmProps.externalMemoryFeatures, VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT);
+ }
+ 
+ // Memory detached in destructor too, as a fail-safe.
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+index 10a373ed..c3893538 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.h
+@@ -505,6 +505,7 @@ protected:
+ 	MVKSmallVector<MVKQueueFamily*, kMVKQueueFamilyCount> _queueFamilies;
+ 	VkExternalMemoryProperties _hostPointerExternalMemoryProperties;
+ 	VkExternalMemoryProperties _mtlBufferExternalMemoryProperties;
++	VkExternalMemoryProperties _mtlBufferHeapExternalMemoryProperties;
+ 	VkExternalMemoryProperties _mtlTextureExternalMemoryProperties;
+ 	VkExternalMemoryProperties _mtlTextureHeapExternalMemoryProperties;
+ 	id<MTLCounterSet> _timestampMTLCounterSet;
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+index fb56d0d8..311f8f86 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKDevice.mm
+@@ -1772,6 +1772,8 @@ VkExternalMemoryProperties& MVKPhysicalDevice::getExternalBufferProperties(VkExt
+ 			return _hostPointerExternalMemoryProperties;
+ 		case VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLBUFFER_BIT_EXT:
+ 			return _mtlBufferExternalMemoryProperties;
++		case VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT:
++			return _mtlBufferHeapExternalMemoryProperties;
+ 		default:
+ 			return _emptyExtMemProps;
+ 	}
+@@ -3927,10 +3929,15 @@ void MVKPhysicalDevice::initExternalMemoryProperties() {
+ 	_mtlTextureExternalMemoryProperties.compatibleHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLTEXTURE_BIT_EXT;
+ 
+ 	if (_metalFeatures.placementHeaps) {
++		_mtlBufferHeapExternalMemoryProperties = _mtlBufferExternalMemoryProperties;
++		_mtlBufferHeapExternalMemoryProperties.exportFromImportedHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT;
++		_mtlBufferHeapExternalMemoryProperties.compatibleHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT;
++
+ 		_mtlTextureHeapExternalMemoryProperties = _mtlTextureExternalMemoryProperties;
+ 		_mtlTextureHeapExternalMemoryProperties.exportFromImportedHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT;
+ 		_mtlTextureHeapExternalMemoryProperties.compatibleHandleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT;
+ 	} else {
++		_mtlBufferHeapExternalMemoryProperties = _emptyExtMemProps;
+ 		_mtlTextureHeapExternalMemoryProperties = _emptyExtMemProps;
+ 	}
+ }
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+index d309b5fa..7c568c87 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+@@ -1520,20 +1520,16 @@ bool MVKImage::validateLinear(const VkImageCreateInfo* pCreateInfo, bool isAttac
+ 
+ void MVKImage::initExternalMemory(VkExternalMemoryHandleTypeFlags handleTypes) {
+ 	if ( !handleTypes ) { return; }
+-	if (mvkIsOnlyAnyFlagEnabled(handleTypes, VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLTEXTURE_BIT_EXT)) {
+-		auto& xmProps = getPhysicalDevice()->getExternalImageProperties(_vkFormat, VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLTEXTURE_BIT_EXT);
+-		for(auto& memoryBinding : _memoryBindings) {
+-			memoryBinding->_externalMemoryHandleTypes = handleTypes;
+-			memoryBinding->_requiresDedicatedMemoryAllocation = memoryBinding->_requiresDedicatedMemoryAllocation || mvkIsAnyFlagEnabled(xmProps.externalMemoryFeatures, VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT);
+-		}
+-	} else if (mvkIsOnlyAnyFlagEnabled(handleTypes, VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT)) {
+-		auto& xmProps = getPhysicalDevice()->getExternalImageProperties(_vkFormat, VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT);
+-		for(auto& memoryBinding : _memoryBindings) {
+-			memoryBinding->_externalMemoryHandleTypes = handleTypes;
+-			memoryBinding->_requiresDedicatedMemoryAllocation = memoryBinding->_requiresDedicatedMemoryAllocation || mvkIsAnyFlagEnabled(xmProps.externalMemoryFeatures, VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT);
+-		}
+-	} else {
+-		setConfigurationResult(reportError(VK_ERROR_FEATURE_NOT_PRESENT, "vkCreateImage(): Only external memory handle type VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLTEXTURE_BIT_EXT and VK_EXTERNAL_MEMORY_HANDLE_TYPE_MTLHEAP_BIT_EXT are supported."));
++
++	auto& xmProps = getPhysicalDevice()->getExternalImageProperties(_vkFormat, (VkExternalMemoryHandleTypeFlagBits)handleTypes);
++	if (xmProps.compatibleHandleTypes == 0) {
++		setConfigurationResult(reportError(VK_ERROR_FEATURE_NOT_PRESENT, "vkCreateImage(): Only Metal and host external memory handle types are supported."));
++		return;
++	}
++
++	for(auto& memoryBinding : _memoryBindings) {
++		memoryBinding->_externalMemoryHandleTypes = handleTypes;
++		memoryBinding->_requiresDedicatedMemoryAllocation = memoryBinding->_requiresDedicatedMemoryAllocation || mvkIsAnyFlagEnabled(xmProps.externalMemoryFeatures, VK_EXTERNAL_MEMORY_FEATURE_DEDICATED_ONLY_BIT);
+ 	}
+ }
+ 

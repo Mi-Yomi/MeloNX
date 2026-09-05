@@ -27,16 +27,52 @@ def verify(source, lock, patch_dir):
         require(revision_file.read_text().strip() == dependency["revision"], str(revision_file))
 
 
+def apply_patches(source, patches, patch_dir, reverse=False):
+    completed = []
+    try:
+        for patch in reversed(patches) if reverse else patches:
+            arguments = ["git", "-C", str(source), "apply"]
+            if reverse:
+                arguments.append("--reverse")
+            path = str((patch_dir / patch["file"]).resolve())
+            subprocess.run([*arguments, "--check", path], check=True)
+            subprocess.run([*arguments, path], check=True)
+            completed.append(path)
+    except subprocess.CalledProcessError:
+        # A failed later patch must not strand a half-applied patch stack.
+        for path in reversed(completed):
+            arguments = ["git", "-C", str(source), "apply"]
+            if not reverse:
+                arguments.append("--reverse")
+            subprocess.run([*arguments, path], check=True)
+        raise
+
+
+def verify_patched_source(source, patches, patch_dir):
+    apply_patches(source, patches, patch_dir, reverse=True)
+    try:
+        require(not git(source, "diff", "HEAD", "--"), "Source differs from baseline plus locked patches")
+    finally:
+        apply_patches(source, patches, patch_dir)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--patches", choices=("apply", "reverse", "verify"))
     args = parser.parse_args()
     patch_dir = Path(__file__).resolve().parent
     lock = json.loads((patch_dir / "source-lock.json").read_text())
     source = args.source.resolve()
     verify(source, lock, patch_dir)
+    if args.patches:
+        if args.patches == "verify":
+            verify_patched_source(source, lock["patches"], patch_dir)
+        else:
+            apply_patches(source, lock["patches"], patch_dir, reverse=args.patches == "reverse")
+        return
     # Parent repositories must exist before their nested dependencies are fetched.
     dependencies = sorted(lock["dependencies"], key=lambda item: item["path"].count("/"))
     for dependency in dependencies:

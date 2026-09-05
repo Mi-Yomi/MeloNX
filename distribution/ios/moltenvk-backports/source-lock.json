@@ -11,16 +11,56 @@
       "file": "0001-buffer-view-autoreleasepool.patch",
       "upstream_commit": "5ff9bcedada97c69686102e00f427355d1096b30",
       "sha256": "462c73b4fa66ba5d4db515952a2bcf3efe49534594b589bb5b9c15e685c874ab"
+    },
+    {
+      "file": "0002-host-external-memory-validation.patch",
+      "upstream_commit": "c33ebc7e1ea491529477c795479ab414b335ab57",
+      "sha256": "2db9fa27b1d0440a7f138ff9af68ed1c56560332e721ce8a9959712eaf1337a6"
     }
   ],
   "pregen_spirv_tools_headers_sha256": "7746c9582fb2031378c99c54fa5a4a5dc10879f2c0ca8bd6bca180c078b4a1d0",
   "dependencies": [
-    { "name": "cereal", "path": "External/cereal", "url": "https://github.com/USCiLab/cereal.git", "revision": "51cbda5f30e56c801c07fe3d3aba5d7fb9e6cca4" },
-    { "name": "SPIRV-Cross", "path": "External/SPIRV-Cross", "url": "https://github.com/KhronosGroup/SPIRV-Cross.git", "revision": "0a88b2d5c08708d45692b7096a0a84e7bfae366c" },
-    { "name": "SPIRV-Headers", "path": "External/SPIRV-Tools/external/spirv-headers", "url": "https://github.com/KhronosGroup/SPIRV-Headers.git", "revision": "bab63ff679c41eb75fc67dac76e1dc44426101e1" },
-    { "name": "SPIRV-Tools", "path": "External/SPIRV-Tools", "url": "https://github.com/KhronosGroup/SPIRV-Tools.git", "revision": "783d7033613cedaa7147d0700b517abc5c32312d" },
-    { "name": "Volk", "path": "External/Volk", "url": "https://github.com/zeux/Volk.git", "revision": "43c29e655cb8117fd9cfb65ad9cefe2d40965102" },
-    { "name": "Vulkan-Headers", "path": "External/Vulkan-Headers", "url": "https://github.com/KhronosGroup/Vulkan-Headers.git", "revision": "088a00d81d1fc30ff77aacf31485871aebec7cb2" },
-    { "name": "Vulkan-Tools", "path": "External/Vulkan-Tools", "url": "https://github.com/KhronosGroup/Vulkan-Tools.git", "revision": "682e42f7ae70a8fadf374199c02de737daa5c70d" }
+    {
+      "name": "cereal",
+      "path": "External/cereal",
+      "url": "https://github.com/USCiLab/cereal.git",
+      "revision": "51cbda5f30e56c801c07fe3d3aba5d7fb9e6cca4"
+    },
+    {
+      "name": "SPIRV-Cross",
+      "path": "External/SPIRV-Cross",
+      "url": "https://github.com/KhronosGroup/SPIRV-Cross.git",
+      "revision": "0a88b2d5c08708d45692b7096a0a84e7bfae366c"
+    },
+    {
+      "name": "SPIRV-Headers",
+      "path": "External/SPIRV-Tools/external/spirv-headers",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "revision": "bab63ff679c41eb75fc67dac76e1dc44426101e1"
+    },
+    {
+      "name": "SPIRV-Tools",
+      "path": "External/SPIRV-Tools",
+      "url": "https://github.com/KhronosGroup/SPIRV-Tools.git",
+      "revision": "783d7033613cedaa7147d0700b517abc5c32312d"
+    },
+    {
+      "name": "Volk",
+      "path": "External/Volk",
+      "url": "https://github.com/zeux/Volk.git",
+      "revision": "43c29e655cb8117fd9cfb65ad9cefe2d40965102"
+    },
+    {
+      "name": "Vulkan-Headers",
+      "path": "External/Vulkan-Headers",
+      "url": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "revision": "088a00d81d1fc30ff77aacf31485871aebec7cb2"
+    },
+    {
+      "name": "Vulkan-Tools",
+      "path": "External/Vulkan-Tools",
+      "url": "https://github.com/KhronosGroup/Vulkan-Tools.git",
+      "revision": "682e42f7ae70a8fadf374199c02de737daa5c70d"
+    }
   ]
 }
