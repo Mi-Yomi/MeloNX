@@ -17,6 +17,28 @@ namespace Ryujinx.Graphics.Vulkan
         private readonly List<BufferHolder> _activeBufferMirrors;
 
         private ulong _byteWeight;
+        private int _disposalFlushDeferralDepth;
+
+        internal readonly struct DisposalFlushScope : IDisposable
+        {
+            private readonly PipelineFull _owner;
+
+            internal DisposalFlushScope(PipelineFull owner)
+            {
+                _owner = owner;
+                owner._disposalFlushDeferralDepth++;
+            }
+
+            public void Dispose()
+            {
+                // The caller of the enclosing upload can still hold a captured
+                // command buffer. Flush only on a future ordinary disposal or the
+                // pipeline's natural submission, never while unwinding this scope.
+                _owner._disposalFlushDeferralDepth--;
+            }
+        }
+
+        internal DisposalFlushScope DeferDisposalFlushes() => new(this);
 
         private readonly List<BufferHolder> _backingSwaps;
 
@@ -204,6 +226,14 @@ namespace Ryujinx.Graphics.Vulkan
 
         public void FlushCommandsIfWeightExceeding(IAuto disposedResource, ulong byteWeight)
         {
+            if (RegisterDisposalWeight(disposedResource, byteWeight))
+            {
+                FlushCommandsImpl();
+            }
+        }
+
+        internal bool RegisterDisposalWeight(IAuto disposedResource, ulong byteWeight)
+        {
             bool usedByCurrentCb = disposedResource.HasCommandBufferDependency(Cbs);
 
             if (PreloadCbs != null && !usedByCurrentCb)
@@ -219,11 +249,10 @@ namespace Ryujinx.Graphics.Vulkan
                 // in use by the current command buffer is above a given limit, and those resources were disposed.
                 _byteWeight += byteWeight;
 
-                if (_byteWeight >= MinByteWeightForFlush)
-                {
-                    FlushCommandsImpl();
-                }
+                return _byteWeight >= MinByteWeightForFlush && _disposalFlushDeferralDepth == 0;
             }
+
+            return false;
         }
 
         public void Restore()

@@ -16,6 +16,7 @@ namespace Ryujinx.Common.Memory
         Readback,
         GuestBridge,
         Upload,
+        Mirror,
         Count,
     }
 

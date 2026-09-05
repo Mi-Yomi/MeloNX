@@ -61,6 +61,9 @@ namespace Ryujinx.Graphics.Vulkan
                     // Orphan the start of the overlap.
                     if (currentOverlap.Offset < offset)
                     {
+                        // A split may need one extra slot. Reserve it before changing
+                        // the original range, so an allocation failure retains its suffix.
+                        list.EnsureCapacity(checked(list.Count + 1));
                         list[overlapIndex] = new Range(currentOverlap.Offset, offset - currentOverlap.Offset);
                         currentOverlap = new Range(offset, currentOverlap.End - offset);
                         list.Insert(++overlapIndex, currentOverlap);
@@ -192,6 +195,25 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             return result;
+        }
+
+        /// <summary>Finds the first current overlap without allocating a snapshot list.</summary>
+        public readonly bool TryFindFirstOverlap(int offset, int size, out Range range)
+        {
+            List<Range> list = _ranges;
+            if (list != null && size > 0)
+            {
+                int index = BinarySearch(list, offset, size);
+                if (index >= 0)
+                {
+                    while (index > 0 && list[index - 1].OverlapsWith(offset, size)) index--;
+                    range = list[index];
+                    return true;
+                }
+            }
+
+            range = default;
+            return false;
         }
 
         private static int BinarySearch(List<Range> list, int offset, int size)

@@ -12,6 +12,8 @@ namespace Ryujinx.Graphics.Vulkan
 {
     class BufferHolder : IDisposable, IMirrorable<DisposableBuffer>, IMirrorable<DisposableBufferView>
     {
+        private static long _nextStorageIdentity;
+        internal long StorageIdentity { get; } = Interlocked.Increment(ref _nextStorageIdentity);
         private const int MaxUpdateBufferSize = 0x10000;
 
         private const int SetCountThreshold = 100;
@@ -53,8 +55,7 @@ namespace Ryujinx.Graphics.Vulkan
         private FenceHolder _flushFence;
         private int _flushWaiting;
 
-        private byte[] _pendingData;
-        private BufferMirrorRangeList _pendingDataRanges;
+        private PendingBufferData _pendingData;
         private Dictionary<ulong, StagingBufferReserved> _mirrors;
         private bool _useMirrors;
 
@@ -67,7 +68,7 @@ namespace Ryujinx.Graphics.Vulkan
             _allocation = allocation;
             _allocationAuto = new Auto<MemoryAllocation>(allocation);
             _waitable = new MultiFenceHolder(size);
-            _buffer = new Auto<DisposableBuffer>(new DisposableBuffer(gd.Api, device, buffer), this, _waitable, _allocationAuto);
+            _buffer = new Auto<DisposableBuffer>(new DisposableBuffer(gd.Api, device, buffer, this), this, _waitable, _allocationAuto);
             _bufferHandle = buffer.Handle;
             Size = size;
             _map = allocation.HostPointer;
@@ -89,7 +90,7 @@ namespace Ryujinx.Graphics.Vulkan
             _allocationAuto = allocation;
             _allocationImported = true;
             _waitable = new MultiFenceHolder(size);
-            _buffer = new Auto<DisposableBuffer>(new DisposableBuffer(gd.Api, device, buffer), this, _waitable, _allocationAuto);
+            _buffer = new Auto<DisposableBuffer>(new DisposableBuffer(gd.Api, device, buffer, this), this, _waitable, _allocationAuto);
             _bufferHandle = buffer.Handle;
             Size = size;
             _map = _allocation.HostPointer + offset;
@@ -105,7 +106,7 @@ namespace Ryujinx.Graphics.Vulkan
             _gd = gd;
             _device = device;
             _waitable = new MultiFenceHolder(size);
-            _buffer = new Auto<DisposableBuffer>(new DisposableBuffer(gd.Api, device, buffer), _waitable, storageAllocations);
+            _buffer = new Auto<DisposableBuffer>(new DisposableBuffer(gd.Api, device, buffer, this), _waitable, storageAllocations);
             _bufferHandle = buffer.Handle;
             Size = size;
 
@@ -177,11 +178,15 @@ namespace Ryujinx.Graphics.Vulkan
 
         private unsafe bool TryGetMirror(CommandBufferScoped cbs, ref int offset, int size, out Auto<DisposableBuffer> buffer)
         {
-            size = Math.Min(size, Size - offset);
+            if (!BufferRangeBounds.TryNormalize(Size, offset, ref size))
+            {
+                buffer = null;
+                return false;
+            }
 
             // Does this binding need to be mirrored?
 
-            if (!_pendingDataRanges.OverlapsWith(offset, size))
+            if (!_pendingData.Overlaps(offset, size))
             {
                 buffer = null;
                 return false;
@@ -210,14 +215,13 @@ namespace Ryujinx.Graphics.Vulkan
             // Build data for the new mirror.
 
             Span<byte> baseData = new((void*)(_map + offset), size);
-            Span<byte> modData = _pendingData.AsSpan(offset, size);
 
             StagingBufferReserved? newMirror = _gd.BufferManager.StagingBuffer.TryReserveData(cbs, size);
 
             if (newMirror != null)
             {
                 StagingBufferReserved mirror = newMirror.Value;
-                _pendingDataRanges.FillData(baseData, modData, offset, new Span<byte>((void*)(mirror.Buffer._map + mirror.Offset), size));
+                _pendingData.FillData(baseData, offset, new Span<byte>((void*)(mirror.Buffer._map + mirror.Offset), size));
 
                 if (_mirrors.Count == 0)
                 {
@@ -302,9 +306,14 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (_pendingData != null)
             {
+                if (!BufferRangeBounds.TryNormalize(Size, offset, ref size))
+                {
+                    return;
+                }
+
                 bool hadMirrors = _mirrors.Count > 0 && RemoveOverlappingMirrors(offset, size);
 
-                if (_pendingDataRanges.Count() != 0)
+                if (_pendingData.HasData)
                 {
                     UploadPendingData(cbs, offset, size);
                 }
@@ -323,27 +332,32 @@ namespace Ryujinx.Graphics.Vulkan
 
         private void UploadPendingData(CommandBufferScoped cbs, int offset, int size)
         {
-            List<BufferMirrorRangeList.Range> ranges = _pendingDataRanges.FindOverlaps(offset, size);
+            // SignalWrite can destroy converted-buffer caches while SetData records
+            // an upload. Their disposal must not submit/replace this captured cbs.
+            using var deferral = _gd.PipelineInternal.DeferDisposalFlushes();
+            PendingUpload upload = new(this, cbs);
+            _pendingData.Upload(offset, size, ref upload);
+        }
 
-            if (ranges != null)
+        private readonly struct PendingUpload(BufferHolder owner, CommandBufferScoped cbs) : IPendingBufferUpload
+        {
+            public void Upload(int offset, ReadOnlySpan<byte> data)
             {
-                _pendingDataRanges.Remove(offset, size);
-
-                foreach (BufferMirrorRangeList.Range range in ranges)
-                {
-                    int rangeOffset = Math.Max(offset, range.Offset);
-                    int rangeSize = Math.Min(offset + size, range.End) - rangeOffset;
-
-                    if (_gd.PipelineInternal.CurrentCommandBuffer.CommandBuffer.Handle == cbs.CommandBuffer.Handle)
-                    {
-                        SetData(rangeOffset, _pendingData.AsSpan(rangeOffset, rangeSize), cbs, _gd.PipelineInternal.EndRenderPassDelegate, false);
-                    }
-                    else
-                    {
-                        SetData(rangeOffset, _pendingData.AsSpan(rangeOffset, rangeSize), cbs, null, false);
-                    }
-                }
+                // Preserve the backend's staging/barrier path. It consumes the span before
+                // returning and cannot create another pending mirror with allowCbsWait=false.
+                Action endRenderPass = owner._gd.PipelineInternal.CurrentCommandBuffer.CommandBuffer.Handle == cbs.CommandBuffer.Handle
+                    ? owner._gd.PipelineInternal.EndRenderPassDelegate
+                    : null;
+                owner.SetData(offset, data, cbs, endRenderPass, false);
             }
+        }
+
+        internal void ReleasePendingData()
+        {
+            _pendingData?.Dispose();
+            _pendingData = null;
+            _mirrors?.Clear();
+            _mirrors = null;
         }
 
         public Auto<MemoryAllocation> GetAllocation()
@@ -538,7 +552,7 @@ namespace Ryujinx.Graphics.Vulkan
 
                     if (_pendingData != null)
                     {
-                        bool removed = _pendingDataRanges.Remove(offset, dataSize);
+                        bool removed = _pendingData.Remove(offset, dataSize);
                         if (RemoveOverlappingMirrors(offset, dataSize) || removed)
                         {
                             // If any mirrors were removed, rebind the buffer range.
@@ -557,12 +571,11 @@ namespace Ryujinx.Graphics.Vulkan
             {
                 if (_pendingData == null)
                 {
-                    _pendingData = new byte[Size];
+                    _pendingData = new PendingBufferData(Size);
                     _mirrors = new Dictionary<ulong, StagingBufferReserved>();
                 }
 
-                data[..dataSize].CopyTo(_pendingData.AsSpan(offset, dataSize));
-                _pendingDataRanges.Add(offset, dataSize);
+                _pendingData.Write(offset, data[..dataSize]);
 
                 // Remove any overlapping mirrors.
                 RemoveOverlappingMirrors(offset, dataSize);
@@ -575,7 +588,7 @@ namespace Ryujinx.Graphics.Vulkan
 
             if (_pendingData != null)
             {
-                _pendingDataRanges.Remove(offset, dataSize);
+                _pendingData.Remove(offset, dataSize);
             }
 
             if (cbs != null &&
@@ -611,14 +624,7 @@ namespace Ryujinx.Graphics.Vulkan
                     {
                         // Need to do a slow upload.
                         BufferHolder srcHolder = _gd.BufferManager.Create(_gd, dataSize, baseType: BufferAllocationType.HostMapped);
-                        srcHolder.SetDataUnchecked(0, data);
-
-                        Auto<DisposableBuffer> srcBuffer = srcHolder.GetBuffer();
-                        Auto<DisposableBuffer> dstBuffer = this.GetBuffer(cbs.Value.CommandBuffer, true);
-
-                        Copy(_gd, cbs.Value, srcBuffer, dstBuffer, 0, offset, dataSize);
-
-                        srcHolder.Dispose();
+                        UploadTransientBuffer(_gd, cbs.Value, endRenderPass, srcHolder, this, offset, data[..dataSize]);
                     }
 
                     if (rentCbs)
@@ -626,6 +632,34 @@ namespace Ryujinx.Graphics.Vulkan
                         cbs.Value.Dispose();
                     }
                 }
+            }
+        }
+
+        internal static void UploadTransientBuffer(
+            VulkanRenderer gd,
+            CommandBufferScoped cbs,
+            Action endRenderPass,
+            BufferHolder source,
+            BufferHolder destination,
+            int offset,
+            ReadOnlySpan<byte> data)
+        {
+            using var deferral = gd.PipelineInternal.DeferDisposalFlushes();
+            try
+            {
+                // Both fast update (unaligned data) and staging (full) can decline
+                // before invoking this callback. vkCmdCopyBuffer cannot be encoded
+                // inside the render pass even on this last-resort upload path.
+                endRenderPass?.Invoke();
+                source.SetDataUnchecked(0, data);
+                Copy(gd, cbs, source.GetBuffer(), destination.GetBuffer(cbs.CommandBuffer, true), 0, offset, data.Length);
+            }
+            finally
+            {
+                // The copy's Auto references retain the source until the submission
+                // retires. Keep disposal weight accounting, while the scope prevents
+                // this source or converted-cache disposal from replacing captured cbs.
+                source.Dispose();
             }
         }
 
