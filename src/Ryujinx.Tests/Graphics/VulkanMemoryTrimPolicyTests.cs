@@ -22,7 +22,7 @@ namespace Ryujinx.Tests.Graphics
         }
 
         [Test]
-        public void FirstCriticalRequestRunsCompleteReclamation()
+        public void FirstCriticalRequestWithHeadroomPreservesCompiledPipelines()
         {
             VulkanMemoryTrimDecision decision = Calculate(
                 isIos: true,
@@ -32,7 +32,7 @@ namespace Ryujinx.Tests.Graphics
                 nowMilliseconds: 40_000,
                 lastRunMilliseconds: 0);
 
-            Assert.That(decision, Is.EqualTo(new VulkanMemoryTrimDecision(true, true, true)));
+            Assert.That(decision, Is.EqualTo(new VulkanMemoryTrimDecision(false, false, false)));
         }
 
         [Test]
@@ -56,7 +56,7 @@ namespace Ryujinx.Tests.Graphics
             Assert.Multiple(() =>
             {
                 Assert.That(early, Is.EqualTo(new VulkanMemoryTrimDecision(false, false, false)));
-                Assert.That(due, Is.EqualTo(new VulkanMemoryTrimDecision(false, true, true)));
+                Assert.That(due, Is.EqualTo(new VulkanMemoryTrimDecision(false, false, true)));
             });
         }
 
@@ -71,7 +71,7 @@ namespace Ryujinx.Tests.Graphics
                 nowMilliseconds: 55_000,
                 lastRunMilliseconds: 40_000);
 
-            Assert.That(decision, Is.EqualTo(new VulkanMemoryTrimDecision(false, true, false)));
+            Assert.That(decision, Is.EqualTo(new VulkanMemoryTrimDecision(false, false, false)));
         }
 
         [Test]
@@ -111,6 +111,20 @@ namespace Ryujinx.Tests.Graphics
                 Assert.That(due, Is.EqualTo(new VulkanMemoryTrimDecision(true, true, true)));
                 Assert.That(throttled, Is.EqualTo(new VulkanMemoryTrimDecision(false, false, false)));
             });
+        }
+
+        [Test]
+        public void EmergencyStillAllowsFullReclamation()
+        {
+            Assert.That(Calculate(true, true, 133, 400, 70_000, 40_000),
+                Is.EqualTo(new VulkanMemoryTrimDecision(true, true, true)));
+        }
+
+        [Test]
+        public void DescriptorRetirementStartsBeforeEmergencyWithoutResettingPipelines()
+        {
+            Assert.That(Calculate(true, true, 512, 300, 70_000, 40_000),
+                Is.EqualTo(new VulkanMemoryTrimDecision(false, true, false)));
         }
 
         private static VulkanMemoryTrimDecision Calculate(

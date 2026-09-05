@@ -26,9 +26,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
         private const ulong MiB = 1024 * 1024;
         internal const ulong EmergencyAvailableMemory = 256 * MiB;
 
-        public static ulong CalculateBufferTarget(ulong configuredCapacity, MemoryPressureSeverity severity)
+        public static ulong CalculateBufferTarget(ulong configuredCapacity, MemoryPressureSeverity severity, ulong availableMemoryBytes)
         {
-            return severity == MemoryPressureSeverity.Critical ? 0 : configuredCapacity / 2;
+            // Keep the pressure-sized hot set. A temporary zero target otherwise empties even
+            // the retained 64/32 MiB working set at EVERY critical sample, forcing reuploads.
+            return severity == MemoryPressureSeverity.Critical && availableMemoryBytes <= EmergencyAvailableMemory
+                ? configuredCapacity / 4
+                : configuredCapacity / 2;
         }
 
         public static ulong? CalculatePersistentBufferCapacity(
@@ -36,14 +40,13 @@ namespace Ryujinx.Graphics.Gpu.Memory
             MemoryPressureSeverity severity,
             ulong availableMemoryBytes)
         {
-            if (severity != MemoryPressureSeverity.Critical)
+            if (severity != MemoryPressureSeverity.Critical || availableMemoryBytes > 1024 * MiB)
             {
                 return null;
             }
 
-            // Keep a small hot working set even in the emergency zone. The current pressure
-            // pass still performs a one-shot trim to zero, while a persistent zero ceiling would
-            // recreate every clean buffer on the next sequence and increase transient overlap.
+            // UIKit can warn about system-wide pressure with ample process headroom. Reclaim
+            // expendable buffers on that pass, but latch only from measured process pressure.
             return availableMemoryBytes <= EmergencyAvailableMemory
                 ? configuredCapacity / 4
                 : configuredCapacity / 2;

@@ -156,7 +156,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             ulong availableMemoryBytes)
         {
             ulong bufferBefore = BufferCache.CachedBytes;
-            ulong bufferTarget = MemoryPressureTrimPolicy.CalculateBufferTarget(BufferCache.Capacity, severity);
+            ulong bufferTarget = MemoryPressureTrimPolicy.CalculateBufferTarget(BufferCache.Capacity, severity, availableMemoryBytes);
             ulong? persistentBufferCapacity = MemoryPressureTrimPolicy.CalculatePersistentBufferCapacity(
                 BufferCache.Capacity,
                 severity,
@@ -174,6 +174,7 @@ namespace Ryujinx.Graphics.Gpu.Memory
             // Buffers are safe to reclaim here. v4 telemetry showed that pressure-only texture eviction
             // released effectively 0 MiB while exposing a stale texture sync/readback action. Keep normal
             // cache maintenance, but do not force texture destruction in this pressure callback.
+            bufferTarget = Math.Min(bufferTarget, BufferCache.EffectiveCapacity);
             BufferCache.TrimToCapacity(bufferTarget);
 
             return (

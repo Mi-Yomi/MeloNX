@@ -11,7 +11,7 @@ namespace Ryujinx.Graphics.Vulkan
         private const long ManagedMiB = 1024 * 1024;
         private const ulong EmergencyAvailableMemory = 256 * MiB;
         private const long HeavyTrimIntervalMilliseconds = 30_000;
-        private const long DescriptorTrimIntervalMilliseconds = 15_000;
+        private const long DescriptorTrimIntervalMilliseconds = 30_000;
         private const long EmergencyDescriptorTrimIntervalMilliseconds = 8_000;
         private const long ManagedCollectionIntervalMilliseconds = 15_000;
         private const long EmergencyManagedCollectionIntervalMilliseconds = 8_000;
@@ -42,11 +42,14 @@ namespace Ryujinx.Graphics.Vulkan
             }
 
             bool emergency = availableMemoryBytes <= EmergencyAvailableMemory;
+            // Pipeline variants are expensive to recreate. Reserve full invalidation for the
+            // emergency zone rather than every UIKit notification with >1 GiB headroom.
+            runHeavyCacheTrim &= emergency;
             long descriptorInterval = emergency
                 ? EmergencyDescriptorTrimIntervalMilliseconds
                 : DescriptorTrimIntervalMilliseconds;
-            bool runDescriptorTrim = runHeavyCacheTrim ||
-                IsDue(nowMilliseconds, lastDescriptorTrimMilliseconds, descriptorInterval);
+            bool runDescriptorTrim = availableMemoryBytes <= 512 * MiB &&
+                (runHeavyCacheTrim || IsDue(nowMilliseconds, lastDescriptorTrimMilliseconds, descriptorInterval));
 
             bool regularManagedCollection = managedHeapBytes >= ManagedCollectionThresholdBytes &&
                 IsDue(nowMilliseconds, lastManagedCollectionMilliseconds, ManagedCollectionIntervalMilliseconds);

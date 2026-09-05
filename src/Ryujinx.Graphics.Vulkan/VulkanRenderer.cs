@@ -1270,9 +1270,14 @@ namespace Ryujinx.Graphics.Vulkan
                 pipelineOwnersReset = ForgetCurrentPipelines();
             }
 
-            FlushAllCommands();
-            WaitForDeviceIdleSynchronized();
+            bool deviceIdleRequired = !OperatingSystem.IsIOS() || runAggressiveTrim || runReusableDescriptorTrim;
+            if (deviceIdleRequired)
+            {
+                FlushAllCommands();
+                WaitForDeviceIdleSynchronized();
+            }
 
+            // Trim retires only signalled fences. Unsubmitted/in-flight dependencies survive.
             CommandBufferPoolTrimResult commandBufferTrim = CommandBufferPool.Trim();
             var backgroundTrim = BackgroundResources.Trim();
             int pipelineVariants = 0;
@@ -1340,7 +1345,7 @@ namespace Ryujinx.Graphics.Vulkan
             Logger.Warning?.Print(
                 LogClass.Gpu,
                 $"Renderer memory trim: critical_requested={aggressive}, heavy_cache_trim={runAggressiveTrim}, " +
-                $"descriptor_trim={runReusableDescriptorTrim}, managed_gc={runManagedCollection}, " +
+                $"descriptor_trim={runReusableDescriptorTrim}, managed_gc={runManagedCollection}, device_idle_wait={deviceIdleRequired}, " +
                 $"available_memory={availableMemoryBytes}, managed_at_decision={managedAtDecision}, " +
                 $"retired_submissions={commandBufferTrim.RetiredSubmissions}, " +
                 $"command_buffers_total={commandBufferTrim.TotalCommandBuffers}, " +

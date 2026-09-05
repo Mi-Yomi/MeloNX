@@ -75,10 +75,30 @@ namespace Ryujinx.Tests.Graphics
 
         [TestCase(256UL, (int)MemoryPressureSeverity.Low, 128UL)]
         [TestCase(257UL, (int)MemoryPressureSeverity.Low, 128UL)]
-        [TestCase(256UL, (int)MemoryPressureSeverity.Critical, 0UL)]
+        [TestCase(256UL, (int)MemoryPressureSeverity.Critical, 128UL)]
         public void CalculatesTemporaryBufferTarget(ulong capacity, int severity, ulong expected)
         {
-            Assert.That(MemoryPressureTrimPolicy.CalculateBufferTarget(capacity, (MemoryPressureSeverity)severity), Is.EqualTo(expected));
+            Assert.That(MemoryPressureTrimPolicy.CalculateBufferTarget(capacity, (MemoryPressureSeverity)severity, 1000 * MiB), Is.EqualTo(expected));
+        }
+
+        [TestCase(0UL, 32UL)]
+        [TestCase(133UL, 32UL)]
+        [TestCase(256UL, 32UL)]
+        [TestCase(512UL, 64UL)]
+        [TestCase(1024UL, 64UL)]
+        [TestCase(1229UL, 64UL)]
+        public void RepeatedCriticalSamplesNeverEmptyHotSet(ulong availableMiB, ulong expectedMiB)
+        {
+            for (int i = 0; i < 100; i++)
+                Assert.That(MemoryPressureTrimPolicy.CalculateBufferTarget(128 * MiB,
+                    MemoryPressureSeverity.Critical, availableMiB * MiB), Is.EqualTo(expectedMiB * MiB));
+        }
+
+        [Test]
+        public void UIKitWarningWithProcessHeadroomDoesNotLatch()
+        {
+            Assert.That(MemoryPressureTrimPolicy.CalculatePersistentBufferCapacity(128 * MiB,
+                MemoryPressureSeverity.Critical, 1229 * MiB), Is.Null);
         }
 
         [Test]
