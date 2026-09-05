@@ -719,6 +719,8 @@ def forensic_evidence(memory, core, interval_rows, clock, packets=(), breadcrumb
     not proof of a deadlock or of the producer/backend responsible for one.
     """
     stop_records = [r for r in memory if r["event"] in STOP_EVENTS]
+    managed_failures = [r for r in memory if r["event"] == "managed_crash"
+        and isinstance(r["metrics"].get("exception_type"), str) and r["metrics"]["exception_type"]]
     # Breadcrumbs can preserve the newest cheap kernel sample when the full
     # diagnostic packet was never written. Prefer the complete copy at equal time.
     periodic = [r for r in memory if r["event"] in ("sample", "post_stop_sample")]
@@ -741,7 +743,10 @@ def forensic_evidence(memory, core, interval_rows, clock, packets=(), breadcrumb
     core_end = (clock.get("core_interval_seconds") or [None, None])[1]
     last_time = last.get("session_seconds") if last else None
     stale = numeric(core_end) and numeric(last_time) and core_end - last_time > 10
-    if stop_records or any(post_stop_sample(r) or r["metrics"].get("core_active") is False for r in periodic):
+    if managed_failures:
+        assessment = ("terminating_managed_failure_observed" if managed_failures[-1]["metrics"].get("is_terminating") is True
+            else "managed_failure_observed")
+    elif stop_records or any(post_stop_sample(r) or r["metrics"].get("core_active") is False for r in periodic):
         assessment = "stop_or_core_inactive_observed"
     elif last is None:
         assessment = "memory_observation_unavailable"
@@ -806,6 +811,11 @@ def forensic_evidence(memory, core, interval_rows, clock, packets=(), breadcrumb
         "policy": {"low_headroom_bytes": 64 * MIB, "memory_stale_after_seconds": 10,
             "plateau_min_seconds": 10, "plateau_max_single_interval_seconds": 30, "diagnostic_tail_per_stream": MAX_FORENSIC_EVENTS},
         "last_memory_sample": evidence_reference(last, memory_keys),
+        "managed_failure_count": len(managed_failures),
+        "managed_failures_tail": [evidence_reference(r, ("exception_type", "exception_message", "exception_stack",
+            "origin", "is_terminating", "managed_time_utc", "managed_thread_id", "managed_thread_name",
+            "phys_footprint_bytes", "os_proc_available_memory_bytes", "managed_heap_bytes"))
+            for r in managed_failures[-MAX_FORENSIC_EVENTS:]],
         "memory_tail": [evidence_reference(r, memory_keys) for r in periodic[-8:]],
         "stop_event_counts": {event: sum(r["event"] == event for r in stop_records) for event in sorted(STOP_EVENTS)},
         "stop_events_tail": [evidence_reference(r) for r in stop_records[-MAX_FORENSIC_EVENTS:]],
@@ -938,6 +948,19 @@ def printable(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True) if isinstance(value, (dict, list)) else str(value)
 
 
+def sample_csv_row(context, record):
+    row = dict(context, stream=record["stream"], start_seconds=record["session_seconds"], end_seconds=record["session_seconds"],
+        raw_time=record["raw_time"], raw_elapsed_seconds=record["raw_elapsed_seconds"], phase=record["phase"],
+        event=record["event"], dimensions=record.get("dimensions", {}))
+    # Runtime phase (e.g. trim_stage.phase) and a manually labelled scene are
+    # different data. Preserve both; telemetry cannot overwrite CSV provenance.
+    for key, value in record["metrics"].items():
+        while key in row:
+            key = "metric." + key
+        row[key] = value
+    return row
+
+
 def write_reports(report, out):
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -949,9 +972,7 @@ def write_reports(report, out):
     context = {"source_commit": provenance["source_commit"], "version": provenance["version"],
         "resolution_scale": provenance["settings"]["resolution_scale"], "settings": provenance["settings"]}
     tables = {
-        "samples.csv": [dict(context, stream=r["stream"], start_seconds=r["session_seconds"], end_seconds=r["session_seconds"],
-            raw_time=r["raw_time"], raw_elapsed_seconds=r["raw_elapsed_seconds"], phase=r["phase"], event=r["event"], dimensions=r.get("dimensions", {}),
-            **r["metrics"]) for r in report["records"]],
+        "samples.csv": [sample_csv_row(context, r) for r in report["records"]],
         "intervals.csv": [dict(context, **{k: v for k, v in r.items() if k != "rates"}, metric=key, **rate)
             for r in report["intervals"] for key, rate in r["rates"].items()],
         "phase-slopes.csv": [dict(context, **r) for r in report["phase_slopes"]],

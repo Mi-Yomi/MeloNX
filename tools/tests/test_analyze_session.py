@@ -443,6 +443,41 @@ class SessionAnalysisTests(unittest.TestCase):
         report = self.analyze(breadcrumb_paths=[self.memory([complete], "breadcrumbs.jsonl"), self.memory([before], "breadcrumbs-previous.jsonl")])
         self.assertTrue(report["forensic_evidence"]["breadcrumbs"]["last_sample_complete_recorded"])
 
+    def test_csv_exports_forensic_runtime_phase_and_scene_phase_without_collision(self):
+        payload = {"schema_version": 1, "monotonic_ms": 1000,
+            "renderer": {"base": {"trim_stage": {"phase": "complete", "sequence": 1}}}}
+        breadcrumb = {**self.forensic_packet(1)["native"], "schema_version": 1,
+            "event": "memory_forensic_phase", "phase": "sample_complete"}
+        report = self.analyze(phases=[("manual_scene", 0)],
+            forensic_paths=[self.memory([self.forensic_packet(1, payload)], "forensic.jsonl")],
+            breadcrumb_paths=[self.memory([breadcrumb], "breadcrumbs.jsonl")])
+        out = self.root / "phase-collision-report"
+        analyzer.write_reports(report, out)
+        with (out / "samples.csv").open(encoding="utf-8", newline="") as source:
+            rows = list(csv.DictReader(source))
+        runtime = next(row for row in rows if row["stream"] == "forensic_trim_stage")
+        self.assertEqual("unknown", runtime["phase"])
+        self.assertEqual("complete", runtime["metric.phase"])
+        breadcrumb_row = next(row for row in rows if row["stream"] == "forensic_breadcrumb")
+        self.assertEqual("manual_scene", breadcrumb_row["phase"])
+        self.assertEqual("sample_complete", breadcrumb_row["metric.phase"])
+        self.assertEqual("a" * 40, breadcrumb_row["source_commit"])
+        self.assertEqual("a" * 40, breadcrumb_row["metric.source_commit"])
+
+    def test_structured_managed_failure_takes_precedence_over_headroom_assessment(self):
+        for terminating, expected in ((True, "terminating_managed_failure_observed"), (False, "managed_failure_observed")):
+            with self.subTest(terminating=terminating):
+                report = self.analyze([self.sample(1, core_active=True, os_proc_available_memory_bytes=0),
+                    dict(event="managed_crash", elapsed_seconds=2, exception_type="InvalidMemoryRegionException",
+                        exception_message="invalid region", exception_stack="at VirtualMemoryEvent", is_terminating=terminating)])
+                evidence = report["forensic_evidence"]
+                self.assertEqual(expected, evidence["assessment"])
+                self.assertEqual(1, evidence["managed_failure_count"])
+                self.assertEqual("at VirtualMemoryEvent", evidence["managed_failures_tail"][0]["metrics"]["exception_stack"])
+                self.assertEqual("unconfirmed_no_matching_system_crash_evidence", evidence["system_termination"])
+        report = self.analyze([dict(event="managed_crash_entry", elapsed_seconds=2)])
+        self.assertEqual(0, report["forensic_evidence"]["managed_failure_count"])
+
     def test_breadcrumb_latest_kernel_sample_survives_missing_complete_packet_without_cause_claim(self):
         breadcrumb = {**self.forensic_packet(4)["native"], "event": "memory_forensic_phase", "schema_version": 1,
             "phase": "before_core_snapshot", "phase_elapsed_precise_seconds": 4.05,

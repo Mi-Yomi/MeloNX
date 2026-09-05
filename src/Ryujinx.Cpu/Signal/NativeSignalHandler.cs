@@ -9,13 +9,14 @@ using System.Threading;
 
 namespace Ryujinx.Cpu.Signal
 {
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    [StructLayout(LayoutKind.Sequential)]
     struct SignalHandlerRange
     {
         public int IsActive;
         public nuint RangeAddress;
         public nuint RangeEndAddress;
         public nint ActionPointer;
+        public int ActionWithFaultAddress;
     }
 
     [InlineArray(NativeSignalHandlerGenerator.MaxTrackedRanges)]
@@ -24,7 +25,7 @@ namespace Ryujinx.Cpu.Signal
         public SignalHandlerRange Range0;
     }
 
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    [StructLayout(LayoutKind.Sequential)]
     struct SignalHandlerConfig
     {
         /// <summary>
@@ -46,6 +47,15 @@ namespace Ryujinx.Cpu.Signal
         /// The type of the previous sigaction. True for the 3 argument variant. (unix only)
         /// </summary>
         public int UnixOldSigaction3Arg;
+
+        public nuint UnixOldBusAction;
+        public int UnixOldBusAction3Arg;
+
+        // Native libc entry points used only when the previous disposition is
+        // SIG_DFL/SIG_IGN. These must never be invoked as function pointers.
+        public nuint UnixSignal;
+        public nuint UnixRaise;
+        public nuint UnixExit;
 
         /// <summary>
         /// Fixed size array of tracked ranges.
@@ -91,6 +101,13 @@ namespace Ryujinx.Cpu.Signal
 
                 if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
                 {
+                    // Populate chaining state before installing either signal.
+                    // A fault on another thread can arrive as soon as sigaction returns.
+                    SetPreviousHandlers(ref config, UnixSignalHandlerRegistration.GetExceptionHandlers());
+                    nint libc = NativeLibrary.Load(OperatingSystem.IsLinux() ? "libc.so.6" : "/usr/lib/libSystem.B.dylib");
+                    config.UnixSignal = (nuint)NativeLibrary.GetExport(libc, "signal");
+                    config.UnixRaise = (nuint)NativeLibrary.GetExport(libc, "raise");
+                    config.UnixExit = (nuint)NativeLibrary.GetExport(libc, "_exit");
                     _signalHandlerPtr = MapCode(NativeSignalHandlerGenerator.GenerateUnixSignalHandler(_handlerConfig, rangeStructSize));
 
                     if (customSignalHandlerFactory != null)
@@ -98,10 +115,7 @@ namespace Ryujinx.Cpu.Signal
                         _signalHandlerPtr = customSignalHandlerFactory(UnixSignalHandlerRegistration.GetSegfaultExceptionHandler().sa_handler, _signalHandlerPtr);
                     }
 
-                    UnixSignalHandlerRegistration.SigAction old = UnixSignalHandlerRegistration.RegisterExceptionHandler(_signalHandlerPtr);
-
-                    config.UnixOldSigaction = (nuint)(ulong)old.sa_handler;
-                    config.UnixOldSigaction3Arg = old.sa_flags & 4;
+                    SetPreviousHandlers(ref config, UnixSignalHandlerRegistration.RegisterExceptionHandler(_signalHandlerPtr));
                 }
                 else
                 {
@@ -120,6 +134,14 @@ namespace Ryujinx.Cpu.Signal
 
                 _initialized = true;
             }
+        }
+
+        private static void SetPreviousHandlers(ref SignalHandlerConfig config, UnixSignalHandlerRegistration.Registration previous)
+        {
+            config.UnixOldSigaction = (nuint)previous.Segfault.sa_handler;
+            config.UnixOldSigaction3Arg = previous.Segfault.IsSigInfo ? 1 : 0;
+            config.UnixOldBusAction = (nuint)previous.Bus.sa_handler;
+            config.UnixOldBusAction3Arg = previous.Bus.IsSigInfo ? 1 : 0;
         }
 
         private static nint MapCode(ReadOnlySpan<byte> code)
@@ -145,7 +167,7 @@ namespace Ryujinx.Cpu.Signal
             return ref Unsafe.AsRef<SignalHandlerConfig>((void*)_handlerConfig);
         }
 
-        public static bool AddTrackedRegion(nuint address, nuint endAddress, nint action)
+        public static bool AddTrackedRegion(nuint address, nuint endAddress, nint action, bool actionWithFaultAddress = false)
         {
             Span<SignalHandlerRange> ranges = GetConfigRef().Ranges;
 
@@ -156,6 +178,7 @@ namespace Ryujinx.Cpu.Signal
                     ranges[i].RangeAddress = address;
                     ranges[i].RangeEndAddress = endAddress;
                     ranges[i].ActionPointer = action;
+                    ranges[i].ActionWithFaultAddress = actionWithFaultAddress ? 1 : 0;
                     ranges[i].IsActive = 1;
 
                     return true;

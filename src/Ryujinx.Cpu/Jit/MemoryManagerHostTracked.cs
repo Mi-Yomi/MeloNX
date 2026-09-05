@@ -44,8 +44,11 @@ namespace Ryujinx.Cpu.Jit
         public string GetMemoryOwnerSnapshot()
         {
             var stats = PrivateMemoryAllocator.GetProcessStatistics();
+            var faults = _nativePageTable.GetFaultStatistics();
             return $"cpu_manager={Type}, guest_backing_virtual_bytes={_backingMemory.Size}, " +
                 $"native_pt_virtual_bytes={_nativePageTable.ReservedBytes}, native_pt_committed_bytes={_nativePageTable.CommittedBytes}, " +
+                $"native_pt_lazy_read_faults={faults.LazyReads}, native_pt_lazy_write_faults={faults.LazyWrites}, native_pt_guard_faults={faults.GuardFaults}, " +
+                $"native_pt_last_fault_offset={faults.LastOffset}, native_pt_last_fault_write={faults.LastWrite}, native_pt_last_fault_pc=0x{faults.LastFaultPc:X}, " +
                 $"managed_pt_leaf_arrays={_nativePageTable.ManagedLeafCount}, " +
                 $"private_process_reserved_bytes={stats.Reserved}, private_process_allocated_bytes={stats.Allocated}, private_process_blocks={stats.Blocks}";
         }

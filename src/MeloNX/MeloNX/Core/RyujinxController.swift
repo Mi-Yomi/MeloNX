@@ -559,6 +559,10 @@ class RyujinxController: ObservableObject {
     
     static func attemptToMapDualMapping() -> Bool {
         if hasScript { return true }
+
+        // A changed/missing breakpoint protocol must fail the JIT availability
+        // check before entering it, rather than run without a verified fallback.
+        if ProcessInfo.processInfo.environment["HAS_TXM"] == "1" && !jitBreakpointFallbackReady { return false }
         
         hasScript = Ryujinx.initDualMapping()
         

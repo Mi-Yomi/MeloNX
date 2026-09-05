@@ -14,14 +14,19 @@ namespace ARMeilleure.Signal
         private const int StructWriteOffset = 4;
         private const int UnixOldSigaction = 8;
         private const int UnixOldSigaction3Arg = 16;
-        private const int RangeOffset = 20;
+        private const int UnixOldBusAction = 24;
+        private const int UnixOldBusAction3Arg = 32;
+        private const int UnixSignal = 40;
+        private const int UnixRaise = 48;
+        private const int UnixExit = 56;
+        private const int RangeOffset = 64;
 
         private const int EXCEPTION_CONTINUE_SEARCH = 0;
         private const int EXCEPTION_CONTINUE_EXECUTION = -1;
 
         private const uint EXCEPTION_ACCESS_VIOLATION = 0xc0000005;
 
-        private static Operand EmitGenericRegionCheck(EmitterContext context, nint signalStructPtr, Operand faultAddress, Operand isWrite, int rangeStructSize)
+        private static Operand EmitGenericRegionCheck(EmitterContext context, nint signalStructPtr, Operand faultAddress, Operand faultPc, Operand isWrite, int rangeStructSize, bool unix, bool darwin, Architecture contextArchitecture)
         {
             Operand inRegionLocal = context.AllocateLocal(OperandType.I32);
             context.Copy(inRegionLocal, Const(0));
@@ -38,8 +43,8 @@ namespace ARMeilleure.Signal
 
                 context.BranchIfFalse(nextLabel, isActive);
 
-                Operand rangeAddress = context.Load(OperandType.I64, Const((ulong)signalStructPtr + rangeBaseOffset + 4));
-                Operand rangeEndAddress = context.Load(OperandType.I64, Const((ulong)signalStructPtr + rangeBaseOffset + 12));
+                Operand rangeAddress = context.Load(OperandType.I64, Const((ulong)signalStructPtr + rangeBaseOffset + 8));
+                Operand rangeEndAddress = context.Load(OperandType.I64, Const((ulong)signalStructPtr + rangeBaseOffset + 16));
 
                 // Is the fault address within this tracked region?
                 Operand inRange = context.BitwiseAnd(
@@ -52,7 +57,7 @@ namespace ARMeilleure.Signal
                 Operand offset = context.Subtract(faultAddress, rangeAddress);
 
                 // Call the tracking action, with the pointer's relative offset to the base address.
-                Operand trackingActionPtr = context.Load(OperandType.I64, Const((ulong)signalStructPtr + rangeBaseOffset + 20));
+                Operand trackingActionPtr = context.Load(OperandType.I64, Const((ulong)signalStructPtr + rangeBaseOffset + 24));
 
                 context.Copy(inRegionLocal, Const(0));
 
@@ -60,15 +65,30 @@ namespace ARMeilleure.Signal
 
                 // Tracking action should be non-null to call it, otherwise assume false return.
                 context.BranchIfFalse(skipActionLabel, trackingActionPtr);
-                Operand result = context.Call(trackingActionPtr, OperandType.I64, offset, Const(1UL), isWrite);
+                Operand result = context.AllocateLocal(OperandType.I64);
+                Operand threeArgumentAction = Label();
+                Operand actionComplete = Label();
+                Operand withFaultAddress = context.Load(OperandType.I32, Const((ulong)signalStructPtr + rangeBaseOffset + 32));
+                context.BranchIfFalse(threeArgumentAction, withFaultAddress);
+                context.Copy(result, context.Call(trackingActionPtr, OperandType.I64, offset, Const(1UL), isWrite, faultPc));
+                context.Branch(actionComplete);
+                context.MarkLabel(threeArgumentAction);
+                context.Copy(result, context.Call(trackingActionPtr, OperandType.I64, offset, Const(1UL), isWrite));
+                context.MarkLabel(actionComplete);
                 context.Copy(inRegionLocal, context.ICompareNotEqual(result, Const(0UL)));
 
-                GenerateFaultAddressPatchCode(context, faultAddress, result);
+                // Zero means unhandled: forwarding must see the ORIGINAL machine
+                // context, never an address register relocated towards address zero.
+                context.BranchIfFalse(skipActionLabel, inRegionLocal);
+                if (unix)
+                {
+                    GenerateFaultAddressPatchCode(context, faultAddress, result, darwin, contextArchitecture);
+                }
 
                 context.MarkLabel(skipActionLabel);
 
                 // If the tracking action returns false or does not exist, it might be an invalid access due to a partial overlap on Windows.
-                if (OperatingSystem.IsWindows())
+                if (!unix)
                 {
                     context.BranchIfTrue(endLabel, inRegionLocal);
 
@@ -85,35 +105,45 @@ namespace ARMeilleure.Signal
             return context.Copy(inRegionLocal);
         }
 
-        private static Operand GenerateUnixFaultAddress(EmitterContext context, Operand sigInfoPtr)
+        private static Operand GenerateUnixFaultAddress(EmitterContext context, Operand sigInfoPtr, bool darwin)
         {
-            ulong structAddressOffset = (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS()) ? 24ul : 16ul; // si_addr
+            ulong structAddressOffset = darwin ? 24ul : 16ul; // si_addr
             return context.Load(OperandType.I64, context.Add(sigInfoPtr, Const(structAddressOffset)));
         }
 
-        private static Operand GenerateUnixWriteFlag(EmitterContext context, Operand ucontextPtr)
+        private static Operand GenerateUnixFaultPc(EmitterContext context, Operand ucontextPtr, bool darwin, Architecture architecture)
         {
-            if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
+            if (darwin)
+            {
+                Operand machine = context.Load(OperandType.I64, context.Add(ucontextPtr, Const(48UL)));
+                return context.Load(OperandType.I64, context.Add(machine, Const(architecture == Architecture.Arm64 ? 272UL : 144UL)));
+            }
+            return context.Load(OperandType.I64, context.Add(ucontextPtr, Const(architecture == Architecture.Arm64 ? 440UL : 168UL)));
+        }
+
+        private static Operand GenerateUnixWriteFlag(EmitterContext context, Operand ucontextPtr, bool darwin, Architecture contextArchitecture)
+        {
+            if (darwin)
             {
                 const ulong McontextOffset = 48; // uc_mcontext
                 Operand ctxPtr = context.Load(OperandType.I64, context.Add(ucontextPtr, Const(McontextOffset)));
 
-                if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+                if (contextArchitecture == Architecture.Arm64)
                 {
                     const ulong EsrOffset = 8; // __es.__esr
-                    Operand esr = context.Load(OperandType.I64, context.Add(ctxPtr, Const(EsrOffset)));
-                    return context.BitwiseAnd(esr, Const(0x40ul));
+                    Operand esr = context.Load(OperandType.I32, context.Add(ctxPtr, Const(EsrOffset)));
+                    return context.ZeroExtend32(OperandType.I64, context.BitwiseAnd(esr, Const(0x40)));
                 }
-                else if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+                else if (contextArchitecture == Architecture.X64)
                 {
                     const ulong ErrOffset = 4; // __es.__err
                     Operand err = context.Load(OperandType.I64, context.Add(ctxPtr, Const(ErrOffset)));
                     return context.BitwiseAnd(err, Const(2ul));
                 }
             }
-            else if (OperatingSystem.IsLinux())
+            else
             {
-                if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+                if (contextArchitecture == Architecture.Arm64)
                 {
                     Operand auxPtr = context.AllocateLocal(OperandType.I64);
 
@@ -144,7 +174,7 @@ namespace ARMeilleure.Signal
                     Operand esr = context.Load(OperandType.I64, context.Add(auxPtr, Const(8ul)));
                     return context.BitwiseAnd(esr, Const(0x40ul));
                 }
-                else if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+                else if (contextArchitecture == Architecture.X64)
                 {
                     const int ErrOffset = 192; // uc_mcontext.gregs[REG_ERR]
                     Operand err = context.Load(OperandType.I64, context.Add(ucontextPtr, Const(ErrOffset)));
@@ -156,6 +186,13 @@ namespace ARMeilleure.Signal
         }
 
         public static byte[] GenerateUnixSignalHandler(nint signalStructPtr, int rangeStructSize)
+            => GenerateUnixSignalHandler(signalStructPtr, rangeStructSize,
+                OperatingSystem.IsMacOS() || OperatingSystem.IsIOS(), RuntimeInformation.ProcessArchitecture);
+
+        // The signal context ABI and the generated code architecture are separate:
+        // this also lets the complete handler run against synthetic Darwin contexts
+        // in platform-independent regression tests, without installing OS handlers.
+        public static byte[] GenerateUnixSignalHandler(nint signalStructPtr, int rangeStructSize, bool darwin, Architecture contextArchitecture)
         {
             EmitterContext context = new();
 
@@ -163,19 +200,49 @@ namespace ARMeilleure.Signal
             Operand sigInfoPtr = context.LoadArgument(OperandType.I64, 1);
             Operand ucontextPtr = context.LoadArgument(OperandType.I64, 2);
 
-            Operand faultAddress = GenerateUnixFaultAddress(context, sigInfoPtr);
-            Operand writeFlag = GenerateUnixWriteFlag(context, ucontextPtr);
+            Operand faultAddress = GenerateUnixFaultAddress(context, sigInfoPtr, darwin);
+            Operand writeFlag = GenerateUnixWriteFlag(context, ucontextPtr, darwin, contextArchitecture);
+            Operand faultPc = GenerateUnixFaultPc(context, ucontextPtr, darwin, contextArchitecture);
 
             Operand isWrite = context.ICompareNotEqual(writeFlag, Const(0L)); // Normalize to 0/1.
 
-            Operand isInRegion = EmitGenericRegionCheck(context, signalStructPtr, faultAddress, isWrite, rangeStructSize);
+            Operand isInRegion = EmitGenericRegionCheck(context, signalStructPtr, faultAddress, faultPc, isWrite, rangeStructSize, true, darwin, contextArchitecture);
 
             Operand endLabel = Label();
 
             context.BranchIfTrue(endLabel, isInRegion);
 
-            Operand unixOldSigaction = context.Load(OperandType.I64, Const((ulong)signalStructPtr + UnixOldSigaction));
-            Operand unixOldSigaction3Arg = context.Load(OperandType.I64, Const((ulong)signalStructPtr + UnixOldSigaction3Arg));
+            Operand signal = context.LoadArgument(OperandType.I32, 0);
+            Operand unixOldSigaction = context.AllocateLocal(OperandType.I64);
+            Operand unixOldSigaction3Arg = context.AllocateLocal(OperandType.I32);
+            context.Copy(unixOldSigaction, context.Load(OperandType.I64, Const((ulong)signalStructPtr + UnixOldSigaction)));
+            context.Copy(unixOldSigaction3Arg, context.Load(OperandType.I32, Const((ulong)signalStructPtr + UnixOldSigaction3Arg)));
+            if (darwin)
+            {
+                Operand selectedLabel = Label();
+                context.BranchIf(selectedLabel, signal, Const(10), Comparison.NotEqual); // Darwin SIGBUS
+                context.Copy(unixOldSigaction, context.Load(OperandType.I64, Const((ulong)signalStructPtr + UnixOldBusAction)));
+                context.Copy(unixOldSigaction3Arg, context.Load(OperandType.I32, Const((ulong)signalStructPtr + UnixOldBusAction3Arg)));
+                context.MarkLabel(selectedLabel);
+            }
+
+            Operand callableLabel = Label();
+            Operand specialDisposition = context.BitwiseOr(
+                context.ICompare(unixOldSigaction, Const(1UL), Comparison.LessOrEqualUI),
+                context.ICompareEqual(unixOldSigaction, Const(ulong.MaxValue)));
+            context.BranchIfFalse(callableLabel, specialDisposition);
+
+            // Synchronous memory faults cannot safely resume with SIG_IGN. Reset
+            // to default and re-raise; the blocked signal is delivered on return.
+            Operand reset = context.Call(context.Load(OperandType.I64, Const((ulong)signalStructPtr + UnixSignal)),
+                OperandType.I64, signal, Const(0UL));
+            Operand raised = context.Call(context.Load(OperandType.I64, Const((ulong)signalStructPtr + UnixRaise)),
+                OperandType.I32, signal);
+            Operand failed = context.BitwiseOr(context.ICompareEqual(reset, Const(ulong.MaxValue)), context.ICompareNotEqual(raised, Const(0)));
+            context.BranchIfFalse(endLabel, failed);
+            context.Call(context.Load(OperandType.I64, Const((ulong)signalStructPtr + UnixExit)), OperandType.None, context.Add(Const(128), signal));
+            context.Branch(endLabel);
+            context.MarkLabel(callableLabel);
             Operand threeArgLabel = Label();
 
             context.BranchIfTrue(threeArgLabel, unixOldSigaction3Arg);
@@ -229,10 +296,11 @@ namespace ARMeilleure.Signal
 
             Operand faultAddress = context.Load(OperandType.I64, context.Add(exceptionRecordPtr, context.ZeroExtend32(OperandType.I64, structAddressOffset)));
             Operand writeFlag = context.Load(OperandType.I64, context.Add(exceptionRecordPtr, context.ZeroExtend32(OperandType.I64, structWriteOffset)));
+            Operand faultPc = context.Load(OperandType.I64, context.Add(exceptionRecordPtr, Const(16UL))); // ExceptionAddress
 
             Operand isWrite = context.ICompareNotEqual(writeFlag, Const(0L)); // Normalize to 0/1.
 
-            Operand isInRegion = EmitGenericRegionCheck(context, signalStructPtr, faultAddress, isWrite, rangeStructSize);
+            Operand isInRegion = EmitGenericRegionCheck(context, signalStructPtr, faultAddress, faultPc, isWrite, rangeStructSize, false, false, RuntimeInformation.ProcessArchitecture);
 
             Operand endLabel = Label();
 
@@ -257,11 +325,10 @@ namespace ARMeilleure.Signal
             return Compiler.Compile(cfg, argTypes, OperandType.I32, CompilerOptions.HighCq, RuntimeInformation.ProcessArchitecture).Code;
         }
 
-        private static void GenerateFaultAddressPatchCode(EmitterContext context, Operand faultAddress, Operand newAddress)
+        private static void GenerateFaultAddressPatchCode(EmitterContext context, Operand faultAddress, Operand newAddress, bool darwin, Architecture contextArchitecture)
         {
-            if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+            if (contextArchitecture == Architecture.Arm64)
             {
-                if (SupportsFaultAddressPatchingForHostOs())
                 {
                     Operand lblSkip = Label();
 
@@ -271,12 +338,12 @@ namespace ARMeilleure.Signal
                     Operand pcCtxAddress = default;
                     ulong baseRegsOffset = 0;
 
-                    if (OperatingSystem.IsLinux())
+                    if (!darwin)
                     {
                         pcCtxAddress = context.Add(ucontextPtr, Const(440UL));
                         baseRegsOffset = 184UL;
                     }
-                    else if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
+                    else
                     {
                         ucontextPtr = context.Load(OperandType.I64, context.Add(ucontextPtr, Const(48UL)));
 
