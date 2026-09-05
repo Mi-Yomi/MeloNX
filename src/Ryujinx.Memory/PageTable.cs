@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using System.Threading;
+
 namespace Ryujinx.Memory
 {
     public class PageTable<T> where T : unmanaged
@@ -11,6 +14,9 @@ namespace Ryujinx.Memory
         private const int PtLevelMask = PtLevelSize - 1;
 
         private readonly T[][][][] _pageTable;
+        private int _allocatedLeafCount;
+
+        public int AllocatedLeafCount => Volatile.Read(ref _allocatedLeafCount);
 
         public PageTable()
         {
@@ -62,6 +68,7 @@ namespace Ryujinx.Memory
             if (_pageTable[l0][l1][l2] == null)
             {
                 _pageTable[l0][l1][l2] = new T[PtLevelSize];
+                Interlocked.Increment(ref _allocatedLeafCount);
             }
 
             _pageTable[l0][l1][l2][l3] = value;
@@ -95,12 +102,19 @@ namespace Ryujinx.Memory
 
             for (int i = 0; i < _pageTable[l0][l1][l2].Length; i++)
             {
-                empty &= _pageTable[l0][l1][l2][i].Equals(default);
+                // Equals(object) with an untyped default compares a boxed value with null.
+                // Compare with default(T), and stop scanning as soon as a live entry is found.
+                if (!EqualityComparer<T>.Default.Equals(_pageTable[l0][l1][l2][i], default))
+                {
+                    empty = false;
+                    break;
+                }
             }
 
             if (empty)
             {
                 _pageTable[l0][l1][l2] = null;
+                Interlocked.Decrement(ref _allocatedLeafCount);
 
                 RemoveIfAllNull(l0, l1);
             }
