@@ -231,6 +231,39 @@ class SessionAnalysisTests(unittest.TestCase):
             {r["dimensions"]["purpose"]: r["rates"]["created_bytes"]["per_second"] for r in report["intervals"]})
         self.assertTrue(all("leased_bytes" not in r["rates"] for r in report["intervals"]))
 
+    def test_nslog_census_continuations_restore_split_fields_and_conversion(self):
+        payload = ("pid=109,created=3,logical_bytes=100; bin=[guest=BC1,host_gal=BC1,role=Storage,created=3,logical_bytes=100]; "
+            "conversion=[fallback=Native,calls=2,source_bytes=200,output_bytes=100,cpu_ms=1]; census_cpu_ms=0.1")
+        split = payload.index("logical_bytes=100]") + 7
+        report = self.analyze(core_records=[self.line(0, payload[:split], "Texture format census v1"),
+            "2026-09-05 11:00:00.000 MeloNX[100:42] " + payload[split:]])
+        self.assertEqual(1, report["quality"]["core_continuations_joined"])
+        self.assertEqual([], report["quality"]["incomplete_census_records"])
+        self.assertEqual(2, next(r for r in report["records"] if r["stream"] == "texture_conversion")["metrics"]["calls"])
+        self.assertEqual(100, next(r for r in report["records"] if r["stream"] == "texture_census_bin")["metrics"]["logical_bytes"])
+
+    def test_census_continuation_rejects_distant_wall_or_other_pid_and_thread(self):
+        first = self.line(0, "created=3; bin=[created=90,logical_", "Texture format census v1")
+        for suffix in ("2026-09-05 11:00:01.000 MeloNX[100:42] ", "2026-09-05 11:00:00.000 MeloNX[101:42] ",
+                       "2026-09-05 11:00:00.000 MeloNX[100:43] "):
+            report = self.analyze(core_records=[first, suffix + "bytes=200]; census_cpu_ms=0.1"])
+            self.assertEqual(0, report["quality"]["core_continuations_joined"])
+            self.assertEqual(1, len(report["quality"]["incomplete_census_records"]))
+            self.assertEqual(3, report["records"][0]["metrics"]["created"])
+
+    def test_census_continuation_allows_millisecond_rollover_during_write(self):
+        report = self.analyze(core_records=[self.line(0, "created=3; bin=[created=3,logical_", "Texture format census v1"),
+            "2026-09-05 11:00:00.001 MeloNX[100:42] bytes=100]; census_cpu_ms=0.1"])
+        self.assertEqual(1, report["quality"]["core_continuations_joined"])
+        self.assertEqual([], report["quality"]["incomplete_census_records"])
+
+    def test_interleaved_full_message_does_not_steal_other_thread_census(self):
+        report = self.analyze(core_records=[self.line(0, "created=3; bin=[created=3,logical_", "Texture format census v1"),
+            self.line(0, "buffers_issued=99").replace("[100:42]", "[100:43]"),
+            "2026-09-05 11:00:00.000 MeloNX[100:42] bytes=100]; census_cpu_ms=0.1"])
+        self.assertEqual(1, report["quality"]["core_continuations_joined"])
+        self.assertEqual(100, next(r for r in report["records"] if r["stream"] == "texture_census_bin")["metrics"]["logical_bytes"])
+
     def test_duplicate_core_telemetry_not_counted_as_extra_event(self):
         line = self.line(0, "managed_gc=True, managed_gc_duration_us=100", "Renderer memory trim")
         report = self.analyze(core_records=[line, line])

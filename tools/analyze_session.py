@@ -25,8 +25,12 @@ import sys
 MIB = 1024 * 1024
 CORE_LINE = re.compile(
     r"^(?P<wall>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?) "
-    r"MeloNX\[(?P<pid>\d+):\d+\].*?"
+    r"MeloNX\[(?P<pid>\d+):(?P<tid>\d+)\].*?"
     r"(?P<elapsed>\d+:\d\d:\d\d\.\d+) \|[A-Z]\| (?P<body>.*)$"
+)
+CORE_CONTINUATION = re.compile(
+    r"^(?P<wall>\d{4}-\d\d-\d\d \d\d:\d\d:\d\d(?:\.\d+)?) "
+    r"MeloNX\[(?P<pid>\d+):(?P<tid>\d+)\] (?P<payload>.*)$"
 )
 PREFIXES = {
     "GPU memory owners": "gpu",
@@ -142,8 +146,11 @@ def census_records(payload):
         dimensions = {k: fields[k] for k in keys if k in fields}
         result.append({"stream": "texture_census_bin" if match[1] == "bin" else "texture_conversion",
             "dimensions": dimensions, "metrics": fields})
-    header = re.sub(r";\s*(bin|conversion)=\[[^\]]*\]", "", payload).replace(";", ",")
-    fields = key_values(header)
+    # An incomplete trailing bin must not overwrite the valid global header.
+    fields = key_values(payload.split(";", 1)[0])
+    duration = re.search(r";\s*census_cpu_ms=([^;]+)$", payload)
+    if duration:
+        fields["census_cpu_ms"] = scalar(duration[1])
     for row in result:
         row["dimensions"]["pid"] = fields.get("pid")
     return [{"stream": "texture_census", "dimensions": {"pid": fields.get("pid")}, "metrics": fields}] + result
@@ -213,11 +220,47 @@ def parse_offset(value):
     return seconds * (1 if match[1] == "+" else -1)
 
 
+def logical_core_lines(lines, quality):
+    """Reassemble NSLog's split census message without joining other threads.
+
+    Continuations repeat PID:TID but omit the core timer and log category. Their
+    wall stamp may advance by a millisecond while NSLog emits the same message.
+    A different full message on the same key closes an unfinished census. The
+    explicit final census_cpu_ms field distinguishes a complete message from a
+    file truncated during a write. Raw evidence stays unchanged on disk.
+    """
+    logical, pending = [], {}
+    for index, line in enumerate(lines):
+        match = CORE_LINE.match(line)
+        if match:
+            key = (match["pid"], match["tid"])
+            pending.pop(key, None)
+            logical.append([index + 1, line])
+            if re.search(r": Texture format census(?: v\d+)?: ", match["body"]) and "; census_cpu_ms=" not in line:
+                pending[key] = (len(logical) - 1, dt.datetime.fromisoformat(match["wall"]))
+            continue
+        continuation = CORE_CONTINUATION.match(line)
+        if continuation:
+            key = (continuation["pid"], continuation["tid"])
+            target = pending.get(key)
+            if target is not None:
+                slot, started = target
+                elapsed = (dt.datetime.fromisoformat(continuation["wall"]) - started).total_seconds()
+                if not 0 <= elapsed <= 0.1:
+                    pending.pop(key)
+                    continue
+                logical[slot][1] += continuation["payload"]
+                quality["core_continuations_joined"] += 1
+                if "; census_cpu_ms=" in continuation["payload"]:
+                    pending.pop(key)
+    return logical
+
+
 def read_core(path, session, quality, offset=None, pid=None):
     if path is None:
         return [], {"method": "unavailable", "core_interval_seconds": None}
     lines = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()
-    parsed = [(i + 1, CORE_LINE.match(line)) for i, line in enumerate(lines)]
+    parsed = [(i, CORE_LINE.match(line)) for i, line in logical_core_lines(lines, quality)]
     parsed = [(i, m) for i, m in parsed if m]
     pids = sorted({int(m["pid"]) for _, m in parsed})
     if pid is None and len(pids) > 1:
@@ -264,6 +307,10 @@ def read_core(path, session, quality, offset=None, pid=None):
                     "session_seconds": time, "core_wall_seconds": (wall - first_wall).total_seconds(),
                     "metrics": key_values(found[1])}
                 if stream == "texture_census":
+                    complete = "; census_cpu_ms=" in found[1]
+                    record["message_complete"] = complete
+                    if not complete:
+                        quality["incomplete_census_records"].append({"line": line, "session_seconds": time})
                     records.extend(dict(record, **part) for part in census_records(found[1]))
                 else:
                     keys = ("type", "purpose") if stream == "scratch_purpose" else ("pid",) if stream == "guest" else ()
@@ -397,6 +444,7 @@ def slopes(records, phases):
 def analyze(session, memory_paths, core_path=None, phases=(), offset=None, pid=None, extra_counters=()):
     quality = {"invalid_memory_lines": [], "duplicate_memory_records": 0, "duplicate_core_records": 0,
         "out_of_order_memory_records": 0, "core_timer_resets": 0, "counter_resets": [], "gaps": []}
+    quality.update(core_continuations_joined=0, incomplete_census_records=[])
     memory = read_memory(memory_paths, session, quality)
     core, clock = read_core(core_path, session, quality, offset, pid)
     markers = [{"name": name, "session_seconds": time, "source": "manual_cli"} for name, time in phases]
